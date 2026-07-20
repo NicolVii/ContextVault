@@ -30,7 +30,8 @@ export function ProfileForm({ profile, email }: { profile: Profile; email: strin
     });
     setBusy(false);
     if (!res.ok) {
-      setError("Could not save your profile");
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setError(body?.error ?? "Could not save your profile");
       return;
     }
     setSaved(true);

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ensureUserProfile, needsOnboarding } from "@/lib/profile";
 
 /**
  * OAuth (PKCE) callback. Supabase redirects here with a `code` after the user
  * authenticates with an external provider (e.g. Google). We exchange the code
- * for a session (which sets the auth cookies) and then send the user into the
- * app. New users land on onboarding via the (app) layout redirect.
+ * for a session (which sets the auth cookies), ensure a profile row exists,
+ * and send new / incomplete users to onboarding.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -25,5 +26,18 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.redirect(`${origin}${next}`);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (user) {
+    const profile = await ensureUserProfile(supabase, user);
+    if (needsOnboarding(profile)) {
+      return NextResponse.redirect(`${origin}/onboarding`);
+    }
+  }
+
+  // Only allow relative in-app redirects.
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+  return NextResponse.redirect(`${origin}${safeNext}`);
 }

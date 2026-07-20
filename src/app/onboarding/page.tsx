@@ -29,8 +29,10 @@ export default function OnboardingPage() {
           onboarding_completed: true,
         }),
       });
-      if (!res.ok) throw new Error("Could not save your profile");
-
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Could not save your profile");
+      }
       const seedMemories = facts.map((f) => f.trim()).filter(Boolean);
       await Promise.all(
         seedMemories.map((content) =>

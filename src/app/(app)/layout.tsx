@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ensureUserProfile, needsOnboarding } from "@/lib/profile";
 
 export default async function AppLayout({
   children,
@@ -14,13 +15,11 @@ export default async function AppLayout({
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("onboarding_completed")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await ensureUserProfile(supabase, user);
 
-  if (profile && !profile.onboarding_completed) {
+  // Missing row OR incomplete onboarding → force the setup flow.
+  // (Previously a missing row skipped this gate entirely.)
+  if (needsOnboarding(profile)) {
     redirect("/onboarding");
   }
 
