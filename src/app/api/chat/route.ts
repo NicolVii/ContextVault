@@ -8,9 +8,9 @@ import { isValidModel } from "@/lib/ai/models";
 import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
-import type { RetrievedChunk } from "@/lib/types";
+import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
 
-const MIN_SIMILARITY = 0.12;
+const MIN_SIMILARITY = 0.05;
 const HISTORY_LIMIT = 10;
 
 export async function POST(request: Request) {
@@ -46,10 +46,27 @@ export async function POST(request: Request) {
     sessionId = session.id;
   }
 
-  // 2. Retrieve the most relevant memories + document chunks for this message.
+  // 2. Retrieve context for this message. Profile memories describe the user's
+  // core identity and are always relevant, so they are injected on every
+  // request. Other types are added by semantic similarity.
   const provider = getMemoryProvider();
-  const retrieved = await provider.retrieve(supabase, user.id, message, { limit: 6 });
-  const usedMemories = retrieved.filter((m) => m.similarity >= MIN_SIMILARITY);
+  const retrieved = await provider.retrieve(supabase, user.id, message, { limit: 8 });
+  const semantic = retrieved.filter((m) => m.similarity >= MIN_SIMILARITY);
+
+  const { data: profileMems } = await supabase
+    .from("memories")
+    .select("id, content, category, type, source, source_detail, confidence, created_at")
+    .eq("status", "active")
+    .eq("type", "profile")
+    .order("created_at", { ascending: true })
+    .limit(10);
+
+  const byId = new Map<string, RetrievedMemory>();
+  for (const m of (profileMems ?? []) as Omit<RetrievedMemory, "similarity">[]) {
+    byId.set(m.id, { ...m, similarity: 1 });
+  }
+  for (const m of semantic) if (!byId.has(m.id)) byId.set(m.id, m);
+  const usedMemories = [...byId.values()];
 
   let usedChunks: RetrievedChunk[] = [];
   const [embedding] = await (
