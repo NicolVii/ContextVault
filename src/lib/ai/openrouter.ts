@@ -1,4 +1,9 @@
-import type { ChatCompletion, ChatMessage, ChatProvider } from "./provider";
+import type {
+  ChatCompletion,
+  ChatCompletionOptions,
+  ChatMessage,
+  ChatProvider,
+} from "./provider";
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -21,7 +26,20 @@ export class OpenRouterChatProvider implements ChatProvider {
     this.title = options.title ?? "Context Vault";
   }
 
-  async complete(model: string, messages: ChatMessage[]): Promise<ChatCompletion> {
+  async complete(
+    model: string,
+    messages: ChatMessage[],
+    options: ChatCompletionOptions = {}
+  ): Promise<ChatCompletion> {
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      temperature: options.temperature ?? 0.3,
+    };
+    if (options.json) {
+      body.response_format = { type: "json_object" };
+    }
+
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -31,7 +49,7 @@ export class OpenRouterChatProvider implements ChatProvider {
         "HTTP-Referer": this.referer,
         "X-Title": this.title,
       },
-      body: JSON.stringify({ model, messages, temperature: 0.3 }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {

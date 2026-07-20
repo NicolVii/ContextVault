@@ -16,6 +16,11 @@ export function getChatProvider(): ChatProvider {
   return cached;
 }
 
+/** Test helper — clears the cached singleton between cases. */
+export function resetChatProviderCache(): void {
+  cached = null;
+}
+
 export * from "./provider";
 export { OpenRouterChatProvider } from "./openrouter";
 export { MockChatProvider } from "./mock";

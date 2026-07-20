@@ -151,7 +151,8 @@ export async function POST(request: Request) {
   }
 
   // 8. Extract candidate memories → review queue (never auto-active).
-  const candidates = extractCandidates(message);
+  // Uses the ExtractionProvider (LLM when available, heuristics offline).
+  const candidates = await extractCandidates(message);
   let proposedCount = 0;
   if (candidates.length > 0) {
     const { data: existing } = await supabase
