@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { profileSchema } from "@/lib/validation";
 import { recordAudit } from "@/lib/audit";
+import { ensureUserProfile } from "@/lib/profile";
 
 export async function PATCH(request: Request) {
   const ctx = await getSessionContext();
@@ -11,6 +12,16 @@ export async function PATCH(request: Request) {
   const parsed = profileSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+  }
+
+  // Guarantees a row exists even if the auth trigger never ran (common when
+  // hosted migrations are incomplete). Then apply the requested fields.
+  const ensured = await ensureUserProfile(ctx.supabase, ctx.user);
+  if (!ensured) {
+    return NextResponse.json(
+      { error: "Could not create your profile. Check that database migrations and grants are applied." },
+      { status: 500 }
+    );
   }
 
   const { data, error } = await ctx.supabase

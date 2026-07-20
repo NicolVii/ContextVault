@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { ProfileForm } from "@/components/ProfileForm";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ensureUserProfile } from "@/lib/profile";
 import type { Profile } from "@/lib/types";
 
 export default async function ProfilePage() {
@@ -10,12 +11,7 @@ export default async function ProfilePage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-
+  const profile = await ensureUserProfile(supabase, user);
   if (!profile) redirect("/onboarding");
 
   return (
