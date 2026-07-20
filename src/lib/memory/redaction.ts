@@ -1,11 +1,11 @@
 /**
  * Guards for automatic memory extraction.
  *
- * - `containsForbiddenSecret` blocks content that must NEVER be stored
- *   automatically (passwords, API keys, payment data, medical data,
- *   government identifiers).
+ * - `scanForForbiddenSecrets` blocks content that must NEVER be stored
+ *   automatically (passwords, API keys, payment data, government identifiers).
  * - `isSensitive` flags content that may be stored only after explicit human
- *   review — it can never be auto-approved.
+ *   review — it can never be auto-approved (medical, financial, identity
+ *   attributes, etc.).
  */
 
 const FORBIDDEN_PATTERNS: { label: string; re: RegExp }[] = [

@@ -1,4 +1,9 @@
-import type { ChatCompletion, ChatMessage, ChatProvider } from "./provider";
+import type {
+  ChatCompletion,
+  ChatCompletionOptions,
+  ChatMessage,
+  ChatProvider,
+} from "./provider";
 
 /**
  * Offline fallback chat provider. Used when no OPENROUTER_API_KEY is set so the
@@ -9,7 +14,11 @@ import type { ChatCompletion, ChatMessage, ChatProvider } from "./provider";
 export class MockChatProvider implements ChatProvider {
   readonly name = "mock";
 
-  async complete(model: string, messages: ChatMessage[]): Promise<ChatCompletion> {
+  async complete(
+    model: string,
+    messages: ChatMessage[],
+    _options?: ChatCompletionOptions
+  ): Promise<ChatCompletion> {
     const system = messages.find((m) => m.role === "system")?.content ?? "";
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     const hasContext =

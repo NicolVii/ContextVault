@@ -11,6 +11,13 @@ export interface ChatCompletion {
   mocked: boolean;
 }
 
+/** Optional knobs for a single completion (used by extraction and chat). */
+export interface ChatCompletionOptions {
+  temperature?: number;
+  /** Request JSON-object mode when the upstream model supports it. */
+  json?: boolean;
+}
+
 /**
  * Internal chat-provider interface. A concrete provider owns how a chat
  * completion is produced. The default `OpenRouterChatProvider` calls OpenRouter;
@@ -19,5 +26,9 @@ export interface ChatCompletion {
  */
 export interface ChatProvider {
   readonly name: string;
-  complete(model: string, messages: ChatMessage[]): Promise<ChatCompletion>;
+  complete(
+    model: string,
+    messages: ChatMessage[],
+    options?: ChatCompletionOptions
+  ): Promise<ChatCompletion>;
 }

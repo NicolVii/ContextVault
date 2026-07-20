@@ -33,7 +33,8 @@ Notes and non-obvious gotchas:
   and `SUPABASE_SERVICE_ROLE_KEY` from `supabase status`. The local demo keys
   are stable across `supabase start` runs, so the committed values usually work.
 - **Offline by default:** with no `OPENROUTER_API_KEY` the chat uses a local
-  mock model that echoes the injected context; with `EMBEDDING_PROVIDER=local`
+  mock model that echoes the injected context, and memory extraction falls
+  back to deterministic heuristics; with `EMBEDDING_PROVIDER=local`
   (default) embeddings are deterministic and need no network. The app is fully
   demoable without any external API keys.
 - **Table grants matter:** recent Supabase does not auto-expose new `public`
@@ -51,6 +52,12 @@ Notes and non-obvious gotchas:
 - **Chat provider:** chat uses the `ChatProvider` interface in `src/lib/ai/`.
   With `OPENROUTER_API_KEY` set it calls OpenRouter; otherwise it uses the
   offline `MockChatProvider`. No code change is needed to switch.
+- **Memory extraction:** uses the `ExtractionProvider` interface in
+  `src/lib/memory/extraction/`. With a real chat backend it runs structured
+  LLM extraction; offline (or on LLM failure) it uses
+  `HeuristicExtractionProvider`. Candidates are always inserted as `proposed`;
+  redaction in `src/lib/memory/redaction.ts` still blocks secrets and flags
+  sensitive content. Optional `EXTRACTION_MODEL` overrides the extraction model.
 - **Google Sign-In:** enabled in `supabase/config.toml`, reading
   `SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` / `_SECRET`. The Supabase CLI only
   substitutes `env(...)` values that are exported in the shell **before**

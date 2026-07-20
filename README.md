@@ -19,13 +19,14 @@ behind an internal memory-service interface.
 - **Landing, sign-up/login, onboarding** flows.
 - **Memory dashboard** — a personal control centre with search, filters and stats.
 - **Add / edit / archive / delete** memories with confirmation before permanent deletion.
-- **Review queue** — automatically-extracted memories are `proposed` and must be approved; sensitive items are never auto-approved.
+- **Review queue** — LLM-extracted (or heuristic, offline) memories are always `proposed` and must be approved; sensitive items are never auto-approved.
 - **Documents** — upload PDF/text, extract + chunk + embed with `pgvector`, cited by filename and page.
 - **Multi-model chat** — pick an OpenRouter model; relevant memories/documents are retrieved and injected into a separated `USER CONTEXT` block; every reply shows exactly which memories were used.
 - **Privacy** — JSON export, delete-all-memories, and full account deletion; audit log of security-relevant actions.
 
 Works fully **offline for development**: with no `OPENROUTER_API_KEY` a local
-mock model is used, and embeddings default to a deterministic local provider.
+mock model is used, memory extraction falls back to heuristics, and embeddings
+default to a deterministic local provider.
 
 ---
 
@@ -78,7 +79,8 @@ pnpm dev            # http://localhost:3000
 
 Set these in `.env.local` (server-only — never exposed to the browser):
 
-- `OPENROUTER_API_KEY` — enables real multi-model chat via OpenRouter.
+- `OPENROUTER_API_KEY` — enables real multi-model chat via OpenRouter and
+  structured LLM memory extraction (optional `EXTRACTION_MODEL`).
 - `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` — use real embeddings.
 
 ### Chat provider (OpenRouter)
@@ -89,12 +91,16 @@ Chat goes through a `ChatProvider` interface (`src/lib/ai/`). When
 otherwise `MockChatProvider` is used so the app runs offline. No code changes
 are needed to switch — just set the key.
 
+The same key enables `LlmExtractionProvider` for post-chat memory extraction
+(see Architecture → Memory extraction). Without it, extraction uses offline
+heuristics.
+
 1. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys).
 2. Put it in `.env.local` as `OPENROUTER_API_KEY=...` (and restart `pnpm dev`).
-3. Optional: `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL` overrides.
+3. Optional: `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, `EXTRACTION_MODEL`.
 
-The key is only ever read server-side in the `/api/chat` route handler and is
-never sent to the browser.
+The key is only ever read server-side (chat + extraction) and is never sent to
+the browser.
 
 ### Google Sign-In (Supabase Auth)
 
@@ -152,7 +158,7 @@ src/
   lib/
     supabase/             # server / browser / admin clients + middleware
     memory/               # MemoryProvider interface, Supabase + Mem0 providers,
-                          # extraction and redaction (secret/sensitive guards)
+                          # ExtractionProvider (LLM + heuristic), redaction
     embeddings/           # pluggable embedding providers (local + OpenAI)
     ai/                   # ChatProvider interface (OpenRouter + mock), model
                           # list, USER CONTEXT builder
@@ -170,6 +176,23 @@ All memory storage/retrieval goes through the `MemoryProvider` interface
 `pgvector`. To connect Mem0, implement `Mem0MemoryProvider` and set
 `MEMORY_PROVIDER=mem0` with `MEM0_API_KEY`.
 
+### Memory extraction
+
+After each chat turn, candidate memories are extracted and inserted with
+`status: proposed` (never auto-active). Extraction goes through the
+`ExtractionProvider` interface (`src/lib/memory/extraction/`):
+
+| Provider | When | Behaviour |
+| --- | --- | --- |
+| `LlmExtractionProvider` | `OPENROUTER_API_KEY` is set (real chat backend) | Structured JSON extraction via the active `ChatProvider` |
+| `HeuristicExtractionProvider` | No API key / offline, or LLM call fails | Deterministic regex heuristics (demo fallback) |
+
+Security is applied **after** the provider returns candidates and is never
+delegated to the model alone: forbidden secrets (passwords, API keys, payment
+data, government IDs) are dropped; medical / financial / identity-attribute
+content is flagged `is_sensitive` for human review. Optional
+`EXTRACTION_MODEL` selects the extraction model (default `openai/gpt-4o-mini`).
+
 ---
 
 ## Development plan
@@ -180,10 +203,11 @@ All memory storage/retrieval goes through the `MemoryProvider` interface
    and match functions.
 3. **Security first** — RLS on every table, explicit role grants, storage
    policies, service-role isolation.
-4. **Memory service** — provider interface, embeddings, extraction + redaction.
+4. **Memory service** — provider interface, embeddings, ExtractionProvider
+   (LLM + heuristic) + redaction.
 5. **Product surface** — the ten pages and their API routes.
 6. **Chat** — retrieval → context injection → provenance → post-response
-   extraction into the review queue.
+   structured extraction into the review queue.
 7. **Documents** — upload → validate → store → extract → chunk → embed → cite.
 8. **Quality** — automated tests, lint, typecheck, build, seed data.
 
@@ -194,7 +218,7 @@ All memory storage/retrieval goes through the `MemoryProvider` interface
 | Cross-user data access | Row Level Security on every table (`auth.uid() = user_id`); retrieval functions filter on `auth.uid()`; tested in `tests/memory.test.ts`. |
 | Provider keys leaking to the browser | All AI calls run server-side; keys read only from server env; `NEXT_PUBLIC_*` limited to safe values. |
 | Service-role key overreach | Used only for auditing, rate limiting and account deletion, with `user_id` set explicitly; never shipped to the client. |
-| Secrets captured as memories | Automatic extraction blocks passwords, API keys, payment, medical and government-ID patterns; sensitive items can never be auto-approved. |
+| Secrets captured as memories | Automatic extraction blocks passwords, API keys, payment and government-ID patterns; medical/financial/identity-attribute content is flagged sensitive and can never be auto-approved. All extractions items stay `proposed` until review. |
 | Prompt-context leakage | Only the current user's memories/chunks are retrieved and injected; provenance is recorded per message. |
 | Malicious/oversized uploads | MIME allow-list (PDF/text) + size limit enforced in the API and the storage bucket. |
 | Abuse / cost blow-ups | Per-user, per-bucket rate limiting on chat, memory writes and uploads. |

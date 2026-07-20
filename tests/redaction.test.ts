@@ -1,6 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { scanForForbiddenSecrets, isSensitive } from "../src/lib/memory/redaction";
-import { extractCandidates } from "../src/lib/memory/extraction";
+import {
+  extractCandidates,
+  resetExtractionProviderCache,
+  setExtractionProviderForTests,
+  HeuristicExtractionProvider,
+} from "../src/lib/memory/extraction";
+import { resetChatProviderCache } from "../src/lib/ai";
 
 describe("forbidden secret detection", () => {
   it("blocks passwords, API keys, cards, SSNs", () => {
@@ -26,9 +32,21 @@ describe("sensitivity detection", () => {
   });
 });
 
-describe("memory extraction", () => {
-  it("never auto-extracts forbidden secrets", () => {
-    const candidates = extractCandidates(
+describe("memory extraction security (heuristic path)", () => {
+  beforeEach(() => {
+    // Force heuristics so these cases never call a real LLM, even if
+    // OPENROUTER_API_KEY is present in .env.local.
+    resetChatProviderCache();
+    setExtractionProviderForTests(new HeuristicExtractionProvider());
+  });
+
+  afterEach(() => {
+    resetExtractionProviderCache();
+    resetChatProviderCache();
+  });
+
+  it("never auto-extracts forbidden secrets", async () => {
+    const candidates = await extractCandidates(
       "My name is Dana. My password is hunter2 and my api key is sk-abcdef1234567890."
     );
     const contents = candidates.map((c) => c.content.toLowerCase());
@@ -37,8 +55,10 @@ describe("memory extraction", () => {
     expect(candidates.some((c) => c.type === "profile")).toBe(true);
   });
 
-  it("extracts preferences and flags sensitive candidates", () => {
-    const candidates = extractCandidates("I prefer concise answers. I was diagnosed with asthma.");
+  it("extracts preferences and flags sensitive candidates", async () => {
+    const candidates = await extractCandidates(
+      "I prefer concise answers. I was diagnosed with asthma."
+    );
     expect(candidates.some((c) => c.type === "preference")).toBe(true);
     const medical = candidates.find((c) => /asthma|diagnosed/.test(c.content));
     if (medical) expect(medical.is_sensitive).toBe(true);
