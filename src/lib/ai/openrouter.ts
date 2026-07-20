@@ -1,74 +1,50 @@
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
+import type { ChatCompletion, ChatMessage, ChatProvider } from "./provider";
 
-export interface ChatResult {
-  content: string;
-  model: string;
-  mocked: boolean;
-}
+const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
 /**
- * Call an OpenRouter chat model. The API key is read from the server-only
- * OPENROUTER_API_KEY and is never sent to the browser.
- *
- * When no key is configured the app falls back to a local mock model so the
- * whole product remains demoable offline. The mock deliberately echoes the
- * injected USER CONTEXT so memory retrieval is visibly working.
+ * Chat provider backed by OpenRouter. The API key is server-only
+ * (OPENROUTER_API_KEY) and is never sent to the browser. Model ids use
+ * OpenRouter's "vendor/model" form (see src/lib/ai/models.ts).
  */
-export async function chatComplete(
-  model: string,
-  messages: ChatMessage[]
-): Promise<ChatResult> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+export class OpenRouterChatProvider implements ChatProvider {
+  readonly name = "openrouter";
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly referer: string;
+  private readonly title: string;
 
-  if (!apiKey) {
-    return { content: mockResponse(messages), model: `${model} (mock)`, mocked: true };
+  constructor(apiKey: string, options: { baseUrl?: string; referer?: string; title?: string } = {}) {
+    this.apiKey = apiKey;
+    this.baseUrl = options.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL;
+    this.referer = options.referer ?? process.env.OPENROUTER_SITE_URL ?? "http://localhost:3000";
+    this.title = options.title ?? "Context Vault";
   }
 
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "Context Vault",
-    },
-    body: JSON.stringify({ model, messages, temperature: 0.3 }),
-  });
+  async complete(model: string, messages: ChatMessage[]): Promise<ChatCompletion> {
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+        // Optional attribution headers recommended by OpenRouter.
+        "HTTP-Referer": this.referer,
+        "X-Title": this.title,
+      },
+      body: JSON.stringify({ model, messages, temperature: 0.3 }),
+    });
 
-  if (!res.ok) {
-    throw new Error(`OpenRouter request failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) {
+      throw new Error(`OpenRouter request failed: ${res.status} ${await res.text()}`);
+    }
+
+    const json = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    return {
+      content: json.choices?.[0]?.message?.content ?? "",
+      model,
+      mocked: false,
+    };
   }
-
-  const json = (await res.json()) as {
-    choices: { message: { content: string } }[];
-  };
-  return {
-    content: json.choices?.[0]?.message?.content ?? "",
-    model,
-    mocked: false,
-  };
-}
-
-function mockResponse(messages: ChatMessage[]): string {
-  const system = messages.find((m) => m.role === "system")?.content ?? "";
-  const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const contextMatch = system.match(/USER CONTEXT[\s\S]*END USER CONTEXT/);
-  const hasContext = contextMatch && !/No saved user context/.test(system);
-
-  const parts: string[] = [];
-  parts.push(
-    "This is a local mock model (set OPENROUTER_API_KEY to use real models)."
-  );
-  if (lastUser) parts.push(`\nYou said: "${lastUser.content.trim()}"`);
-  if (hasContext) {
-    parts.push(
-      "\nI used your saved context for this answer — see the memories listed under this response."
-    );
-  } else {
-    parts.push("\nI didn't find any relevant saved context for this message.");
-  }
-  return parts.join("\n");
 }
