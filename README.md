@@ -81,6 +81,64 @@ Set these in `.env.local` (server-only — never exposed to the browser):
 - `OPENROUTER_API_KEY` — enables real multi-model chat via OpenRouter.
 - `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` — use real embeddings.
 
+### Chat provider (OpenRouter)
+
+Chat goes through a `ChatProvider` interface (`src/lib/ai/`). When
+`OPENROUTER_API_KEY` is set, `OpenRouterChatProvider` calls OpenRouter's
+`/chat/completions` API using the `vendor/model` ids in `src/lib/ai/models.ts`;
+otherwise `MockChatProvider` is used so the app runs offline. No code changes
+are needed to switch — just set the key.
+
+1. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys).
+2. Put it in `.env.local` as `OPENROUTER_API_KEY=...` (and restart `pnpm dev`).
+3. Optional: `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL` overrides.
+
+The key is only ever read server-side in the `/api/chat` route handler and is
+never sent to the browser.
+
+### Google Sign-In (Supabase Auth)
+
+The login/signup pages have a "Continue with Google" button that uses
+`supabase.auth.signInWithOAuth({ provider: 'google' })`. Supabase redirects back
+to `/auth/callback`, which exchanges the code for a session. To enable it you
+need a Google OAuth client and matching Supabase config.
+
+**Google Cloud Console**
+
+1. APIs & Services → **OAuth consent screen** → configure (External), add your
+   email as a test user.
+2. APIs & Services → **Credentials** → Create Credentials → **OAuth client ID**
+   → Application type **Web application**.
+3. Add an **Authorized redirect URI** pointing at Supabase's callback:
+   - Local: `http://127.0.0.1:54321/auth/v1/callback`
+   - Hosted: `https://<project-ref>.supabase.co/auth/v1/callback`
+4. Copy the generated **Client ID** and **Client secret**.
+
+**Supabase — local**
+
+The provider is already enabled in `supabase/config.toml`; it reads the client
+id/secret from the environment when the stack starts. Export them (the CLI only
+substitutes `env(...)` values that are present in the shell), then restart:
+
+```bash
+export SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID="<client-id>"
+export SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET="<client-secret>"
+supabase stop && supabase start
+```
+
+Also set the app's Site URL for redirects (already `http://127.0.0.1:3000`
+locally in `config.toml`).
+
+**Supabase — hosted**
+
+In the dashboard: **Authentication → Providers → Google** → enable and paste the
+Client ID/secret. Under **Authentication → URL Configuration** set the Site URL
+and add your deployed domain (and `.../auth/callback`) to the redirect allow
+list. No `SUPABASE_AUTH_EXTERNAL_GOOGLE_*` env vars are needed for hosted.
+
+Without credentials the button still appears and initiates the flow, but Google
+rejects the request — so leave it unconfigured locally unless you have a client.
+
 ---
 
 ## Architecture
@@ -96,7 +154,8 @@ src/
     memory/               # MemoryProvider interface, Supabase + Mem0 providers,
                           # extraction and redaction (secret/sensitive guards)
     embeddings/           # pluggable embedding providers (local + OpenAI)
-    ai/                   # OpenRouter client, model list, USER CONTEXT builder
+    ai/                   # ChatProvider interface (OpenRouter + mock), model
+                          # list, USER CONTEXT builder
     documents/            # PDF/text extraction + chunking
     ratelimit.ts, audit.ts, validation.ts
 supabase/migrations/      # schema, RLS, functions, storage, grants
