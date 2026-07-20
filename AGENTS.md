@@ -54,10 +54,12 @@ Notes and non-obvious gotchas:
   offline `MockChatProvider`. No code change is needed to switch.
 - **Memory extraction:** uses the `ExtractionProvider` interface in
   `src/lib/memory/extraction/`. With a real chat backend it runs structured
-  LLM extraction; offline (or on LLM failure) it uses
-  `HeuristicExtractionProvider`. Candidates are always inserted as `proposed`;
-  redaction in `src/lib/memory/redaction.ts` still blocks secrets and flags
-  sensitive content. Optional `EXTRACTION_MODEL` overrides the extraction model.
+  LLM extraction; offline (or on LLM failure / timeout) it uses
+  `HeuristicExtractionProvider`. Trivial greetings/acks and impersonal
+  questions are skipped before calling the model. Candidates are always
+  inserted as `proposed`; redaction in `src/lib/memory/redaction.ts` still
+  blocks secrets and flags sensitive content. Optional `EXTRACTION_MODEL` and
+  `EXTRACTION_TIMEOUT_MS` override the extraction model and per-call budget.
 - **Google Sign-In:** enabled in `supabase/config.toml`, reading
   `SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` / `_SECRET`. The Supabase CLI only
   substitutes `env(...)` values that are exported in the shell **before**

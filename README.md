@@ -185,13 +185,15 @@ After each chat turn, candidate memories are extracted and inserted with
 | Provider | When | Behaviour |
 | --- | --- | --- |
 | `LlmExtractionProvider` | `OPENROUTER_API_KEY` is set (real chat backend) | Structured JSON extraction via the active `ChatProvider` |
-| `HeuristicExtractionProvider` | No API key / offline, or LLM call fails | Deterministic regex heuristics (demo fallback) |
+| `HeuristicExtractionProvider` | No API key / offline, or LLM call fails / times out | Deterministic regex heuristics (demo fallback) |
 
-Security is applied **after** the provider returns candidates and is never
-delegated to the model alone: forbidden secrets (passwords, API keys, payment
-data, government IDs) are dropped; medical / financial / identity-attribute
-content is flagged `is_sensitive` for human review. Optional
-`EXTRACTION_MODEL` selects the extraction model (default `openai/gpt-4o-mini`).
+Obvious greetings, acknowledgements, and impersonal factual questions are
+skipped before the model is called. Security is applied **after** the provider
+returns candidates and is never delegated to the model alone: forbidden secrets
+(passwords, API keys, payment data, government IDs) are dropped; medical /
+financial / identity-attribute content is flagged `is_sensitive` for human
+review. Optional `EXTRACTION_MODEL` selects the extraction model (default
+`openai/gpt-4o-mini`); `EXTRACTION_TIMEOUT_MS` caps each call (default 8000).
 Invalid JSON or schema-invalid LLM output triggers the heuristic fallback for
 that request; a valid `{"memories":[]}` is kept as intentionally empty.
 

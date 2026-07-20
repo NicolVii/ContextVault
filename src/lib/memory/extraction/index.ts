@@ -3,16 +3,24 @@ import { isSensitive, scanForForbiddenSecrets } from "../redaction";
 import type { ExtractedCandidate, ExtractionProvider, RawExtractedCandidate } from "./provider";
 import { HeuristicExtractionProvider } from "./heuristic";
 import { LlmExtractionProvider } from "./llm";
+import { shouldSkipExtraction } from "./skip";
 
 export type { ExtractedCandidate, ExtractionProvider, RawExtractedCandidate } from "./provider";
 export { HeuristicExtractionProvider } from "./heuristic";
 export { LlmExtractionProvider } from "./llm";
 export { parseExtractionResponse, extractionResponseSchema } from "./schema";
 export type { ParseExtractionResult } from "./schema";
+export { shouldSkipExtraction, hasFirstPersonReference } from "./skip";
+export { EXTRACTION_SYSTEM_PROMPT } from "./llm";
+
+/** Default budget for a single extraction call (ms). Overridable via env. */
+export const DEFAULT_EXTRACTION_TIMEOUT_MS = 8_000;
 
 let cached: ExtractionProvider | null = null;
 /** Test-only override; null means use the normal factory. */
 let testOverride: ExtractionProvider | null = null;
+/** Test-only timeout override in ms; null means use env / default. */
+let testTimeoutMs: number | null = null;
 
 /**
  * Resolve the active extraction provider.
@@ -40,12 +48,47 @@ export function getExtractionProvider(): ExtractionProvider {
 export function resetExtractionProviderCache(): void {
   cached = null;
   testOverride = null;
+  testTimeoutMs = null;
 }
 
 /** Test helper — force a specific provider (e.g. a stubbed LLM). */
 export function setExtractionProviderForTests(provider: ExtractionProvider): void {
   testOverride = provider;
   cached = null;
+}
+
+/** Test helper — override the extraction timeout (ms). */
+export function setExtractionTimeoutForTests(ms: number | null): void {
+  testTimeoutMs = ms;
+}
+
+export function getExtractionTimeoutMs(): number {
+  if (testTimeoutMs != null) return testTimeoutMs;
+  const raw = process.env.EXTRACTION_TIMEOUT_MS;
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_EXTRACTION_TIMEOUT_MS;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Extraction timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (value) => {
+        if (timer) clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        if (timer) clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
 }
 
 function finalize(raw: RawExtractedCandidate[]): ExtractedCandidate[] {
@@ -86,16 +129,20 @@ function finalize(raw: RawExtractedCandidate[]): ExtractedCandidate[] {
  * content is flagged so it can never be auto-approved.
  *
  * Uses the active ExtractionProvider (LLM when available, heuristics offline).
- * If the LLM path throws (network error, invalid JSON, or schema-invalid
- * output), falls back to heuristics for that request so chat is never blocked
- * by extraction failures. A valid `{"memories":[]}` is kept as intentionally
- * empty and does not trigger the fallback.
+ * Obvious greetings / acknowledgements / impersonal questions are skipped
+ * without calling the model. If the LLM path throws or times out (network
+ * error, invalid JSON, schema-invalid output), falls back to heuristics for
+ * that request so chat is never blocked. A valid `{"memories":[]}` is kept as
+ * intentionally empty and does not trigger the fallback.
  */
 export async function extractCandidates(text: string): Promise<ExtractedCandidate[]> {
+  if (shouldSkipExtraction(text)) return [];
+
   const provider = getExtractionProvider();
+  const timeoutMs = getExtractionTimeoutMs();
   let raw: RawExtractedCandidate[];
   try {
-    raw = await provider.extract(text);
+    raw = await withTimeout(provider.extract(text), timeoutMs);
   } catch {
     // Per-request fallback — do not poison the cached provider.
     raw = await new HeuristicExtractionProvider().extract(text);
