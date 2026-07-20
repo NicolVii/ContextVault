@@ -16,13 +16,25 @@ export const extractionResponseSchema = z.object({
 export type ParsedExtraction = z.infer<typeof extractionResponseSchema>;
 
 /**
- * Parse and validate LLM extraction JSON. Accepts either a bare object or a
- * fenced ```json ... ``` block. Returns an empty list on unrecoverable input
- * so a bad model reply never crashes the chat turn.
+ * Discriminated parse result so callers can tell apart:
+ * - a valid intentional empty list (`{"memories":[]}`)
+ * - malformed JSON / schema-invalid output (should trigger heuristic fallback)
  */
-export function parseExtractionResponse(raw: string): ParsedExtraction {
+export type ParseExtractionResult =
+  | { ok: true; memories: ParsedExtraction["memories"] }
+  | { ok: false; error: string };
+
+/**
+ * Parse and validate LLM extraction JSON. Accepts either a bare object or a
+ * fenced ```json ... ``` block.
+ *
+ * Returns `{ ok: true, memories }` for schema-valid payloads (including an
+ * empty `memories` array). Returns `{ ok: false }` for empty, non-JSON, or
+ * schema-invalid input — callers should treat that as an extraction failure.
+ */
+export function parseExtractionResponse(raw: string): ParseExtractionResult {
   const trimmed = raw.trim();
-  if (!trimmed) return { memories: [] };
+  if (!trimmed) return { ok: false, error: "empty response" };
 
   const candidates = [trimmed];
   const fence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
@@ -32,18 +44,23 @@ export function parseExtractionResponse(raw: string): ParsedExtraction {
   const brace = trimmed.match(/\{[\s\S]*\}/);
   if (brace?.[0] && brace[0] !== trimmed) candidates.push(brace[0]);
 
+  let sawJson = false;
   for (const candidate of candidates) {
     try {
       const json: unknown = JSON.parse(candidate);
+      sawJson = true;
       const parsed = extractionResponseSchema.safeParse(json);
-      if (parsed.success) return parsed.data;
+      if (parsed.success) return { ok: true, memories: parsed.data.memories };
       // Tolerate a bare array of memories.
       const asArray = z.array(extractedMemorySchema).max(5).safeParse(json);
-      if (asArray.success) return { memories: asArray.data };
+      if (asArray.success) return { ok: true, memories: asArray.data };
     } catch {
       // try next candidate
     }
   }
 
-  return { memories: [] };
+  return {
+    ok: false,
+    error: sawJson ? "schema validation failed" : "invalid JSON",
+  };
 }

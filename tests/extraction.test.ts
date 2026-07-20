@@ -70,6 +70,8 @@ describe("parseExtractionResponse", () => {
         ],
       })
     );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
     expect(parsed.memories).toHaveLength(1);
     expect(parsed.memories[0].type).toBe("preference");
   });
@@ -78,26 +80,35 @@ describe("parseExtractionResponse", () => {
     const fenced = parseExtractionResponse(
       'Here you go:\n```json\n{"memories":[{"content":"I live in Lisbon","type":"profile","confidence":0.8}]}\n```'
     );
+    expect(fenced.ok).toBe(true);
+    if (!fenced.ok) return;
     expect(fenced.memories[0].content).toBe("I live in Lisbon");
 
     const bare = parseExtractionResponse(
       JSON.stringify([{ content: "I use TypeScript", type: "preference", confidence: 0.6 }])
     );
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) return;
     expect(bare.memories[0].type).toBe("preference");
   });
 
-  it("returns an empty list for invalid input", () => {
-    expect(parseExtractionResponse("not json").memories).toEqual([]);
-    expect(parseExtractionResponse("").memories).toEqual([]);
+  it("treats a valid empty memories list as success", () => {
+    const parsed = parseExtractionResponse(JSON.stringify({ memories: [] }));
+    expect(parsed).toEqual({ ok: true, memories: [] });
   });
 
-  it("rejects unknown memory types", () => {
+  it("returns ok:false for invalid JSON or empty input", () => {
+    expect(parseExtractionResponse("not json").ok).toBe(false);
+    expect(parseExtractionResponse("").ok).toBe(false);
+  });
+
+  it("returns ok:false for unknown memory types", () => {
     const parsed = parseExtractionResponse(
       JSON.stringify({
         memories: [{ content: "I like cats", type: "not-a-type", confidence: 0.5 }],
       })
     );
-    expect(parsed.memories).toEqual([]);
+    expect(parsed.ok).toBe(false);
   });
 });
 
@@ -181,6 +192,43 @@ describe("extractCandidates with LLM provider", () => {
   it("falls back to heuristics when the LLM provider throws", async () => {
     setExtractionProviderForTests(
       new LlmExtractionProvider(new StubChatProvider("", true))
+    );
+
+    const candidates = await extractCandidates("I prefer tea over coffee.");
+    expect(candidates.some((c) => c.type === "preference")).toBe(true);
+  });
+
+  it("preserves an intentionally empty valid LLM result without heuristic fallback", async () => {
+    setExtractionProviderForTests(
+      new LlmExtractionProvider(
+        new StubChatProvider(JSON.stringify({ memories: [] }))
+      )
+    );
+
+    // Heuristics would extract a preference from this text; a valid empty
+    // LLM response must win and stay empty.
+    const candidates = await extractCandidates("I prefer tea over coffee.");
+    expect(candidates).toEqual([]);
+  });
+
+  it("falls back to heuristics when LLM output is invalid JSON", async () => {
+    setExtractionProviderForTests(
+      new LlmExtractionProvider(new StubChatProvider("this is not json at all"))
+    );
+
+    const candidates = await extractCandidates("I prefer tea over coffee.");
+    expect(candidates.some((c) => c.type === "preference")).toBe(true);
+  });
+
+  it("falls back to heuristics when LLM output fails schema validation", async () => {
+    setExtractionProviderForTests(
+      new LlmExtractionProvider(
+        new StubChatProvider(
+          JSON.stringify({
+            memories: [{ content: "I like cats", type: "not-a-type", confidence: 0.5 }],
+          })
+        )
+      )
     );
 
     const candidates = await extractCandidates("I prefer tea over coffee.");

@@ -49,6 +49,12 @@ export class LlmExtractionProvider implements ExtractionProvider {
     );
 
     const parsed = parseExtractionResponse(result.content);
+    if (!parsed.ok) {
+      // Surface parse/schema failures so extractCandidates can fall back to
+      // heuristics. A valid {"memories":[]} is ok:true with an empty list.
+      throw new Error(`Invalid extraction response: ${parsed.error}`);
+    }
+
     return parsed.memories.map((m) => ({
       content: m.content.replace(/\s+/g, " ").trim(),
       type: m.type,

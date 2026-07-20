@@ -192,6 +192,8 @@ delegated to the model alone: forbidden secrets (passwords, API keys, payment
 data, government IDs) are dropped; medical / financial / identity-attribute
 content is flagged `is_sensitive` for human review. Optional
 `EXTRACTION_MODEL` selects the extraction model (default `openai/gpt-4o-mini`).
+Invalid JSON or schema-invalid LLM output triggers the heuristic fallback for
+that request; a valid `{"memories":[]}` is kept as intentionally empty.
 
 ---
 

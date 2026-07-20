@@ -8,6 +8,7 @@ export type { ExtractedCandidate, ExtractionProvider, RawExtractedCandidate } fr
 export { HeuristicExtractionProvider } from "./heuristic";
 export { LlmExtractionProvider } from "./llm";
 export { parseExtractionResponse, extractionResponseSchema } from "./schema";
+export type { ParseExtractionResult } from "./schema";
 
 let cached: ExtractionProvider | null = null;
 /** Test-only override; null means use the normal factory. */
@@ -85,8 +86,10 @@ function finalize(raw: RawExtractedCandidate[]): ExtractedCandidate[] {
  * content is flagged so it can never be auto-approved.
  *
  * Uses the active ExtractionProvider (LLM when available, heuristics offline).
- * If the LLM path throws, falls back to heuristics for that request so chat
- * is never blocked by extraction failures.
+ * If the LLM path throws (network error, invalid JSON, or schema-invalid
+ * output), falls back to heuristics for that request so chat is never blocked
+ * by extraction failures. A valid `{"memories":[]}` is kept as intentionally
+ * empty and does not trigger the fallback.
  */
 export async function extractCandidates(text: string): Promise<ExtractedCandidate[]> {
   const provider = getExtractionProvider();
