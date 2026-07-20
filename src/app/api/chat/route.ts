@@ -3,7 +3,7 @@ import { getSessionContext } from "@/lib/auth";
 import { getMemoryProvider } from "@/lib/memory";
 import { extractCandidates } from "@/lib/memory/extraction";
 import { buildSystemPrompt } from "@/lib/ai/context";
-import { chatComplete, type ChatMessage } from "@/lib/ai/openrouter";
+import { getChatProvider, type ChatMessage } from "@/lib/ai";
 import { isValidModel } from "@/lib/ai/models";
 import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
@@ -103,10 +103,10 @@ export async function POST(request: Request) {
     content: message,
   });
 
-  // 6. Call the model.
+  // 6. Call the model through the active chat provider (OpenRouter or mock).
   let result;
   try {
-    result = await chatComplete(model, [
+    result = await getChatProvider().complete(model, [
       { role: "system", content: systemPrompt },
       ...historyMsgs,
       { role: "user", content: message },
