@@ -48,3 +48,11 @@ Notes and non-obvious gotchas:
 - **Tests** (`pnpm test`) run against the running local stack and create/delete
   real users via the service role, so Supabase must be started first.
 - Lint / typecheck / build: `pnpm lint`, `pnpm typecheck`, `pnpm build`.
+- **Chat provider:** chat uses the `ChatProvider` interface in `src/lib/ai/`.
+  With `OPENROUTER_API_KEY` set it calls OpenRouter; otherwise it uses the
+  offline `MockChatProvider`. No code change is needed to switch.
+- **Google Sign-In:** enabled in `supabase/config.toml`, reading
+  `SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` / `_SECRET`. The Supabase CLI only
+  substitutes `env(...)` values that are exported in the shell **before**
+  `supabase start`, so export them (or leave unset to keep Google disabled) and
+  restart the stack after changing them. OAuth returns to `/auth/callback`.
