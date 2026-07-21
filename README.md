@@ -173,8 +173,14 @@ scripts/seed.ts           # demo data
 
 All memory storage/retrieval goes through the `MemoryProvider` interface
 (`src/lib/memory/provider.ts`). The default `SupabaseMemoryProvider` uses
-`pgvector`. To connect Mem0, implement `Mem0MemoryProvider` and set
+`pgvector`. To use Mem0 for semantic search instead, set
 `MEMORY_PROVIDER=mem0` with `MEM0_API_KEY`.
+
+With Mem0 enabled the app uses a **hybrid** model: Supabase remains the
+canonical store (UI, review queue, RLS, export) while Mem0 owns embeddings and
+retrieval. Each memory is mirrored to Mem0 with `infer: false` (verbatim
+content) and Context Vault metadata; the Mem0 id is stored in `source_detail`
+as `mem0:<uuid>` for updates.
 
 ### Memory extraction
 
