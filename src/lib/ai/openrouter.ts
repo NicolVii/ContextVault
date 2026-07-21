@@ -23,7 +23,7 @@ export class OpenRouterChatProvider implements ChatProvider {
     this.apiKey = apiKey;
     this.baseUrl = options.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL;
     this.referer = options.referer ?? process.env.OPENROUTER_SITE_URL ?? "http://localhost:3000";
-    this.title = options.title ?? "Context Vault";
+    this.title = options.title ?? process.env.OPENROUTER_APP_TITLE ?? "Personal Memory";
   }
 
   async complete(

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/Logo";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { BRAND } from "@/lib/brand";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const router = useRouter();
@@ -21,7 +22,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     setError(null);
     setLoading(true);
     const supabase = createSupabaseBrowserClient();
-    const redirect = params.get("redirect") ?? "/dashboard";
+    const redirect = params.get("redirect") ?? "/";
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -49,7 +50,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        router.push(params.get("redirect") ?? "/dashboard");
+        router.push(params.get("redirect") ?? "/");
       }
       router.refresh();
     } catch (err) {
@@ -137,7 +138,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           </button>
 
           <p className="mt-6 text-center text-sm text-brand-600">
-            {isSignup ? "Already have an account? " : "New to Context Vault? "}
+            {isSignup ? "Already have an account? " : `New to ${BRAND.name}? `}
             <Link
               href={isSignup ? "/login" : "/signup"}
               className="font-medium text-brand-700 underline"

@@ -30,7 +30,7 @@ export function ReviewQueue() {
         <CheckCircle2 className="h-10 w-10 text-green-500" />
         <h3 className="text-lg font-semibold text-brand-900">You&apos;re all caught up</h3>
         <p className="max-w-sm text-sm text-brand-600">
-          Memories suggested from your chats will appear here for you to approve or reject before they become active.
+          Suggested memories from your thinking will appear here. Keep what fits; discard the rest.
         </p>
       </div>
     );

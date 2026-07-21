@@ -95,14 +95,14 @@ export function MemoryCard({
               disabled={busy}
               onClick={() => patch({ status: "active" })}
             >
-              <Check className="h-4 w-4" /> Approve
+              <Check className="h-4 w-4" /> Keep
             </button>
             <button
               className="btn-secondary"
               disabled={busy}
               onClick={() => patch({ status: "rejected" })}
             >
-              <X className="h-4 w-4" /> Reject
+              <X className="h-4 w-4" /> Discard
             </button>
           </>
         ) : editing ? (

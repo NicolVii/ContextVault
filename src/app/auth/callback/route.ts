@@ -11,7 +11,7 @@ import { ensureUserProfile, needsOnboarding } from "@/lib/profile";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") ?? "/dashboard";
+  const next = url.searchParams.get("next") ?? "/";
   const origin = url.origin;
 
   if (!code) {
@@ -38,6 +38,6 @@ export async function GET(request: Request) {
   }
 
   // Only allow relative in-app redirects.
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
   return NextResponse.redirect(`${origin}${safeNext}`);
 }

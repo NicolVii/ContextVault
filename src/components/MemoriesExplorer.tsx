@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Search, PlusCircle, Inbox } from "lucide-react";
 import { MemoryCard } from "@/components/MemoryCard";
+import { BRAND } from "@/lib/brand";
 import { MEMORY_TYPES, MEMORY_TYPE_META, type Memory, type MemoryType } from "@/lib/types";
 
 export function MemoriesExplorer() {
@@ -70,9 +71,9 @@ export function MemoriesExplorer() {
             <Inbox className="h-10 w-10 text-brand-300" />
             <h3 className="text-lg font-semibold text-brand-900">No memories here yet</h3>
             <p className="max-w-sm text-sm text-brand-600">
-              Add your first memory or start a chat — Context Vault will suggest memories you can review.
+              Add your first memory from Thinking — {BRAND.name} will suggest memories you can review.
             </p>
-            <Link href="/memories/new" className="btn-primary mt-2">
+            <Link href="/vault/memories/new" className="btn-primary mt-2">
               <PlusCircle className="h-4 w-4" /> Add a memory
             </Link>
           </div>

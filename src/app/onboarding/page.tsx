@@ -43,7 +43,7 @@ export default function OnboardingPage() {
           })
         )
       );
-      router.push("/dashboard");
+      router.push("/");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");

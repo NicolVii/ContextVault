@@ -1,10 +1,11 @@
 import type { RetrievedChunk, RetrievedMemory, UserIdentity } from "@/lib/types";
 import type { ChatMessage } from "@/lib/ai/provider";
+import { BRAND } from "@/lib/brand";
 
 /** Max characters of persona included in the system prompt. */
 export const PERSONA_PROMPT_MAX = 500;
 
-const BASE_SYSTEM_PROMPT = `You are Context Vault's assistant. You help the user using their saved personal context.
+const BASE_SYSTEM_PROMPT = `You are ${BRAND.name}'s assistant. You help the user using their saved personal context.
 Guidelines:
 - Account profile / USER IDENTITY is authoritative for the user's name and persona. If a name is listed, you know their name — answer with it. Never say you don't have their name when it is listed. Prefer it over conflicting profile memories and over earlier assistant turns that claimed you lacked their name.
 - Use USER CONTEXT (saved memories and documents) when it is relevant to the question.

@@ -1,13 +1,22 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Manrope, Newsreader } from "next/font/google";
+import { BRAND } from "@/lib/brand";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const sans = Manrope({
+  subsets: ["latin"],
+  variable: "--font-sans",
+});
+
+const display = Newsreader({
+  subsets: ["latin"],
+  variable: "--font-display",
+  style: ["normal", "italic"],
+});
 
 export const metadata: Metadata = {
-  title: "Context Vault — Save your context once. Use it with every AI.",
-  description:
-    "A model-independent personal AI memory platform. Save your context once and use it with every AI model.",
+  title: `${BRAND.name} — ${BRAND.tagline}`,
+  description: BRAND.description,
 };
 
 export default function RootLayout({
@@ -16,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={`${sans.variable} ${display.variable}`}>
       <body className="font-sans antialiased">{children}</body>
     </html>
   );
