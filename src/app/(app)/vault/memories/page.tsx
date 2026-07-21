@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, Pin } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import type { Memory } from "@/lib/types";
 
@@ -40,16 +40,25 @@ export default function VaultMemoriesPage() {
     void load();
   }, [load]);
 
+  const pinned = useMemo(
+    () => memories.filter((m) => Boolean(m.pinned_at)),
+    [memories]
+  );
+  const unpinned = useMemo(
+    () => memories.filter((m) => !m.pinned_at),
+    [memories]
+  );
+
   const groups = useMemo(() => {
     const map = new Map<string, Memory[]>();
-    for (const m of memories) {
+    for (const m of unpinned) {
       const key = dayLabel(m.created_at);
       const list = map.get(key) ?? [];
       list.push(m);
       map.set(key, list);
     }
     return [...map.entries()];
-  }, [memories]);
+  }, [unpinned]);
 
   return (
     <div className="mx-auto max-w-lg">
@@ -73,6 +82,18 @@ export default function VaultMemoriesPage() {
         </div>
       ) : (
         <div className="space-y-8">
+          {pinned.length > 0 && (
+            <section>
+              <h2 className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                <Pin className="h-3 w-3" /> Pinned
+              </h2>
+              <ul className="space-y-2">
+                {pinned.map((m) => (
+                  <MemoryLink key={m.id} memory={m} />
+                ))}
+              </ul>
+            </section>
+          )}
           {groups.map(([label, items]) => (
             <section key={label}>
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint">
@@ -80,15 +101,7 @@ export default function VaultMemoriesPage() {
               </h2>
               <ul className="space-y-2">
                 {items.map((m) => (
-                  <li key={m.id}>
-                    <Link
-                      href={`/vault/memories/${m.id}`}
-                      className="card block px-4 py-3 transition-colors hover:bg-mist-50"
-                    >
-                      <p className="line-clamp-3 text-sm leading-relaxed text-ink">{m.content}</p>
-                      <p className="mt-2 text-xs text-ink-faint">{formatDate(m.created_at)}</p>
-                    </Link>
-                  </li>
+                  <MemoryLink key={m.id} memory={m} />
                 ))}
               </ul>
             </section>
@@ -96,5 +109,19 @@ export default function VaultMemoriesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function MemoryLink({ memory }: { memory: Memory }) {
+  return (
+    <li>
+      <Link
+        href={`/vault/memories/${memory.id}`}
+        className="card block px-4 py-3 transition-colors hover:bg-mist-50"
+      >
+        <p className="line-clamp-3 text-sm leading-relaxed text-ink">{memory.content}</p>
+        <p className="mt-2 text-xs text-ink-faint">{formatDate(memory.created_at)}</p>
+      </Link>
+    </li>
   );
 }

@@ -13,6 +13,7 @@ const TITLES: Record<string, string> = {
   "/vault/files": "Files",
   "/vault/review": "Review",
   "/vault/settings": "Settings",
+  "/vault/connections": "Connections",
 };
 
 function titleFor(pathname: string): string {

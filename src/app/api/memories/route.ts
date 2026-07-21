@@ -19,6 +19,7 @@ export async function GET(request: Request) {
     .from("memories")
     .select("*")
     .neq("status", "deleted")
+    .order("pinned_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
 
   if (status) query = query.eq("status", status);

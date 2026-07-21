@@ -70,10 +70,19 @@ export async function PATCH(
 
   await recordAudit({
     userId: ctx.user.id,
-    action: parsed.data.status ? `memory.status.${parsed.data.status}` : "memory.update",
+    action: parsed.data.pinned_at !== undefined
+      ? parsed.data.pinned_at
+        ? "memory.pin"
+        : "memory.unpin"
+      : parsed.data.status
+        ? `memory.status.${parsed.data.status}`
+        : "memory.update",
     entityType: "memory",
     entityId: params.id,
-    metadata: { status: parsed.data.status },
+    metadata: {
+      status: parsed.data.status,
+      pinned: parsed.data.pinned_at !== undefined ? Boolean(parsed.data.pinned_at) : undefined,
+    },
   });
 
   return NextResponse.json({ memory: data });

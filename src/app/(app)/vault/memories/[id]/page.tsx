@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Archive, Pencil, Trash2, Save } from "lucide-react";
+import { Archive, Pencil, Trash2, Save, Pin } from "lucide-react";
 import { ConfirmModal } from "@/components/ConfirmModal";
-import { formatDate } from "@/lib/utils";
+import { RelatedMemoriesStrip } from "@/components/RelatedMemoriesStrip";
+import { formatDate, cn } from "@/lib/utils";
 import type { Memory } from "@/lib/types";
 
 export default function MemoryDetailPage() {
@@ -50,6 +51,12 @@ export default function MemoryDetailPage() {
     setEditing(false);
   }
 
+  async function togglePin() {
+    if (!memory) return;
+    const pinned_at = memory.pinned_at ? null : new Date().toISOString();
+    await patch({ pinned_at });
+  }
+
   async function remove() {
     if (!memory) return;
     setBusy(true);
@@ -66,9 +73,14 @@ export default function MemoryDetailPage() {
     return <p className="text-sm text-ink-faint">Loading…</p>;
   }
 
+  const pinned = Boolean(memory.pinned_at);
+
   return (
     <div className="mx-auto max-w-lg">
-      <p className="text-xs text-ink-faint">{formatDate(memory.created_at)}</p>
+      <div className="flex items-center gap-2 text-xs text-ink-faint">
+        <span>{formatDate(memory.created_at)}</span>
+        {pinned && <span className="text-accent">Pinned</span>}
+      </div>
 
       {editing ? (
         <textarea
@@ -100,6 +112,14 @@ export default function MemoryDetailPage() {
           </>
         ) : (
           <>
+            <button
+              className={cn("btn-secondary", pinned && "border-accent text-accent")}
+              disabled={busy}
+              onClick={() => void togglePin()}
+            >
+              <Pin className="h-4 w-4" />
+              {pinned ? "Unpin" : "Pin"}
+            </button>
             <button className="btn-secondary" onClick={() => setEditing(true)}>
               <Pencil className="h-4 w-4" /> Edit
             </button>
@@ -122,7 +142,7 @@ export default function MemoryDetailPage() {
         )}
       </div>
 
-      {/* Stage 2: related memories strip */}
+      <RelatedMemoriesStrip memoryId={memory.id} />
 
       <ConfirmModal
         open={confirmDelete}
