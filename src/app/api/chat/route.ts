@@ -1,26 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
-import { getMemoryProvider } from "@/lib/memory";
-import { extractCandidates } from "@/lib/memory/extraction";
-import {
-  buildSystemPrompt,
-  composeChatMessages,
-  directIdentityAnswer,
-  toUserIdentity,
-} from "@/lib/ai/context";
-import { getChatProvider, type ChatMessage } from "@/lib/ai";
-import { isValidModel } from "@/lib/ai/models";
-import { displayNameFromUser } from "@/lib/profile";
 import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
-import { recordAudit } from "@/lib/audit";
-import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
+import { isValidSelection } from "@/lib/inference/models";
+import { InsufficientCreditsError } from "@/lib/inference/credits";
+import { runChatOrchestrator } from "@/lib/orchestration/chat";
 
 /** Always resolve identity fresh — never serve a cached chat handler. */
 export const dynamic = "force-dynamic";
-
-const MIN_SIMILARITY = 0.05;
-const HISTORY_LIMIT = 10;
 
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
@@ -28,7 +15,10 @@ export async function POST(request: Request) {
 
   const limit = await checkRateLimit(ctx.user.id, "chat", 30, 60);
   if (!limit.allowed) {
-    return NextResponse.json({ error: "Rate limit exceeded. Please slow down." }, { status: 429 });
+    return NextResponse.json(
+      { error: "Rate limit exceeded. Please slow down." },
+      { status: 429 }
+    );
   }
 
   const body = await request.json().catch(() => null);
@@ -36,212 +26,48 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
-  const { message, model } = parsed.data;
-  if (!isValidModel(model)) {
-    return NextResponse.json({ error: "Unknown model" }, { status: 400 });
+
+  const selectionRaw = parsed.data.selection ?? parsed.data.model;
+  if (!selectionRaw || !isValidSelection(selectionRaw)) {
+    return NextResponse.json({ error: "Unknown model or selection" }, { status: 400 });
   }
 
-  const { supabase, user } = ctx;
+  try {
+    const result = await runChatOrchestrator({
+      user: ctx.user,
+      supabase: ctx.supabase,
+      message: parsed.data.message,
+      selectionRaw,
+      sessionId: parsed.data.sessionId,
+    });
 
-  // 1. Resolve or create the chat session (RLS scopes this to the user).
-  let sessionId = parsed.data.sessionId ?? null;
-  if (!sessionId) {
-    const { data: session, error } = await supabase
-      .from("chat_sessions")
-      .insert({ user_id: user.id, model, title: message.slice(0, 60) })
-      .select("id")
-      .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    sessionId = session.id;
-  }
-
-  // 2. Retrieve context for this message. Profile memories describe the user's
-  // core identity and are always relevant, so they are injected on every
-  // request. Other types are added by semantic similarity.
-  const provider = getMemoryProvider();
-  const retrieved = await provider.retrieve(supabase, user.id, message, { limit: 8 });
-  const semantic = retrieved.filter((m) => m.similarity >= MIN_SIMILARITY);
-
-  const { data: profileMems } = await supabase
-    .from("memories")
-    .select("id, content, category, type, source, source_detail, confidence, created_at")
-    .eq("status", "active")
-    .eq("type", "profile")
-    .order("created_at", { ascending: true })
-    .limit(10);
-
-  const byId = new Map<string, RetrievedMemory>();
-  for (const m of (profileMems ?? []) as Omit<RetrievedMemory, "similarity">[]) {
-    byId.set(m.id, { ...m, similarity: 1 });
-  }
-  for (const m of semantic) if (!byId.has(m.id)) byId.set(m.id, m);
-  const usedMemories = [...byId.values()];
-
-  let usedChunks: RetrievedChunk[] = [];
-  const [embedding] = await (
-    await import("@/lib/embeddings")
-  ).getEmbeddingProvider().embed([message]);
-  const { data: chunkData } = await supabase.rpc("match_document_chunks", {
-    query_embedding: `[${embedding.join(",")}]`,
-    match_count: 3,
-  });
-  usedChunks = ((chunkData ?? []) as RetrievedChunk[]).filter(
-    (c) => c.similarity >= MIN_SIMILARITY
-  );
-
-  // 3. Load allowlisted account identity (name / persona only) for this user.
-  // Prefer profiles.display_name; fall back to auth metadata / email local-part
-  // so Google users still get a name when the profiles row was never filled in.
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("display_name, persona")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (profileError) {
-    console.error("chat profile identity load failed", profileError.message);
-  }
-  const identity = toUserIdentity({
-    display_name: profile?.display_name?.trim() || displayNameFromUser(user),
-    persona: profile?.persona ?? null,
-  });
-
-  // 4. Build the system prompt with USER IDENTITY + USER CONTEXT sections.
-  const { systemPrompt } = buildSystemPrompt(usedMemories, usedChunks, identity);
-
-  // 5. Load recent history for conversational continuity.
-  const { data: history } = await supabase
-    .from("chat_messages")
-    .select("role, content")
-    .eq("session_id", sessionId)
-    .order("created_at", { ascending: false })
-    .limit(HISTORY_LIMIT);
-
-  const historyMsgs: ChatMessage[] = ((history ?? []) as ChatMessage[])
-    .reverse()
-    .map((m) => ({ role: m.role, content: m.content }));
-
-  // 6. Persist the user's message.
-  await supabase.from("chat_messages").insert({
-    session_id: sessionId,
-    user_id: user.id,
-    role: "user",
-    content: message,
-  });
-
-  // 7. Answer name questions from structured identity when possible; otherwise
-  // call the model with identity in the system prompt and outbound user turn.
-  let result: { content: string; model: string; mocked?: boolean };
-  let identityDirect = false;
-  const direct = directIdentityAnswer(message, identity);
-  if (direct) {
-    identityDirect = true;
-    result = { content: direct, model, mocked: false };
-  } else {
-    try {
-      result = await getChatProvider().complete(
-        model,
-        composeChatMessages({
-          systemPrompt,
-          history: historyMsgs,
-          userMessage: message,
-          identity,
-        })
-      );
-    } catch (err) {
+    return NextResponse.json({
+      sessionId: result.sessionId,
+      message: result.message,
+      usedMemories: result.usedMemories,
+      usedChunks: result.usedChunks,
+      usedIdentity: result.usedIdentity,
+      identityDirectAnswer: result.identityDirectAnswer,
+      proposedCount: result.proposedCount,
+      mocked: result.mocked,
+      resolved: result.resolved,
+      selection: result.selection,
+    });
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
       return NextResponse.json(
-        { error: err instanceof Error ? err.message : "Model request failed" },
-        { status: 502 }
+        {
+          error: err.message,
+          code: "insufficient_credits",
+          balance: err.balance,
+          required: err.required,
+        },
+        { status: 402 }
       );
     }
-  }
-
-  // 8. Persist the assistant message and its context provenance.
-  const { data: assistantMsg, error: amErr } = await supabase
-    .from("chat_messages")
-    .insert({
-      session_id: sessionId,
-      user_id: user.id,
-      role: "assistant",
-      content: result.content,
-      model: result.model,
-    })
-    .select("id, content, model, created_at")
-    .single();
-  if (amErr) return NextResponse.json({ error: amErr.message }, { status: 500 });
-
-  const contextRows = [
-    ...usedMemories.map((m) => ({
-      message_id: assistantMsg.id,
-      user_id: user.id,
-      memory_id: m.id,
-      relevance: m.similarity,
-    })),
-    ...usedChunks.map((c) => ({
-      message_id: assistantMsg.id,
-      user_id: user.id,
-      document_chunk_id: c.id,
-      relevance: c.similarity,
-    })),
-  ];
-  if (contextRows.length > 0) {
-    await supabase.from("message_context").insert(contextRows);
-  }
-
-  // 9. Extract candidate memories → review queue (never auto-active).
-  // Uses the ExtractionProvider (LLM when available, heuristics offline).
-  const candidates = await extractCandidates(message);
-  let proposedCount = 0;
-  if (candidates.length > 0) {
-    const { data: existing } = await supabase
-      .from("memories")
-      .select("content")
-      .neq("status", "deleted");
-    const existingSet = new Set(
-      ((existing ?? []) as { content: string }[]).map((e) => e.content.toLowerCase())
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Model request failed" },
+      { status: 502 }
     );
-    const fresh = candidates.filter((c) => !existingSet.has(c.content.toLowerCase()));
-    if (fresh.length > 0) {
-      await provider.insert(
-        supabase,
-        user.id,
-        fresh.map((c) => ({
-          content: c.content,
-          type: c.type,
-          category: c.category,
-          confidence: c.confidence,
-          source: "chat_extraction" as const,
-          source_detail: `chat:${sessionId}`,
-          status: "proposed" as const,
-          is_sensitive: c.is_sensitive,
-        }))
-      );
-      proposedCount = fresh.length;
-    }
   }
-
-  await recordAudit({
-    userId: user.id,
-    action: "chat.message",
-    entityType: "chat_session",
-    entityId: sessionId,
-    metadata: {
-      model: result.model,
-      memories_used: usedMemories.length,
-      chunks_used: usedChunks.length,
-      identity_used: Boolean(identity.displayName || identity.persona),
-      identity_direct: identityDirect,
-      proposed: proposedCount,
-    },
-  });
-
-  return NextResponse.json({
-    sessionId,
-    message: assistantMsg,
-    usedMemories,
-    usedChunks,
-    usedIdentity: identity,
-    identityDirectAnswer: identityDirect,
-    proposedCount,
-    mocked: result.mocked,
-  });
 }

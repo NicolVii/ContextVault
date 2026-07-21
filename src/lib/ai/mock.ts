@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatProvider,
 } from "./provider";
+import { estimateTokensFromMessages } from "@/lib/inference/usage";
 
 /**
  * Offline fallback chat provider. Used when no OPENROUTER_API_KEY is set so the
@@ -34,30 +35,34 @@ export class MockChatProvider implements ChatProvider {
       lastUser?.content ?? ""
     );
 
+    let content: string;
     if (askedName && nameMatch?.[1]) {
-      return {
-        content: `Your name is ${nameMatch[1].trim()}.`,
-        model: `${model} (mock)`,
-        mocked: true,
-      };
-    }
-
-    const parts: string[] = [
-      "This is a local mock model (set OPENROUTER_API_KEY to use real models).",
-    ];
-    if (lastUser) {
-      const visible = lastUser.content.replace(
-        /^\[Account profile for this reply[\s\S]*?\n\n/,
-        ""
+      content = `Your name is ${nameMatch[1].trim()}.`;
+    } else {
+      const parts: string[] = [
+        "This is a local mock model (set OPENROUTER_API_KEY to use real models).",
+      ];
+      if (lastUser) {
+        const visible = lastUser.content.replace(
+          /^\[Account profile for this reply[\s\S]*?\n\n/,
+          ""
+        );
+        parts.push(`\nYou said: "${visible.trim()}"`);
+      }
+      parts.push(
+        hasContext
+          ? "\nI used your saved context for this answer — see the memories listed under this response."
+          : "\nI didn't find any relevant saved context for this message."
       );
-      parts.push(`\nYou said: "${visible.trim()}"`);
+      content = parts.join("\n");
     }
-    parts.push(
-      hasContext
-        ? "\nI used your saved context for this answer — see the memories listed under this response."
-        : "\nI didn't find any relevant saved context for this message."
-    );
 
-    return { content: parts.join("\n"), model: `${model} (mock)`, mocked: true };
+    const est = estimateTokensFromMessages(messages, content);
+    return {
+      content,
+      model: `${model} (mock)`,
+      mocked: true,
+      usage: est,
+    };
   }
 }

@@ -36,6 +36,11 @@ export async function GET() {
           ? "OPENROUTER_API_KEY is missing in this deployment's environment. In Vercel: Settings → Environment Variables → add OPENROUTER_API_KEY for Production → Redeploy the Production deployment."
           : "OpenRouter chat provider is active.",
     },
+    inference: {
+      router: "deterministic",
+      metering: "usage_events",
+      billing: "credit_wallet",
+    },
     embeddings: { provider: embeddings.name },
     memory: { provider: memory.name },
     extraction: { provider: extraction.name },

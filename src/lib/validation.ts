@@ -24,11 +24,18 @@ export const updateMemorySchema = z.object({
   pinned_at: z.string().datetime().optional().nullable(),
 });
 
-export const chatRequestSchema = z.object({
-  message: z.string().trim().min(1).max(8000),
-  model: z.string().min(1),
-  sessionId: z.string().uuid().optional().nullable(),
-});
+export const chatRequestSchema = z
+  .object({
+    message: z.string().trim().min(1).max(8000),
+    /** @deprecated Prefer `selection` (auto | preset:* | model id). */
+    model: z.string().min(1).optional(),
+    /** Selection policy: auto | preset:coding | cortaix model id | legacy provider id. */
+    selection: z.string().min(1).optional(),
+    sessionId: z.string().uuid().optional().nullable(),
+  })
+  .refine((v) => Boolean(v.selection ?? v.model), {
+    message: "selection or model is required",
+  });
 
 export const profileSchema = z.object({
   display_name: z.string().trim().max(120).optional().nullable(),

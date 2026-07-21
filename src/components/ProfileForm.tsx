@@ -2,14 +2,26 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CHAT_MODELS } from "@/lib/ai/models";
+import {
+  AUTO_MODEL_ID,
+  chatPickerOptions,
+  DEFAULT_MODEL_ID,
+  resolveModelProfile,
+} from "@/lib/ai/models";
 import { ProfileFields } from "@/components/ProfileFields";
 import type { Profile } from "@/lib/types";
+
+const picker = chatPickerOptions();
+
+function normalizeDefault(raw: string): string {
+  if (raw === AUTO_MODEL_ID || raw.startsWith("preset:")) return raw;
+  return resolveModelProfile(raw)?.id ?? DEFAULT_MODEL_ID;
+}
 
 /** Legacy wrapper used by onboarding-era profile pages. */
 export function ProfileForm({ profile, email }: { profile: Profile; email: string }) {
   const router = useRouter();
-  const [model, setModel] = useState(profile.default_model);
+  const [model, setModel] = useState(normalizeDefault(profile.default_model));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -34,11 +46,21 @@ export function ProfileForm({ profile, email }: { profile: Profile; email: strin
         <div>
           <label className="label">Default model</label>
           <select className="input" value={model} onChange={(e) => setModel(e.target.value)}>
-            {CHAT_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} · {m.vendor}
-              </option>
-            ))}
+            <option value={AUTO_MODEL_ID}>Auto · router picks</option>
+            <optgroup label="Presets">
+              {picker.presets.map((p) => (
+                <option key={p.id} value={`preset:${p.id}`}>
+                  {p.label} — {p.description}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Models">
+              {picker.models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} · {m.vendor}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </div>
         {saved && <p className="text-sm text-green-700">Saved.</p>}

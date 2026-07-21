@@ -1,14 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Send, Info, Sparkles, BookOpen } from "lucide-react";
-import { CHAT_MODELS } from "@/lib/ai/models";
+import {
+  chatPickerOptions,
+  DEFAULT_MODEL_ID,
+  resolveModelProfile,
+} from "@/lib/ai/models";
 import type { RetrievedChunk, RetrievedMemory, UserIdentity } from "@/lib/types";
 
 interface UIMessage {
   role: "user" | "assistant";
   content: string;
   model?: string;
+  reasonCode?: string;
   usedMemories?: RetrievedMemory[];
   usedChunks?: RetrievedChunk[];
   usedIdentity?: UserIdentity;
@@ -18,8 +23,15 @@ function hasIdentity(identity?: UserIdentity): boolean {
   return Boolean(identity?.displayName || identity?.persona);
 }
 
+function normalizeSelection(raw: string): string {
+  if (raw === "auto" || raw.startsWith("preset:")) return raw;
+  return resolveModelProfile(raw)?.id ?? DEFAULT_MODEL_ID;
+}
+
+const picker = chatPickerOptions();
+
 export function ChatView({ initialModel }: { initialModel: string }) {
-  const [model, setModel] = useState(initialModel);
+  const [selection, setSelection] = useState(normalizeSelection(initialModel));
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -27,7 +39,17 @@ export function ChatView({ initialModel }: { initialModel: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openContext, setOpenContext] = useState<number | null>(null);
+  const [credits, setCredits] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch("/api/credits")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (json && typeof json.balance === "number") setCredits(json.balance);
+      })
+      .catch(() => undefined);
+  }, [messages.length]);
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -43,7 +65,7 @@ export function ChatView({ initialModel }: { initialModel: string }) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, model, sessionId }),
+        body: JSON.stringify({ message, selection, sessionId }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Request failed");
@@ -55,6 +77,7 @@ export function ChatView({ initialModel }: { initialModel: string }) {
           role: "assistant",
           content: json.message.content,
           model: json.message.model,
+          reasonCode: json.resolved?.reasonCode,
           usedMemories: json.usedMemories,
           usedChunks: json.usedChunks,
           usedIdentity: json.usedIdentity,
@@ -80,14 +103,33 @@ export function ChatView({ initialModel }: { initialModel: string }) {
           <h1 className="text-2xl font-bold text-brand-900">Chat</h1>
           <p className="text-sm text-brand-600">
             Your saved context is retrieved and injected before every reply.
+            {credits !== null && (
+              <span className="ml-2 text-brand-500">
+                · {credits.toLocaleString()} credits
+              </span>
+            )}
           </p>
         </div>
-        <select className="input sm:w-64" value={model} onChange={(e) => setModel(e.target.value)}>
-          {CHAT_MODELS.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label} · {m.vendor}
-            </option>
-          ))}
+        <select
+          className="input sm:w-72"
+          value={selection}
+          onChange={(e) => setSelection(e.target.value)}
+        >
+          <option value="auto">Auto · router picks</option>
+          <optgroup label="Presets">
+            {picker.presets.map((p) => (
+              <option key={p.id} value={`preset:${p.id}`}>
+                {p.label} — {p.description}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Models">
+            {picker.models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label} · {m.vendor}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </div>
 
@@ -126,7 +168,10 @@ export function ChatView({ initialModel }: { initialModel: string }) {
 
                   {m.role === "assistant" && (
                     <div className="mt-1.5 pl-1">
-                      <span className="text-xs text-brand-400">{m.model}</span>
+                      <span className="text-xs text-brand-400">
+                        {m.model}
+                        {m.reasonCode ? ` · ${m.reasonCode.replace(/_/g, " ")}` : ""}
+                      </span>
                       {contextCount > 0 ? (
                         <button
                           className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"

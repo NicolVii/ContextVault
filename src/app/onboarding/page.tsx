@@ -4,13 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { Logo } from "@/components/Logo";
-import { CHAT_MODELS } from "@/lib/ai/models";
+import { chatPickerOptions, DEFAULT_MODEL_ID } from "@/lib/ai/models";
+
+const picker = chatPickerOptions();
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [persona, setPersona] = useState("");
-  const [model, setModel] = useState(CHAT_MODELS[0].id);
+  const [model, setModel] = useState(DEFAULT_MODEL_ID);
   const [facts, setFacts] = useState(["", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,11 +124,21 @@ export default function OnboardingPage() {
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
-                {CHAT_MODELS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label} · {m.vendor}
-                  </option>
-                ))}
+                <option value="auto">Auto · router picks</option>
+                <optgroup label="Presets">
+                  {picker.presets.map((p) => (
+                    <option key={p.id} value={`preset:${p.id}`}>
+                      {p.label} — {p.description}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Models">
+                  {picker.models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label} · {m.vendor}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 

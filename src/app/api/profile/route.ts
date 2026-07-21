@@ -3,6 +3,12 @@ import { getSessionContext } from "@/lib/auth";
 import { profileSchema } from "@/lib/validation";
 import { recordAudit } from "@/lib/audit";
 import { ensureUserProfile } from "@/lib/profile";
+import {
+  isValidSelection,
+  parseSelection,
+  resolveModelProfile,
+  selectionToStorageKey,
+} from "@/lib/inference/models";
 
 export async function PATCH(request: Request) {
   const ctx = await getSessionContext();
@@ -12,6 +18,20 @@ export async function PATCH(request: Request) {
   const parsed = profileSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+  }
+
+  const updates = { ...parsed.data };
+  if (updates.default_model) {
+    if (!isValidSelection(updates.default_model)) {
+      return NextResponse.json({ error: "Unknown model or selection" }, { status: 400 });
+    }
+    const selection = parseSelection(updates.default_model);
+    if (selection.type === "model") {
+      const profile = resolveModelProfile(selection.modelId);
+      updates.default_model = profile?.id ?? updates.default_model;
+    } else {
+      updates.default_model = selectionToStorageKey(selection);
+    }
   }
 
   // Guarantees a row exists even if the auth trigger never ran (common when
@@ -26,7 +46,7 @@ export async function PATCH(request: Request) {
 
   const { data, error } = await ctx.supabase
     .from("profiles")
-    .update(parsed.data)
+    .update(updates)
     .eq("id", ctx.user.id)
     .select()
     .single();

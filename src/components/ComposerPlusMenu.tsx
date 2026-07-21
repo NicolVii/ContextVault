@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Check, Paperclip } from "lucide-react";
-import { AUTO_MODEL_ID, CHAT_MODELS } from "@/lib/ai/models";
+import { AUTO_MODEL_ID, CHAT_MODELS, MODEL_PRESETS } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 
 export function ComposerPlusMenu({
@@ -59,6 +59,24 @@ export function ComposerPlusMenu({
             onClose();
           }}
         />
+        <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+          Presets
+        </p>
+        {MODEL_PRESETS.map((p) => (
+          <ModelOption
+            key={p.id}
+            selected={modelChoice === `preset:${p.id}`}
+            label={p.label}
+            hint={p.description}
+            onClick={() => {
+              onSelectModel(`preset:${p.id}`);
+              onClose();
+            }}
+          />
+        ))}
+        <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+          Models
+        </p>
         {CHAT_MODELS.map((m) => (
           <ModelOption
             key={m.id}
