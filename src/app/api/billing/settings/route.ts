@@ -9,6 +9,7 @@ const patchSchema = z.object({
   monthlySpendCapEurCents: z.number().int().min(0).nullable().optional(),
   autoTopupEnabled: z.boolean().optional(),
   autoTopupPackId: z.string().nullable().optional(),
+  foundingOfferDismissed: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -18,7 +19,7 @@ export async function GET() {
   const { data } = await admin
     .from("billing_settings")
     .select(
-      "monthly_spend_cap_eur_cents, auto_topup_enabled, auto_topup_pack_id, grace_period_ends_at, inference_restricted"
+      "monthly_spend_cap_eur_cents, auto_topup_enabled, auto_topup_pack_id, grace_period_ends_at, inference_restricted, founding_offer_dismissed"
     )
     .eq("user_id", ctx.user.id)
     .maybeSingle();
@@ -28,6 +29,7 @@ export async function GET() {
     autoTopupPackId: data?.auto_topup_pack_id ?? null,
     gracePeriodEndsAt: data?.grace_period_ends_at ?? null,
     inferenceRestricted: Boolean(data?.inference_restricted),
+    foundingOfferDismissed: Boolean(data?.founding_offer_dismissed),
   });
 }
 
@@ -51,6 +53,7 @@ export async function PATCH(request: Request) {
       parsed.data.autoTopupPackId === undefined
         ? undefined
         : parsed.data.autoTopupPackId,
+    founding_offer_dismissed: parsed.data.foundingOfferDismissed,
     updated_at: new Date().toISOString(),
   };
 

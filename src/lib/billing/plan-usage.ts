@@ -113,54 +113,124 @@ export async function getBillingRestriction(userId: string): Promise<{
   };
 }
 
-export async function getPlanUsageSnapshot(userId: string): Promise<PlanUsageSnapshot> {
-  const admin = createSupabaseAdminClient();
-  const period = await resolveUsagePeriod(userId);
-  const ents = entitlementsForPlan(period.planId);
-  await applyGraceExpiryIfNeeded(userId);
-  const restriction = await getBillingRestriction(userId);
-
-  const { data: row } = await admin
-    .from("plan_usage_periods")
-    .select("auto_turns, frontier_turns, auto_credits, frontier_credits")
-    .eq("user_id", userId)
-    .eq("period_start", period.periodStart.toISOString())
-    .maybeSingle();
-
-  const autoTurns = (row?.auto_turns as number | undefined) ?? 0;
-  const frontierTurns = (row?.frontier_turns as number | undefined) ?? 0;
-  const autoCredits = (row?.auto_credits as number | undefined) ?? 0;
-  const frontierCredits = (row?.frontier_credits as number | undefined) ?? 0;
-
-  const autoRemaining =
-    ents.autoMonthlyTurns == null ? null : Math.max(0, ents.autoMonthlyTurns - autoTurns);
-  const frontierRemaining =
-    ents.frontierMonthlyTurns == null
-      ? null
-      : Math.max(0, ents.frontierMonthlyTurns - frontierTurns);
-
-  const soft = ents.frontierSoftCreditCap;
-  const frontierHeavy =
-    soft != null && soft > 0 && frontierCredits / soft >= ents.frontierHeavyRatio;
-
+function freeSnapshotFallback(userIdIgnored?: string): PlanUsageSnapshot {
+  void userIdIgnored;
+  const ents = entitlementsForPlan("free");
+  const periodStart = new Date(
+    Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1)
+  );
+  const periodEnd = new Date(
+    Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)
+  );
   return {
-    planId: period.planId,
-    periodStart: period.periodStart.toISOString(),
-    periodEnd: period.periodEnd.toISOString(),
-    autoTurns,
-    frontierTurns,
-    autoCredits,
-    frontierCredits,
+    planId: "free",
+    periodStart: periodStart.toISOString(),
+    periodEnd: periodEnd.toISOString(),
+    autoTurns: 0,
+    frontierTurns: 0,
+    autoCredits: 0,
+    frontierCredits: 0,
     entitlements: ents,
-    autoRemaining,
-    frontierRemaining,
-    frontierHeavy,
-    inferenceRestricted: restriction.inferenceRestricted,
-    gracePeriodEndsAt: restriction.gracePeriodEndsAt,
-    currentPeriodEnd: period.currentPeriodEnd,
-    planStatus: period.planStatus,
-    cancelAtPeriodEnd: period.cancelAtPeriodEnd,
+    autoRemaining: ents.autoMonthlyTurns,
+    frontierRemaining: 0,
+    frontierHeavy: false,
+    inferenceRestricted: false,
+    gracePeriodEndsAt: null,
+    currentPeriodEnd: null,
+    planStatus: "active",
+    cancelAtPeriodEnd: false,
   };
+}
+
+export async function getPlanUsageSnapshot(userId: string): Promise<PlanUsageSnapshot> {
+  try {
+    const admin = createSupabaseAdminClient();
+    const period = await resolveUsagePeriod(userId);
+    const ents = entitlementsForPlan(period.planId);
+    await applyGraceExpiryIfNeeded(userId);
+    const restriction = await getBillingRestriction(userId);
+
+    const { data: row } = await admin
+      .from("plan_usage_periods")
+      .select("auto_turns, frontier_turns, auto_credits, frontier_credits")
+      .eq("user_id", userId)
+      .eq("period_start", period.periodStart.toISOString())
+      .maybeSingle();
+
+    const autoTurns = (row?.auto_turns as number | undefined) ?? 0;
+    const frontierTurns = (row?.frontier_turns as number | undefined) ?? 0;
+    const autoCredits = (row?.auto_credits as number | undefined) ?? 0;
+    const frontierCredits = (row?.frontier_credits as number | undefined) ?? 0;
+
+    const autoRemaining =
+      ents.autoMonthlyTurns == null
+        ? null
+        : Math.max(0, ents.autoMonthlyTurns - autoTurns);
+    const frontierRemaining =
+      ents.frontierMonthlyTurns == null
+        ? null
+        : Math.max(0, ents.frontierMonthlyTurns - frontierTurns);
+
+    const soft = ents.frontierSoftCreditCap;
+    const frontierHeavy =
+      soft != null && soft > 0 && frontierCredits / soft >= ents.frontierHeavyRatio;
+
+    return {
+      planId: period.planId,
+      periodStart: period.periodStart.toISOString(),
+      periodEnd: period.periodEnd.toISOString(),
+      autoTurns,
+      frontierTurns,
+      autoCredits,
+      frontierCredits,
+      entitlements: ents,
+      autoRemaining,
+      frontierRemaining,
+      frontierHeavy,
+      inferenceRestricted: restriction.inferenceRestricted,
+      gracePeriodEndsAt: restriction.gracePeriodEndsAt,
+      currentPeriodEnd: period.currentPeriodEnd,
+      planStatus: period.planStatus ?? "active",
+      cancelAtPeriodEnd: period.cancelAtPeriodEnd,
+    };
+  } catch {
+    // Missing migration / transient DB errors must not blank Vault Plan & Usage.
+    return freeSnapshotFallback(userId);
+  }
+}
+
+export async function getFoundingOfferState(userId: string): Promise<{
+  showFoundingOffer: boolean;
+  foundingOfferDismissed: boolean;
+}> {
+  try {
+    const admin = createSupabaseAdminClient();
+    const snap = await getPlanUsageSnapshot(userId);
+    const { data } = await admin
+      .from("billing_settings")
+      .select("founding_offer_dismissed")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const dismissed = Boolean(data?.founding_offer_dismissed);
+    return {
+      foundingOfferDismissed: dismissed,
+      showFoundingOffer: snap.planId === "free" && !dismissed,
+    };
+  } catch {
+    return { showFoundingOffer: false, foundingOfferDismissed: false };
+  }
+}
+
+export async function dismissFoundingOffer(userId: string): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  await admin.from("billing_settings").upsert(
+    {
+      user_id: userId,
+      founding_offer_dismissed: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
 }
 
 export async function assertPlanAllowsTurn(input: {

@@ -7,6 +7,7 @@ import { BRAND } from "@/lib/brand";
 import { AUTO_MODEL_ID, modelLabel } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { ComposerPlusMenu, type ComposerPlanHints } from "@/components/ComposerPlusMenu";
+import { FoundingOfferBanner } from "@/components/FoundingOfferBanner";
 import {
   ResponseInfoButton,
   type ResponseInfoMeta,
@@ -19,6 +20,7 @@ type UsageHints = ComposerPlanHints & {
   frontierHeavy: boolean;
   inferenceRestricted: boolean;
   unlimitedAuto: boolean;
+  showFoundingOffer: boolean;
 };
 
 type ThreadItem =
@@ -118,6 +120,7 @@ export function ThinkingView({
           frontierHeavy: Boolean(json.frontierHeavy),
           inferenceRestricted: Boolean(json.inferenceRestricted),
           unlimitedAuto: Boolean(json.entitlements?.unlimitedAuto),
+          showFoundingOffer: Boolean(json.showFoundingOffer),
         });
       } catch {
         /* ignore */
@@ -367,6 +370,12 @@ export function ThinkingView({
         <div ref={scrollRef} />
       </div>
 
+      <FoundingOfferBanner
+        visible={Boolean(usage?.showFoundingOffer)}
+        onDismissed={() =>
+          setUsage((u) => (u ? { ...u, showFoundingOffer: false } : u))
+        }
+      />
       {notice && (
         <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
           {notice}{" "}

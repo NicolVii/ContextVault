@@ -7,6 +7,7 @@ import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
 import { isStripeConfigured } from "@/lib/billing/products";
 import { isDevTopupAllowed } from "@/lib/billing/dev-topup";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
+import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 
 export default async function VaultPlanPage() {
   const supabase = createSupabaseServerClient();
@@ -18,6 +19,7 @@ export default async function VaultPlanPage() {
   const profile = await ensureUserProfile(supabase, user);
   if (!profile) redirect("/onboarding");
 
+  await ensureFreeSubscription(user.id);
   await ensureCreditAccount(user.id);
   const [balance, snap, recentRes] = await Promise.all([
     getCreditBalance(user.id),
