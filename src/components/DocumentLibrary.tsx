@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Upload, FileText, Trash2, Loader2, FileWarning } from "lucide-react";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import type { DocumentRecord } from "@/lib/types";
@@ -13,12 +14,24 @@ export function DocumentLibrary() {
   const [error, setError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<DocumentRecord | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attachmentsAllowed, setAttachmentsAllowed] = useState(true);
+  const [storageUsed, setStorageUsed] = useState(0);
+  const [storageCap, setStorageCap] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/documents");
-    const json = await res.json();
+    const [docsRes, usageRes] = await Promise.all([
+      fetch("/api/documents"),
+      fetch("/api/billing/usage"),
+    ]);
+    const json = await docsRes.json();
     setDocs(json.documents ?? []);
+    if (usageRes.ok) {
+      const usage = await usageRes.json();
+      setAttachmentsAllowed(Boolean(usage.entitlements?.attachments));
+      setStorageCap(Number(usage.entitlements?.storageBytes) || 0);
+      setStorageUsed(Number(usage.storageUsedBytes) || 0);
+    }
     setLoading(false);
   }, []);
 
@@ -51,37 +64,71 @@ export function DocumentLibrary() {
     load();
   }
 
+  const storagePct =
+    storageCap > 0 ? Math.min(100, Math.round((storageUsed / storageCap) * 100)) : 0;
+
   return (
     <div>
-      <div className="card flex flex-col items-center gap-3 border-dashed p-8 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-          {uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6" />}
+      {storageCap > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between text-xs text-ink-muted">
+            <span>Library storage</span>
+            <span>{storagePct}% used</span>
+          </div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-mist-100">
+            <div
+              className="h-full rounded-full bg-accent/80"
+              style={{ width: `${storagePct}%` }}
+            />
+          </div>
         </div>
-        <div>
-          <p className="font-medium text-brand-900">Upload a PDF or text file</p>
-          <p className="text-sm text-brand-600">
-            We extract the text, split it into searchable chunks and cite it in chat. Max 20 MiB.
+      )}
+
+      {!attachmentsAllowed ? (
+        <div className="rounded-2xl border border-mist-200 bg-mist-50 p-6 text-center">
+          <p className="text-sm font-medium text-ink">Files are on Lite and Pro</p>
+          <p className="mt-1 text-xs text-ink-muted">
+            Your memories stay available. Upgrade to attach documents.
           </p>
+          <Link href="/vault/plan" className="btn-primary mt-4 inline-flex text-xs">
+            View plans
+          </Link>
         </div>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) upload(f);
-          }}
-        />
-        <button
-          className="btn-primary"
-          disabled={uploading}
-          onClick={() => inputRef.current?.click()}
-        >
-          {uploading ? "Processing…" : "Choose file"}
-        </button>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-      </div>
+      ) : (
+        <div className="card flex flex-col items-center gap-3 border-dashed p-8 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+            {uploading ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <Upload className="h-6 w-6" />
+            )}
+          </div>
+          <div>
+            <p className="font-medium text-brand-900">Upload a PDF or text file</p>
+            <p className="text-sm text-brand-600">
+              We extract the text, split it into searchable chunks and cite it in chat. Max 20 MiB.
+            </p>
+          </div>
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) upload(f);
+            }}
+          />
+          <button
+            className="btn-primary"
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+          >
+            {uploading ? "Processing…" : "Choose file"}
+          </button>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+      )}
 
       <div className="mt-6">
         {loading ? (

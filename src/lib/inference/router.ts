@@ -56,16 +56,25 @@ function pickForPreset(preset: ModelPreset): ModelProfile {
   }
 }
 
+const AUTO_CHEAP_MIN = 0.7;
+
 function pickAuto(req: InferenceRequest): { profile: ModelProfile; reason: RouteReasonCode } {
+  const cheapOnly = Boolean(req.cheapOnlyRouting);
+  const cheapGate = (m: ModelProfile) =>
+    !cheapOnly || m.suitability.cheap >= AUTO_CHEAP_MIN;
+
   if (req.input.hasVisionAttachment) {
     return {
-      profile: bestBy((m) => m.suitability.vision, (m) => m.capabilities.vision),
+      profile: bestBy(
+        (m) => m.suitability.vision,
+        (m) => m.capabilities.vision && cheapGate(m)
+      ),
       reason: "vision_required",
     };
   }
 
   const contextChars = req.input.contextChars ?? 0;
-  if (contextChars >= LONG_CONTEXT_CHAR_THRESHOLD) {
+  if (contextChars >= LONG_CONTEXT_CHAR_THRESHOLD && !cheapOnly) {
     return {
       profile: bestBy((m) => m.suitability.longContext),
       reason: "long_context_required",
@@ -73,7 +82,7 @@ function pickAuto(req: InferenceRequest): { profile: ModelProfile; reason: Route
   }
 
   const lastUser = [...req.input.messages].reverse().find((m) => m.role === "user");
-  if (lastUser && CODING_HINT.test(lastUser.content)) {
+  if (lastUser && CODING_HINT.test(lastUser.content) && !cheapOnly) {
     return {
       profile: bestBy((m) => m.suitability.coding),
       reason: "coding_heuristic",
@@ -81,7 +90,10 @@ function pickAuto(req: InferenceRequest): { profile: ModelProfile; reason: Route
   }
 
   return {
-    profile: bestBy((m) => m.suitability.cheap * 0.6 + m.suitability.fast * 0.4),
+    profile: bestBy(
+      (m) => m.suitability.cheap * 0.6 + m.suitability.fast * 0.4,
+      cheapGate
+    ),
     reason: "cost_optimized",
   };
 }

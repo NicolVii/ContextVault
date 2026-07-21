@@ -250,19 +250,20 @@ checks, Vercel preview/production, hosted Supabase, and env separation.
 
 ## Billing & providers
 
-Inference is metered in **Cortaix credits**. Users buy credit packs or subscribe
-via Stripe (`/vault/settings` → Billing). OpenRouter / OpenAI / Anthropic /
-Google / Groq are adapters behind the Inference Router; optional BYOK keys are
-encrypted at rest and skip credit debit for matching providers.
+Inference is metered in **Cortaix credits** (internal). Customers see **Auto**
+vs **Frontier** on Plan & Usage (`/vault/plan`). Launch plans: **Free**, **Lite**,
+and **Pro** (EUR). Team/Max are not offered. Optional BYOK is **Pro-only** and
+skips credit debit when the plan allows it.
 
 **Model selection vs configuration:** everyday Auto / presets / models live in
 the Thinking composer **+** menu. Provider keys and the account default model
 live under Vault → Settings → Advanced.
 
 Locally, when `STRIPE_SECRET_KEY` is unset and `NODE_ENV !== production`, use
-**Dev top-up** on the billing panel. Dev top-up is **unconditionally disabled**
+**Dev top-up** on Plan & Usage. Dev top-up is **unconditionally disabled**
 in production (no env override). Configure Stripe price ids via `STRIPE_PRICE_*`
-env vars (see `.env.example`).
+env vars (see `.env.example`). Legal readiness checklist:
+[`docs/legal-readiness-checklist.md`](docs/legal-readiness-checklist.md).
 
 ### BYOK encryption
 

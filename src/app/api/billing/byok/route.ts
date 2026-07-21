@@ -29,6 +29,19 @@ export async function GET() {
 export async function PUT(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { getPlanUsageSnapshot } = await import("@/lib/billing/plan-usage");
+  const usage = await getPlanUsageSnapshot(ctx.user.id);
+  if (!usage.entitlements.byok) {
+    return NextResponse.json(
+      {
+        error: "Bring your own key is available on Pro.",
+        code: "byok_locked",
+      },
+      { status: 403 }
+    );
+  }
+
   const parsed = upsertSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });

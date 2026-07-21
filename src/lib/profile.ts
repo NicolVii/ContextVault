@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Profile } from "@/lib/types";
+import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 
 /** Resolve a display name from auth user metadata / email (never email itself). */
 export function displayNameFromUser(user: User): string | null {
@@ -48,9 +49,13 @@ export async function ensureUserProfile(
           .eq("id", user.id)
           .select("*")
           .maybeSingle();
-        if (updated) return updated as Profile;
+        if (updated) {
+          await ensureFreeSubscription(user.id).catch(() => undefined);
+          return updated as Profile;
+        }
       }
     }
+    await ensureFreeSubscription(user.id).catch(() => undefined);
     return existing as Profile;
   }
 
@@ -65,7 +70,10 @@ export async function ensureUserProfile(
     .select("*")
     .maybeSingle();
 
-  if (inserted) return inserted as Profile;
+  if (inserted) {
+    await ensureFreeSubscription(user.id).catch(() => undefined);
+    return inserted as Profile;
+  }
 
   // Concurrent insert (trigger or another request) — fetch again.
   if (insertError) {
@@ -74,7 +82,10 @@ export async function ensureUserProfile(
       .select("*")
       .eq("id", user.id)
       .maybeSingle();
-    if (again) return again as Profile;
+    if (again) {
+      await ensureFreeSubscription(user.id).catch(() => undefined);
+      return again as Profile;
+    }
     console.error("ensureUserProfile insert failed", insertError.message);
   }
 

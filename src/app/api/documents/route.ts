@@ -25,6 +25,26 @@ export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { getPlanUsageSnapshot } = await import("@/lib/billing/plan-usage");
+  const usage = await getPlanUsageSnapshot(ctx.user.id);
+  if (!usage.entitlements.attachments) {
+    return NextResponse.json(
+      {
+        error: "File uploads are available on Lite and Pro.",
+        code: "attachments_locked",
+      },
+      { status: 403 }
+    );
+  }
+
+  const { data: existingDocs } = await ctx.supabase
+    .from("documents")
+    .select("size_bytes");
+  const usedBytes = (existingDocs ?? []).reduce(
+    (n, d) => n + (Number(d.size_bytes) || 0),
+    0
+  );
+
   const limit = await checkRateLimit(ctx.user.id, "document_upload", 20, 3600);
   if (!limit.allowed) {
     return NextResponse.json({ error: "Upload limit reached" }, { status: 429 });
@@ -34,6 +54,16 @@ export async function POST(request: Request) {
   const file = form?.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  }
+
+  if (usedBytes + file.size > usage.entitlements.storageBytes) {
+    return NextResponse.json(
+      {
+        error: "File library storage limit reached for your plan.",
+        code: "storage_full",
+      },
+      { status: 403 }
+    );
   }
 
   // --- Validate file type and size ---
@@ -90,7 +120,10 @@ export async function POST(request: Request) {
 
     if (chunks.length > 0) {
       const embedder = getEmbeddingProvider();
-      const embeddings = await embedder.embed(chunks.map((c) => c.content));
+      const texts = chunks.map((c) => c.content);
+      const embeddings = await embedder.embed(texts);
+      const { meterEmbeddingUsage } = await import("@/lib/billing/meter-embed");
+      await meterEmbeddingUsage({ userId: user.id, texts });
       const rows = chunks.map((c, i) => ({
         document_id: docId,
         user_id: user.id,

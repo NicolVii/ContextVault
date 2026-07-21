@@ -1,9 +1,16 @@
 import { readOpenRouterApiKey } from "@/lib/ai";
 import type { ChatMessage } from "@/lib/ai/provider";
 import { loadUserProviderKey } from "@/lib/billing/byok";
+import {
+  assertPlanAllowsTurn,
+  classifyUsageIntensity,
+  getPlanUsageSnapshot,
+  PlanUsageBlockedError,
+  recordPlanTurn,
+} from "@/lib/billing";
 import { getAdapter } from "./adapters";
 import { resolveRoute } from "./router";
-import { settleUsage } from "./meter";
+import { settleUsage, computeCreditsCharged } from "./meter";
 import {
   assertCreditsAvailable,
   InsufficientCreditsError,
@@ -13,7 +20,7 @@ import { estimateTokensFromMessages } from "./usage";
 import { resolveModelProfile, type ProviderBinding } from "./models";
 import type { InferenceRequest, InferenceResult, UsageDraft } from "./types";
 
-export { InsufficientCreditsError };
+export { InsufficientCreditsError, PlanUsageBlockedError };
 
 function platformKeysFor(provider: string): string[] {
   if (provider === "openrouter") {
@@ -46,9 +53,11 @@ function platformKeysFor(provider: string): string[] {
 async function resolveApiKey(
   userId: string,
   provider: string,
-  billingMode: "platform" | "byok"
+  billingMode: "platform" | "byok",
+  allowByokFallback: boolean
 ): Promise<{ key: string; source: "platform" | "byok" } | null> {
   if (billingMode === "byok") {
+    if (!allowByokFallback) return null;
     const byok = await loadUserProviderKey(userId, provider);
     return byok ? { key: byok, source: "byok" } : null;
   }
@@ -59,7 +68,7 @@ async function resolveApiKey(
     return { key: platform[idx] ?? platform[0]!, source: "platform" };
   }
 
-  // Fall back to the user's own key when platform has none for this provider.
+  if (!allowByokFallback) return null;
   const byok = await loadUserProviderKey(userId, provider);
   return byok ? { key: byok, source: "byok" } : null;
 }
@@ -81,7 +90,18 @@ function orderedBindings(
  */
 export async function runInference(req: InferenceRequest): Promise<InferenceResult> {
   const started = Date.now();
-  const route = resolveRoute(req.selection, req);
+
+  const snap = await getPlanUsageSnapshot(req.userId);
+  const gatedReq: InferenceRequest = {
+    ...req,
+    cheapOnlyRouting: req.cheapOnlyRouting ?? snap.planId === "free",
+    // BYOK is a Pro entitlement; force platform billing otherwise.
+    billingMode:
+      req.billingMode === "byok" && !snap.entitlements.byok ? "platform" : req.billingMode,
+  };
+
+  const route = resolveRoute(gatedReq.selection, gatedReq);
+  const intensity = classifyUsageIntensity(gatedReq.selection, route.modelId);
   const profile = resolveModelProfile(route.modelId);
   const bindings = orderedBindings(
     { provider: route.provider, providerModelId: route.providerModelId },
@@ -92,19 +112,31 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
     1,
     Math.ceil(req.input.messages.reduce((n, m) => n + m.content.length, 0) / 4)
   );
+  const hold = estimateCreditsForPreflight(route.modelId, inputEstimate);
 
   let hasRunnable = false;
   for (const b of bindings) {
-    if (await resolveApiKey(req.userId, b.provider, req.billingMode)) {
+    if (
+      await resolveApiKey(
+        req.userId,
+        b.provider,
+        gatedReq.billingMode,
+        snap.entitlements.byok
+      )
+    ) {
       hasRunnable = true;
       break;
     }
   }
   const useMock = !hasRunnable;
 
-  const willCharge = req.billingMode === "platform" && !useMock;
+  const willCharge = gatedReq.billingMode === "platform" && !useMock;
   if (willCharge) {
-    const hold = estimateCreditsForPreflight(route.modelId, inputEstimate);
+    await assertPlanAllowsTurn({
+      userId: req.userId,
+      intensity,
+      estimatedCredits: hold,
+    });
     await assertCreditsAvailable(req.userId, hold);
   }
 
@@ -114,7 +146,7 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
     null;
   let usedProvider = route.provider;
   let usedProviderModelId = route.providerModelId;
-  let effectiveBillingMode = req.billingMode;
+  let effectiveBillingMode = gatedReq.billingMode;
   const errors: string[] = [];
 
   if (useMock) {
@@ -131,7 +163,12 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
     for (const binding of bindings) {
       const adapter = getAdapter(binding.provider);
       if (!adapter) continue;
-      const resolved = await resolveApiKey(req.userId, binding.provider, req.billingMode);
+      const resolved = await resolveApiKey(
+        req.userId,
+        binding.provider,
+        gatedReq.billingMode,
+        snap.entitlements.byok
+      );
       if (!resolved) {
         errors.push(`${binding.provider}: no api key`);
         continue;
@@ -146,7 +183,10 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
         });
         usedProvider = binding.provider;
         usedProviderModelId = binding.providerModelId;
-        if (resolved.source === "byok") effectiveBillingMode = "byok";
+        // Only honor BYOK debit skip when the plan allows BYOK.
+        if (resolved.source === "byok" && snap.entitlements.byok) {
+          effectiveBillingMode = "byok";
+        }
         break;
       } catch (err) {
         errors.push(
@@ -188,7 +228,20 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
     usage = { ...usageBase, ...est };
   }
 
-  await settleUsage(usage);
+  const settlement = await settleUsage(usage);
+  const charged =
+    settlement.creditsCharged ||
+    computeCreditsCharged(usage);
+
+  if (effectiveBillingMode === "platform" && !useMock) {
+    await recordPlanTurn({
+      userId: req.userId,
+      planId: snap.planId,
+      intensity,
+      credits: charged,
+      modelId: route.modelId,
+    });
+  }
 
   return {
     requestId: req.requestId,

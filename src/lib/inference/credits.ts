@@ -7,7 +7,7 @@ export class InsufficientCreditsError extends Error {
 
   constructor(balance: number, required: number) {
     super(
-      `Insufficient credits: need ${required}, have ${balance}. Top up your wallet to continue.`
+      `Usage unavailable right now (need ${required}, have ${balance}). Check Plan & Usage to continue.`
     );
     this.name = "InsufficientCreditsError";
     this.balance = balance;

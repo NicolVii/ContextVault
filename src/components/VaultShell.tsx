@@ -12,6 +12,7 @@ const TITLES: Record<string, string> = {
   "/vault/memories": "Memories",
   "/vault/files": "Files",
   "/vault/review": "Review",
+  "/vault/plan": "Plan & Usage",
   "/vault/settings": "Settings",
   "/vault/connections": "Connections",
 };

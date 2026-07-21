@@ -6,13 +6,22 @@ import { Mic, MicOff, Plus, Send, Paperclip, X } from "lucide-react";
 import { BRAND } from "@/lib/brand";
 import { AUTO_MODEL_ID, modelLabel } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
-import { ComposerPlusMenu } from "@/components/ComposerPlusMenu";
+import { ComposerPlusMenu, type ComposerPlanHints } from "@/components/ComposerPlusMenu";
+import { FoundingOfferBanner } from "@/components/FoundingOfferBanner";
 import {
   ResponseInfoButton,
   type ResponseInfoMeta,
 } from "@/components/ResponseInfoButton";
 
 const MODEL_STORAGE_KEY = "think-model-choice";
+
+type UsageHints = ComposerPlanHints & {
+  autoRemaining: number | null;
+  frontierHeavy: boolean;
+  inferenceRestricted: boolean;
+  unlimitedAuto: boolean;
+  showFoundingOffer: boolean;
+};
 
 type ThreadItem =
   | {
@@ -82,6 +91,7 @@ export function ThinkingView({
   const [notice, setNotice] = useState<string | null>(null);
   const [ephemeral, setEphemeral] = useState<string | null>(null);
   const [modelChoice, setModelChoice] = useState<string>(AUTO_MODEL_ID);
+  const [usage, setUsage] = useState<UsageHints | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -90,6 +100,36 @@ export function ThinkingView({
 
   useEffect(() => {
     setModelChoice(readStoredModel());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUsage() {
+      try {
+        const res = await fetch("/api/billing/usage");
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        setUsage({
+          attachments: Boolean(json.entitlements?.attachments),
+          frontierAllowed: (json.entitlements?.frontierMonthlyTurns ?? 0) !== 0,
+          frontierRemaining: json.frontierRemaining ?? null,
+          byok: Boolean(json.entitlements?.byok),
+          voice: Boolean(json.entitlements?.voice),
+          autoRemaining: json.autoRemaining ?? null,
+          frontierHeavy: Boolean(json.frontierHeavy),
+          inferenceRestricted: Boolean(json.inferenceRestricted),
+          unlimitedAuto: Boolean(json.entitlements?.unlimitedAuto),
+          showFoundingOffer: Boolean(json.showFoundingOffer),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    void loadUsage();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -151,6 +191,10 @@ export function ThinkingView({
   }
 
   function toggleVoice() {
+    if (usage && !usage.voice) {
+      setError("Voice is included with Pro.");
+      return;
+    }
     const SpeechRecognitionCtor =
       typeof window !== "undefined"
         ? window.SpeechRecognition || window.webkitSpeechRecognition
@@ -326,12 +370,55 @@ export function ThinkingView({
         <div ref={scrollRef} />
       </div>
 
+      <FoundingOfferBanner
+        visible={Boolean(usage?.showFoundingOffer)}
+        onDismissed={() =>
+          setUsage((u) => (u ? { ...u, showFoundingOffer: false } : u))
+        }
+      />
       {notice && (
         <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
           {notice}{" "}
           <Link href="/vault/review" className="font-medium underline">
             Review
           </Link>
+        </div>
+      )}
+      {usage?.inferenceRestricted && (
+        <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          AI usage is paused due to a billing problem.{" "}
+          <Link href="/vault/plan" className="font-medium underline">
+            Plan &amp; Usage
+          </Link>
+        </div>
+      )}
+      {usage &&
+        !usage.inferenceRestricted &&
+        usage.autoRemaining != null &&
+        usage.autoRemaining <= 3 &&
+        usage.autoRemaining > 0 && (
+          <div className="mb-3 text-center text-xs text-ink-muted">
+            About {usage.autoRemaining} Auto conversations left this month.{" "}
+            <Link href="/vault/plan" className="underline">
+              View plan
+            </Link>
+          </div>
+        )}
+      {usage &&
+        !usage.inferenceRestricted &&
+        usage.frontierRemaining != null &&
+        usage.frontierRemaining <= 2 &&
+        usage.frontierAllowed && (
+          <div className="mb-3 text-center text-xs text-ink-muted">
+            Frontier · {usage.frontierRemaining} left this month.{" "}
+            <Link href="/vault/plan" className="underline">
+              Upgrade
+            </Link>
+          </div>
+        )}
+      {usage?.frontierHeavy && (
+        <div className="mb-3 text-center text-xs text-ink-muted">
+          You’re using Frontier heavily this period.
         </div>
       )}
       {error && (
@@ -392,6 +479,7 @@ export function ThinkingView({
               modelChoice={modelChoice}
               onSelectModel={selectModel}
               onUploadFile={() => fileRef.current?.click()}
+              plan={usage}
             />
             <input
               ref={fileRef}
