@@ -97,6 +97,39 @@ describe("Mem0Client", () => {
       top_k: 5,
     });
   });
+
+  it("deletes a single memory and ignores 404 when requested", async () => {
+    const fetchImpl = viFetchSequence([
+      { ok: false, status: 404, json: async () => ({ detail: "not found" }) },
+    ]) as ReturnType<typeof vi.fn>;
+
+    const client = new Mem0Client({
+      apiKey: "test-key",
+      baseUrl: "https://mem0.test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await expect(
+      client.deleteMemory("missing-id", { ignoreNotFound: true })
+    ).resolves.toBeUndefined();
+  });
+
+  it("deletes all memories for a user", async () => {
+    const fetchImpl = viFetchSequence([
+      { ok: true, status: 200, json: async () => ({}) },
+    ]) as ReturnType<typeof vi.fn>;
+
+    const client = new Mem0Client({
+      apiKey: "test-key",
+      baseUrl: "https://mem0.test",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await client.deleteAllForUser("user-1");
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      "https://mem0.test/v1/memories/?user_id=user-1"
+    );
+  });
 });
 
 describe("readMem0ApiKey", () => {

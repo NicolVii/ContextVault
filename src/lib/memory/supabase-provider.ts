@@ -64,4 +64,16 @@ export class SupabaseMemoryProvider implements MemoryProvider {
       .eq("id", memoryId);
     if (error) throw new Error(`Failed to re-embed memory: ${error.message}`);
   }
+
+  async remove(): Promise<void> {
+    // pgvector rows are removed when the Supabase row is deleted.
+  }
+
+  async syncMetadata(): Promise<void> {
+    // Supabase is the only index for this provider.
+  }
+
+  async removeAll(): Promise<void> {
+    // Supabase rows are removed by the caller.
+  }
 }

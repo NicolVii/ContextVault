@@ -180,7 +180,8 @@ With Mem0 enabled the app uses a **hybrid** model: Supabase remains the
 canonical store (UI, review queue, RLS, export) while Mem0 owns embeddings and
 retrieval. Each memory is mirrored to Mem0 with `infer: false` (verbatim
 content) and Context Vault metadata; the Mem0 id is stored in `source_detail`
-as `mem0:<uuid>` for updates.
+as `mem0:<uuid>` for updates. Deletes, bulk wipes, and review-queue status
+changes are synced back to Mem0 automatically.
 
 ### Memory extraction
 

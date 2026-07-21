@@ -104,16 +104,32 @@ export class Mem0Client {
 
   async updateMemory(
     mem0Id: string,
-    params: { text: string; metadata?: CvMem0Metadata }
+    params: { text: string; metadata?: CvMem0Metadata; expirationDate?: string | null }
   ): Promise<void> {
     await this.request("PUT", `/v1/memories/${mem0Id}/`, {
       text: params.text,
       ...(params.metadata ? { metadata: params.metadata } : {}),
+      ...(params.expirationDate ? { expiration_date: params.expirationDate } : {}),
     });
   }
 
-  async deleteMemory(mem0Id: string): Promise<void> {
-    await this.request("DELETE", `/v1/memories/${mem0Id}/`);
+  async deleteMemory(mem0Id: string, options?: { ignoreNotFound?: boolean }): Promise<void> {
+    try {
+      await this.request("DELETE", `/v1/memories/${mem0Id}/`);
+    } catch (err) {
+      if (
+        options?.ignoreNotFound &&
+        err instanceof Error &&
+        err.message.includes("(404)")
+      ) {
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async deleteAllForUser(userId: string): Promise<void> {
+    await this.request("DELETE", `/v1/memories/?user_id=${encodeURIComponent(userId)}`);
   }
 
   private async waitForEvent(eventId: string): Promise<Mem0EventResponse> {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
+import { getMemoryProvider } from "@/lib/memory";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { recordAudit } from "@/lib/audit";
 
@@ -20,6 +21,7 @@ export async function DELETE(request: Request) {
   const { supabase, user } = ctx;
 
   if (scope === "memories") {
+    await getMemoryProvider().removeAll(supabase, user.id);
     const { error } = await supabase
       .from("memories")
       .delete()
@@ -32,6 +34,7 @@ export async function DELETE(request: Request) {
   // Full account deletion. Remove stored files, then delete the auth user,
   // which cascades to every table via ON DELETE CASCADE foreign keys.
   await recordAudit({ userId: user.id, action: "account.delete" });
+  await getMemoryProvider().removeAll(supabase, user.id);
   const admin = createSupabaseAdminClient();
 
   const { data: files } = await admin.storage.from("documents").list(user.id, {

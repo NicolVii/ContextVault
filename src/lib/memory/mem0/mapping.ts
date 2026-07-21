@@ -1,5 +1,4 @@
 import type { MemorySource, MemoryStatus, MemoryType } from "@/lib/types";
-import type { NewMemory } from "../provider";
 
 const MEM0_ID_PREFIX = "mem0:";
 
@@ -8,16 +7,28 @@ export interface CvMem0Metadata {
   cv_memory_id: string;
   type: MemoryType;
   source: MemorySource;
-  status: MemoryStatus | "active" | "proposed";
+  status: MemoryStatus;
   category?: string | null;
   source_detail?: string | null;
   confidence?: number;
   is_sensitive?: boolean;
 }
 
+export interface Mem0MetadataInput {
+  content: string;
+  type: MemoryType;
+  source: MemorySource;
+  status?: MemoryStatus;
+  category?: string | null;
+  source_detail?: string | null;
+  confidence?: number;
+  is_sensitive?: boolean;
+  expires_at?: string | null;
+}
+
 export function buildMem0Metadata(
   memoryId: string,
-  memory: NewMemory
+  memory: Mem0MetadataInput
 ): CvMem0Metadata {
   return {
     cv_memory_id: memoryId,

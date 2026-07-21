@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Memory, MemorySource, MemoryType, RetrievedMemory } from "@/lib/types";
+import type { Memory, MemorySource, MemoryStatus, MemoryType, RetrievedMemory } from "@/lib/types";
 import type { MemoryProvider, NewMemory, RetrieveOptions } from "./provider";
 import { Mem0Client } from "./mem0/client";
 import {
@@ -181,6 +181,37 @@ export class Mem0MemoryProvider implements MemoryProvider {
     memoryId: string,
     content: string
   ): Promise<void> {
+    const row = await this.loadRow(client, memoryId);
+    const mem0Id = this.requireMem0Id(row.source_detail);
+    await this.client.updateMemory(mem0Id, {
+      text: content,
+      metadata: this.metadataFromRow(row, content),
+      expirationDate: toExpirationDate(row.expires_at),
+    });
+  }
+
+  async remove(client: SupabaseClient, memoryId: string): Promise<void> {
+    const row = await this.loadRow(client, memoryId);
+    const mem0Id = parseMem0Id(row.source_detail);
+    if (!mem0Id) return;
+    await this.client.deleteMemory(mem0Id, { ignoreNotFound: true });
+  }
+
+  async syncMetadata(client: SupabaseClient, memoryId: string): Promise<void> {
+    const row = await this.loadRow(client, memoryId);
+    const mem0Id = this.requireMem0Id(row.source_detail);
+    await this.client.updateMemory(mem0Id, {
+      text: row.content,
+      metadata: this.metadataFromRow(row),
+      expirationDate: toExpirationDate(row.expires_at),
+    });
+  }
+
+  async removeAll(_client: SupabaseClient, userId: string): Promise<void> {
+    await this.client.deleteAllForUser(userId);
+  }
+
+  private async loadRow(client: SupabaseClient, memoryId: string) {
     const { data, error } = await client
       .from("memories")
       .select(
@@ -189,27 +220,54 @@ export class Mem0MemoryProvider implements MemoryProvider {
       .eq("id", memoryId)
       .maybeSingle();
 
-    if (error) throw new Error(`Failed to load memory for re-embed: ${error.message}`);
+    if (error) throw new Error(`Failed to load memory: ${error.message}`);
     if (!data) throw new Error("Memory not found");
+    return data as {
+      id: string;
+      user_id: string;
+      content: string;
+      type: MemoryType;
+      source: MemorySource;
+      source_detail: string | null;
+      category: string | null;
+      confidence: number;
+      status: MemoryStatus;
+      is_sensitive: boolean;
+      expires_at: string | null;
+    };
+  }
 
-    const mem0Id = parseMem0Id(data.source_detail);
-    if (!mem0Id) {
-      throw new Error("No Mem0 id linked to this memory");
-    }
+  private requireMem0Id(sourceDetail: string | null): string {
+    const mem0Id = parseMem0Id(sourceDetail);
+    if (!mem0Id) throw new Error("No Mem0 id linked to this memory");
+    return mem0Id;
+  }
 
-    await this.client.updateMemory(mem0Id, {
-      text: content,
-      metadata: buildMem0Metadata(data.id, {
-        content,
-        type: data.type,
-        source: data.source,
-        source_detail: data.source_detail,
-        category: data.category,
-        confidence: data.confidence,
-        status: data.status,
-        is_sensitive: data.is_sensitive,
-        expires_at: data.expires_at,
-      }),
+  private metadataFromRow(
+    row: {
+      id: string;
+      content: string;
+      type: MemoryType;
+      source: MemorySource;
+      source_detail: string | null;
+      category: string | null;
+      confidence: number;
+      status: MemoryStatus;
+      is_sensitive: boolean;
+      expires_at: string | null;
+    },
+    content = row.content
+  ) {
+    return buildMem0Metadata(row.id, {
+      content,
+      type: row.type,
+      source: row.source,
+      source_detail: row.source_detail,
+      category: row.category,
+      confidence: row.confidence,
+      status: row.status,
+      is_sensitive: row.is_sensitive,
+      expires_at: row.expires_at,
     });
   }
 

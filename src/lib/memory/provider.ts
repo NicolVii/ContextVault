@@ -45,4 +45,10 @@ export interface MemoryProvider {
   ): Promise<RetrievedMemory[]>;
   /** Re-embed a single memory after its content is edited. */
   reembed(client: SupabaseClient, memoryId: string, content: string): Promise<void>;
+  /** Remove a memory from the external search index (row deleted separately). */
+  remove(client: SupabaseClient, memoryId: string): Promise<void>;
+  /** Push the latest Supabase fields to the external index (status, type, …). */
+  syncMetadata(client: SupabaseClient, memoryId: string): Promise<void>;
+  /** Remove every external memory for a user (bulk row delete handled separately). */
+  removeAll(client: SupabaseClient, userId: string): Promise<void>;
 }
