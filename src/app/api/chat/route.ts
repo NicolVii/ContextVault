@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getMemoryProvider } from "@/lib/memory";
 import { extractCandidates } from "@/lib/memory/extraction";
-import { buildSystemPrompt } from "@/lib/ai/context";
+import { buildSystemPrompt, toUserIdentity } from "@/lib/ai/context";
 import { getChatProvider, type ChatMessage } from "@/lib/ai";
 import { isValidModel } from "@/lib/ai/models";
 import { chatRequestSchema } from "@/lib/validation";
@@ -80,10 +80,18 @@ export async function POST(request: Request) {
     (c) => c.similarity >= MIN_SIMILARITY
   );
 
-  // 3. Build the system prompt with a separated USER CONTEXT section.
-  const { systemPrompt } = buildSystemPrompt(usedMemories, usedChunks);
+  // 3. Load allowlisted account identity (name / persona only) for this user.
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name, persona")
+    .eq("id", user.id)
+    .maybeSingle();
+  const identity = toUserIdentity(profile);
 
-  // 4. Load recent history for conversational continuity.
+  // 4. Build the system prompt with USER IDENTITY + USER CONTEXT sections.
+  const { systemPrompt } = buildSystemPrompt(usedMemories, usedChunks, identity);
+
+  // 5. Load recent history for conversational continuity.
   const { data: history } = await supabase
     .from("chat_messages")
     .select("role, content")
@@ -95,7 +103,7 @@ export async function POST(request: Request) {
     .reverse()
     .map((m) => ({ role: m.role, content: m.content }));
 
-  // 5. Persist the user's message.
+  // 6. Persist the user's message.
   await supabase.from("chat_messages").insert({
     session_id: sessionId,
     user_id: user.id,
@@ -103,7 +111,7 @@ export async function POST(request: Request) {
     content: message,
   });
 
-  // 6. Call the model through the active chat provider (OpenRouter or mock).
+  // 7. Call the model through the active chat provider (OpenRouter or mock).
   let result;
   try {
     result = await getChatProvider().complete(model, [
@@ -118,7 +126,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // 7. Persist the assistant message and its context provenance.
+  // 8. Persist the assistant message and its context provenance.
   const { data: assistantMsg, error: amErr } = await supabase
     .from("chat_messages")
     .insert({
@@ -150,7 +158,7 @@ export async function POST(request: Request) {
     await supabase.from("message_context").insert(contextRows);
   }
 
-  // 8. Extract candidate memories → review queue (never auto-active).
+  // 9. Extract candidate memories → review queue (never auto-active).
   // Uses the ExtractionProvider (LLM when available, heuristics offline).
   const candidates = await extractCandidates(message);
   let proposedCount = 0;
