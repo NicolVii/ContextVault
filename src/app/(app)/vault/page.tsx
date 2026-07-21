@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronRight, Search } from "lucide-react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { BRAND } from "@/lib/brand";
+import { SignOutButton } from "@/components/SignOutButton";
 
 export default async function VaultHubPage() {
   const supabase = createSupabaseServerClient();
@@ -28,7 +29,7 @@ export default async function VaultHubPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg">
+    <div className="mx-auto flex max-w-lg flex-col">
       <p className="mb-6 text-sm text-ink-muted">
         The backstage of {BRAND.name}. Your Thinking screen stays clear.
       </p>
@@ -74,6 +75,10 @@ export default async function VaultHubPage() {
           <ChevronRight className="h-4 w-4 text-ink-faint" />
         </Link>
       </nav>
+
+      <div className="mt-10 border-t border-mist-100 pt-2">
+        <SignOutButton />
+      </div>
     </div>
   );
 }

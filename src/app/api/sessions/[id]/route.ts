@@ -20,7 +20,7 @@ export async function GET(
 
   const { data: messages, error: mErr } = await ctx.supabase
     .from("chat_messages")
-    .select("id, role, content, created_at")
+    .select("id, role, content, model, created_at")
     .eq("session_id", params.id)
     .order("created_at", { ascending: true })
     .limit(100);

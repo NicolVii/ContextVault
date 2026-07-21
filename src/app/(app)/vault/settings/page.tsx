@@ -3,7 +3,6 @@ import { ShieldCheck, ChevronDown } from "lucide-react";
 import { DangerZone } from "@/components/DangerZone";
 import { ProfileFields } from "@/components/ProfileFields";
 import { AdvancedModelSettings } from "@/components/AdvancedModelSettings";
-import { SignOutButton } from "@/components/SignOutButton";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ensureUserProfile } from "@/lib/profile";
 import { formatDate } from "@/lib/utils";
@@ -74,15 +73,11 @@ export default async function VaultSettingsPage() {
           </summary>
           <div className="border-t border-mist-200 px-4 py-4">
             <p className="mb-4 text-xs text-ink-muted">
-              Technical configuration. Most people never need this.
+              Default model used when Auto is selected. Most people never need this.
             </p>
             <AdvancedModelSettings defaultModel={(profile as Profile).default_model} />
           </div>
         </details>
-      </section>
-
-      <section>
-        <SignOutButton />
       </section>
     </div>
   );

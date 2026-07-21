@@ -4,8 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Mic, MicOff, Plus, Send, Paperclip, X } from "lucide-react";
 import { BRAND } from "@/lib/brand";
+import { AUTO_MODEL_ID, modelLabel } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
-import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
+import { ComposerPlusMenu } from "@/components/ComposerPlusMenu";
+import {
+  ResponseInfoButton,
+  type ResponseInfoMeta,
+} from "@/components/ResponseInfoButton";
+
+const MODEL_STORAGE_KEY = "think-model-choice";
 
 type ThreadItem =
   | {
@@ -15,27 +22,13 @@ type ThreadItem =
     }
   | {
       id: string;
-      kind: "remembered";
+      kind: "reply";
       content: string;
-      memoryId: string;
-      undone?: boolean;
-    }
-  | {
-      id: string;
-      kind: "confirmation";
-      content: string;
-    }
-  | {
-      id: string;
-      kind: "answer";
-      content: string;
-      usedMemories?: RetrievedMemory[];
-      usedChunks?: RetrievedChunk[];
+      meta: ResponseInfoMeta;
     };
 
 declare global {
   interface Window {
-    // Web Speech API — not in all TS DOM libs consistently.
     webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     SpeechRecognition?: new () => SpeechRecognitionLike;
   }
@@ -59,6 +52,16 @@ function greetingFor(name?: string | null) {
   return name ? `${hello}, ${name}` : hello;
 }
 
+function readStoredModel(): string {
+  if (typeof window === "undefined") return AUTO_MODEL_ID;
+  try {
+    const v = sessionStorage.getItem(MODEL_STORAGE_KEY);
+    return v || AUTO_MODEL_ID;
+  } catch {
+    return AUTO_MODEL_ID;
+  }
+}
+
 export function ThinkingView({
   displayName,
   reviewCount = 0,
@@ -74,15 +77,20 @@ export function ThinkingView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-  const [attachOpen, setAttachOpen] = useState(false);
+  const [plusOpen, setPlusOpen] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [basedOnId, setBasedOnId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [ephemeral, setEphemeral] = useState<string | null>(null);
+  const [modelChoice, setModelChoice] = useState<string>(AUTO_MODEL_ID);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   const hasContent = input.trim().length > 0 || Boolean(pendingFile);
+
+  useEffect(() => {
+    setModelChoice(readStoredModel());
+  }, []);
 
   useEffect(() => {
     if (!initialSessionId) return;
@@ -93,11 +101,20 @@ export function ThinkingView({
       if (!res.ok || cancelled) return;
       setSessionId(json.session?.id ?? initialSessionId);
       const items: ThreadItem[] = (json.messages ?? []).map(
-        (m: { id: string; role: string; content: string }) => {
+        (m: { id: string; role: string; content: string; model?: string; created_at?: string }) => {
           if (m.role === "user") {
             return { id: m.id, kind: "user" as const, content: m.content };
           }
-          return { id: m.id, kind: "answer" as const, content: m.content };
+          return {
+            id: m.id,
+            kind: "reply" as const,
+            content: m.content,
+            meta: {
+              createdAt: m.created_at ?? new Date().toISOString(),
+              modelLabel: m.model ? modelLabel(m.model) : "Auto",
+              memoryRegistered: false,
+            },
+          };
         }
       );
       setThread(items);
@@ -110,13 +127,28 @@ export function ThinkingView({
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [thread, busy]);
+  }, [thread, busy, ephemeral]);
 
   useEffect(() => {
     return () => {
       recognitionRef.current?.stop();
     };
   }, []);
+
+  useEffect(() => {
+    if (!ephemeral) return;
+    const t = setTimeout(() => setEphemeral(null), 2200);
+    return () => clearTimeout(t);
+  }, [ephemeral]);
+
+  function selectModel(id: string) {
+    setModelChoice(id);
+    try {
+      sessionStorage.setItem(MODEL_STORAGE_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }
 
   function toggleVoice() {
     const SpeechRecognitionCtor =
@@ -158,23 +190,15 @@ export function ThinkingView({
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error ?? "Could not attach file");
     setPendingFile(null);
-    setAttachOpen(false);
     return json.document?.filename ?? pendingFile.name;
   }
 
-  async function undoMemory(itemId: string, memoryId: string) {
-    const res = await fetch(`/api/memories/${memoryId}`, { method: "DELETE" });
-    if (!res.ok) {
-      setError("Could not undo");
-      return;
-    }
-    setThread((items) =>
-      items.map((item) =>
-        item.id === itemId && item.kind === "remembered"
-          ? { ...item, undone: true }
-          : item
-      )
-    );
+  function metaFromJson(json: Record<string, unknown>): ResponseInfoMeta {
+    return {
+      createdAt: (json.createdAt as string) ?? new Date().toISOString(),
+      modelLabel: (json.modelLabel as string) ?? "Auto",
+      memoryRegistered: Boolean(json.memoryRegistered),
+    };
   }
 
   async function submit(e?: React.FormEvent) {
@@ -199,8 +223,13 @@ export function ThinkingView({
             ...t,
             {
               id: crypto.randomUUID(),
-              kind: "confirmation",
+              kind: "reply",
               content: `Saved ${filename} to Files.`,
+              meta: {
+                createdAt: new Date().toISOString(),
+                modelLabel: "Auto",
+                memoryRegistered: false,
+              },
             },
           ]);
           setBusy(false);
@@ -211,30 +240,24 @@ export function ThinkingView({
       const res = await fetch("/api/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, sessionId }),
+        body: JSON.stringify({ message, sessionId, model: modelChoice }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Request failed");
 
       if (json.sessionId) setSessionId(json.sessionId);
 
-      if (json.intent === "statement" || (json.intent === "instruction" && json.undoMemoryId)) {
-        setThread((t) => [
-          ...t,
-          {
-            id: crypto.randomUUID(),
-            kind: "remembered",
-            content: json.confirmation ?? "Remembered",
-            memoryId: json.undoMemoryId ?? json.memory?.id,
-          },
-        ]);
+      if (json.intent === "statement") {
+        // Quiet capture — no large Remembered / Undo in the thread.
+        setEphemeral("Saved");
       } else if (json.intent === "instruction") {
         setThread((t) => [
           ...t,
           {
             id: crypto.randomUUID(),
-            kind: "confirmation",
+            kind: "reply",
             content: json.confirmation ?? "Done.",
+            meta: metaFromJson(json),
           },
         ]);
       } else {
@@ -242,10 +265,9 @@ export function ThinkingView({
           ...t,
           {
             id: crypto.randomUUID(),
-            kind: "answer",
+            kind: "reply",
             content: json.message?.content ?? "",
-            usedMemories: json.usedMemories,
-            usedChunks: json.usedChunks,
+            meta: metaFromJson(json),
           },
         ]);
       }
@@ -267,7 +289,7 @@ export function ThinkingView({
   return (
     <div className="flex flex-1 flex-col">
       <div className="flex-1 space-y-6 overflow-y-auto pb-4 pt-6 sm:pt-16">
-        {thread.length === 0 && (
+        {thread.length === 0 && !ephemeral && (
           <div className="animate-fade-in flex flex-col items-center justify-center px-4 pt-10 text-center sm:pt-20">
             <p className="font-display text-3xl font-medium tracking-tight text-ink sm:text-4xl">
               {greetingFor(displayName)}
@@ -285,63 +307,20 @@ export function ThinkingView({
                 {item.content}
               </p>
             )}
-            {item.kind === "remembered" && (
-              <div className="flex items-center gap-3 text-sm text-ink-muted">
-                <span className={cn(item.undone && "line-through opacity-50")}>
-                  {item.undone ? "Removed" : item.content}
-                </span>
-                {!item.undone && (
-                  <button
-                    type="button"
-                    className="text-accent hover:underline"
-                    onClick={() => undoMemory(item.id, item.memoryId)}
-                  >
-                    Undo
-                  </button>
-                )}
-              </div>
-            )}
-            {item.kind === "confirmation" && (
-              <p className="text-sm leading-relaxed text-ink-muted">{item.content}</p>
-            )}
-            {item.kind === "answer" && (
+            {item.kind === "reply" && (
               <div>
                 <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink">
                   {item.content}
                 </p>
-                {((item.usedMemories?.length ?? 0) > 0 ||
-                  (item.usedChunks?.length ?? 0) > 0) && (
-                  <div className="mt-2">
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-ink-faint hover:text-accent"
-                      onClick={() =>
-                        setBasedOnId(basedOnId === item.id ? null : item.id)
-                      }
-                    >
-                      Based on…
-                    </button>
-                    {basedOnId === item.id && (
-                      <ul className="mt-2 space-y-1.5 rounded-xl bg-white/70 p-3 text-xs text-ink-muted">
-                        {item.usedMemories?.map((m) => (
-                          <li key={m.id} className="leading-snug">
-                            {m.content}
-                          </li>
-                        ))}
-                        {item.usedChunks?.map((c) => (
-                          <li key={c.id} className="leading-snug">
-                            {c.filename}
-                            {c.page_number ? ` · p.${c.page_number}` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
+                <ResponseInfoButton meta={item.meta} />
               </div>
             )}
           </div>
         ))}
+
+        {ephemeral && (
+          <p className="animate-fade-in text-xs text-ink-faint">{ephemeral}</p>
+        )}
 
         {busy && <p className="text-sm text-ink-faint">Thinking…</p>}
         <div ref={scrollRef} />
@@ -397,27 +376,23 @@ export function ThinkingView({
           <div className="relative">
             <button
               type="button"
-              aria-label="Add attachment"
-              className="rounded-xl p-2 text-ink-muted hover:bg-mist-50 hover:text-ink"
-              onClick={() => setAttachOpen((o) => !o)}
+              aria-label="More options"
+              aria-expanded={plusOpen}
+              className={cn(
+                "rounded-xl p-2 text-ink-muted hover:bg-mist-50 hover:text-ink",
+                plusOpen && "bg-mist-50 text-ink"
+              )}
+              onClick={() => setPlusOpen((o) => !o)}
             >
               <Plus className="h-5 w-5" />
             </button>
-            {attachOpen && (
-              <div className="absolute bottom-full left-0 mb-2 w-44 rounded-xl border border-mist-200 bg-white p-1 shadow-soft">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-mist-50"
-                  onClick={() => {
-                    fileRef.current?.click();
-                    setAttachOpen(false);
-                  }}
-                >
-                  <Paperclip className="h-4 w-4 text-ink-muted" />
-                  Attach file
-                </button>
-              </div>
-            )}
+            <ComposerPlusMenu
+              open={plusOpen}
+              onClose={() => setPlusOpen(false)}
+              modelChoice={modelChoice}
+              onSelectModel={selectModel}
+              onUploadFile={() => fileRef.current?.click()}
+            />
             <input
               ref={fileRef}
               type="file"
