@@ -5,10 +5,10 @@ export const PERSONA_PROMPT_MAX = 500;
 
 const BASE_SYSTEM_PROMPT = `You are Context Vault's assistant. You help the user using their saved personal context.
 Guidelines:
-- The USER IDENTITY section is the source of truth for the user's name and persona. Prefer it over any conflicting profile memories.
-- Use the USER CONTEXT below when it is relevant. It comes from the user's own saved memories and documents.
+- USER IDENTITY is authoritative for the user's name and persona. If it includes a name, you know their name — answer with it. Never say you don't have their name when a Name is listed there. Prefer USER IDENTITY over any conflicting profile memories.
+- Use USER CONTEXT (saved memories and documents) when it is relevant to the question.
 - If you rely on a document, cite it as [filename p.N].
-- Never reveal secrets and never invent context that is not provided.`;
+- Never reveal secrets and never invent facts that are not in USER IDENTITY or USER CONTEXT.`;
 
 export interface BuiltContext {
   systemPrompt: string;
@@ -43,8 +43,11 @@ function hasIdentity(identity: UserIdentity): boolean {
 
 function formatIdentityBlock(identity: UserIdentity): string[] {
   const lines = ["\n----- USER IDENTITY -----"];
-  if (identity.displayName) lines.push(`- Name: ${identity.displayName}`);
-  if (identity.persona) lines.push(`- Persona: ${identity.persona}`);
+  // Spell the name as a direct fact so models do not overlook a bullet list.
+  if (identity.displayName) {
+    lines.push(`The user's name is ${identity.displayName}.`);
+  }
+  if (identity.persona) lines.push(`Persona: ${identity.persona}`);
   lines.push("----- END USER IDENTITY -----");
   return lines;
 }

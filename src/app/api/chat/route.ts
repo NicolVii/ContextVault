@@ -5,6 +5,7 @@ import { extractCandidates } from "@/lib/memory/extraction";
 import { buildSystemPrompt, toUserIdentity } from "@/lib/ai/context";
 import { getChatProvider, type ChatMessage } from "@/lib/ai";
 import { isValidModel } from "@/lib/ai/models";
+import { displayNameFromUser } from "@/lib/profile";
 import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
@@ -81,12 +82,20 @@ export async function POST(request: Request) {
   );
 
   // 3. Load allowlisted account identity (name / persona only) for this user.
-  const { data: profile } = await supabase
+  // Prefer profiles.display_name; fall back to auth metadata / email local-part
+  // so Google users still get a name when the profiles row was never filled in.
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("display_name, persona")
     .eq("id", user.id)
     .maybeSingle();
-  const identity = toUserIdentity(profile);
+  if (profileError) {
+    console.error("chat profile identity load failed", profileError.message);
+  }
+  const identity = toUserIdentity({
+    display_name: profile?.display_name?.trim() || displayNameFromUser(user),
+    persona: profile?.persona ?? null,
+  });
 
   // 4. Build the system prompt with USER IDENTITY + USER CONTEXT sections.
   const { systemPrompt } = buildSystemPrompt(usedMemories, usedChunks, identity);
@@ -199,6 +208,7 @@ export async function POST(request: Request) {
       model: result.model,
       memories_used: usedMemories.length,
       chunks_used: usedChunks.length,
+      identity_used: Boolean(identity.displayName || identity.persona),
       proposed: proposedCount,
     },
   });
@@ -208,6 +218,7 @@ export async function POST(request: Request) {
     message: assistantMsg,
     usedMemories,
     usedChunks,
+    usedIdentity: identity,
     proposedCount,
     mocked: result.mocked,
   });

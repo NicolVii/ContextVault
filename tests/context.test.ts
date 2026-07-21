@@ -69,15 +69,15 @@ describe("buildSystemPrompt identity block", () => {
     });
     expect(identity.displayName).toBe("Alex Rivera");
     expect(systemPrompt).toContain("----- USER IDENTITY -----");
-    expect(systemPrompt).toContain("- Name: Alex Rivera");
-    expect(systemPrompt).toContain("source of truth for the user's name and persona");
+    expect(systemPrompt).toContain("The user's name is Alex Rivera.");
+    expect(systemPrompt).toContain("USER IDENTITY is authoritative");
   });
 
   it("includes persona in USER IDENTITY", () => {
     const { systemPrompt } = buildSystemPrompt([], [], {
       persona: "Prefer short, direct answers",
     });
-    expect(systemPrompt).toContain("- Persona: Prefer short, direct answers");
+    expect(systemPrompt).toContain("Persona: Prefer short, direct answers");
   });
 
   it("omits the identity section when profile fields are empty", () => {
@@ -92,7 +92,7 @@ describe("buildSystemPrompt identity block", () => {
       persona: "y".repeat(PERSONA_PROMPT_MAX + 50),
     });
     const { systemPrompt } = buildSystemPrompt([], [], identity);
-    expect(systemPrompt).toContain(`- Persona: ${"y".repeat(PERSONA_PROMPT_MAX)}`);
+    expect(systemPrompt).toContain(`Persona: ${"y".repeat(PERSONA_PROMPT_MAX)}`);
     expect(systemPrompt).not.toContain("y".repeat(PERSONA_PROMPT_MAX + 1));
   });
 
@@ -104,13 +104,11 @@ describe("buildSystemPrompt identity block", () => {
     const { systemPrompt } = buildSystemPrompt([conflicting], [], {
       displayName: "Alex Rivera",
     });
-    expect(systemPrompt).toContain("- Name: Alex Rivera");
+    expect(systemPrompt).toContain("The user's name is Alex Rivera.");
     expect(systemPrompt).toContain("(profile) My name is Definitely Not Alex");
     expect(systemPrompt.indexOf("USER IDENTITY")).toBeLessThan(
       systemPrompt.indexOf("USER CONTEXT")
     );
-    expect(systemPrompt).toContain(
-      "Prefer it over any conflicting profile memories"
-    );
+    expect(systemPrompt).toContain("Never say you don't have their name");
   });
 });

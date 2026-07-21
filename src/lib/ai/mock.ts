@@ -22,7 +22,8 @@ export class MockChatProvider implements ChatProvider {
     const system = messages.find((m) => m.role === "system")?.content ?? "";
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     const hasContext =
-      /USER CONTEXT[\s\S]*END USER CONTEXT/.test(system) &&
+      (/USER CONTEXT[\s\S]*END USER CONTEXT/.test(system) ||
+        /USER IDENTITY[\s\S]*END USER IDENTITY/.test(system)) &&
       !/No saved user context/.test(system);
 
     const parts: string[] = [
