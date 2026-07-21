@@ -10,7 +10,12 @@ import {
   toUserIdentity,
 } from "@/lib/ai/context";
 import { getChatProvider, type ChatMessage } from "@/lib/ai";
-import { isValidModel, CHAT_MODELS } from "@/lib/ai/models";
+import {
+  isValidModel,
+  CHAT_MODELS,
+  AUTO_MODEL_ID,
+  resolvedModelDisplay,
+} from "@/lib/ai/models";
 import { displayNameFromUser } from "@/lib/profile";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
@@ -26,8 +31,24 @@ const HISTORY_LIMIT = 10;
 const thinkRequestSchema = z.object({
   message: z.string().trim().min(1).max(8000),
   sessionId: z.string().uuid().optional().nullable(),
+  /** Concrete model id or "auto". */
   model: z.string().min(1).optional(),
 });
+
+function responseMeta(opts: {
+  modelChoice: string;
+  resolvedModel: string;
+  memoryRegistered: boolean;
+  createdAt?: string;
+}) {
+  return {
+    createdAt: opts.createdAt ?? new Date().toISOString(),
+    modelChoice: opts.modelChoice,
+    model: opts.resolvedModel,
+    modelLabel: resolvedModelDisplay(opts.modelChoice, opts.resolvedModel),
+    memoryRegistered: opts.memoryRegistered,
+  };
+}
 
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
@@ -48,35 +69,48 @@ export async function POST(request: Request) {
   const message = parsed.data.message;
   const intent = classifyIntent(message);
 
-  let model = parsed.data.model ?? CHAT_MODELS[0].id;
-  if (!parsed.data.model) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("default_model")
-      .eq("id", user.id)
-      .maybeSingle();
-    if (profile?.default_model) model = profile.default_model;
-  }
-  if (!isValidModel(model)) {
+  const modelChoice = parsed.data.model ?? AUTO_MODEL_ID;
+  if (!isValidModel(modelChoice)) {
     return NextResponse.json({ error: "Unknown model" }, { status: 400 });
   }
 
+  let resolvedModel = CHAT_MODELS[0].id;
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("default_model")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profile?.default_model && isValidModel(profile.default_model) && profile.default_model !== AUTO_MODEL_ID) {
+    resolvedModel = profile.default_model;
+  }
+  if (modelChoice !== AUTO_MODEL_ID) {
+    resolvedModel = modelChoice;
+  }
+
   if (intent === "statement") {
-    return handleStatement(ctx, message);
+    return handleStatement(ctx, message, modelChoice, resolvedModel);
   }
 
   if (intent === "instruction") {
-    const handled = await handleInstruction(ctx, message, model);
+    const handled = await handleInstruction(ctx, message, modelChoice, resolvedModel);
     if (handled) return handled;
-    // Fall through to question-style short confirmation via chat.
   }
 
-  return handleQuestion(ctx, message, model, parsed.data.sessionId ?? null, intent);
+  return handleQuestion(
+    ctx,
+    message,
+    modelChoice,
+    resolvedModel,
+    parsed.data.sessionId ?? null,
+    intent === "instruction" ? "instruction" : "question"
+  );
 }
 
 async function handleStatement(
   ctx: NonNullable<Awaited<ReturnType<typeof getSessionContext>>>,
-  message: string
+  message: string,
+  modelChoice: string,
+  resolvedModel: string
 ) {
   const { supabase, user } = ctx;
   const content = stripRememberPrefix(message) || message;
@@ -103,16 +137,20 @@ async function handleStatement(
 
   return NextResponse.json({
     intent: "statement" as const,
-    confirmation: "Remembered",
-    memory,
-    undoMemoryId: memory.id,
+    ...responseMeta({
+      modelChoice,
+      resolvedModel,
+      memoryRegistered: true,
+      createdAt: memory.created_at,
+    }),
   });
 }
 
 async function handleInstruction(
   ctx: NonNullable<Awaited<ReturnType<typeof getSessionContext>>>,
   message: string,
-  _model: string
+  modelChoice: string,
+  resolvedModel: string
 ): Promise<NextResponse | null> {
   const { supabase, user } = ctx;
   const lower = message.trim().toLowerCase();
@@ -142,9 +180,13 @@ async function handleInstruction(
     });
     return NextResponse.json({
       intent: "instruction" as const,
-      confirmation: "Remembered",
-      memory,
-      undoMemoryId: memory.id,
+      confirmation: "Got it.",
+      ...responseMeta({
+        modelChoice,
+        resolvedModel,
+        memoryRegistered: true,
+        createdAt: memory.created_at,
+      }),
     });
   }
 
@@ -158,6 +200,7 @@ async function handleInstruction(
       return NextResponse.json({
         intent: "instruction" as const,
         confirmation: "Tell me what to forget.",
+        ...responseMeta({ modelChoice, resolvedModel, memoryRegistered: false }),
       });
     }
     const { data } = await supabase
@@ -171,6 +214,7 @@ async function handleInstruction(
       return NextResponse.json({
         intent: "instruction" as const,
         confirmation: "I couldn't find anything matching that.",
+        ...responseMeta({ modelChoice, resolvedModel, memoryRegistered: false }),
       });
     }
     const ids = matches.map((m) => m.id);
@@ -187,6 +231,7 @@ async function handleInstruction(
         matches.length === 1
           ? "Forgotten."
           : `Archived ${matches.length} related memories.`,
+      ...responseMeta({ modelChoice, resolvedModel, memoryRegistered: false }),
     });
   }
 
@@ -196,6 +241,7 @@ async function handleInstruction(
       intent: "instruction" as const,
       confirmation: "Open the Vault to browse your memories and files.",
       action: { type: "open_vault" as const },
+      ...responseMeta({ modelChoice, resolvedModel, memoryRegistered: false }),
     });
   }
 
@@ -205,6 +251,7 @@ async function handleInstruction(
 async function handleQuestion(
   ctx: NonNullable<Awaited<ReturnType<typeof getSessionContext>>>,
   message: string,
+  modelChoice: string,
   model: string,
   existingSessionId: string | null,
   intent: "question" | "instruction"
@@ -412,10 +459,13 @@ async function handleQuestion(
     sessionId,
     message: assistantMsg,
     confirmation: intent === "instruction" ? assistantMsg.content : undefined,
-    usedMemories,
-    usedChunks,
-    usedIdentity: identity,
     proposedCount,
     mocked: result.mocked,
+    ...responseMeta({
+      modelChoice,
+      resolvedModel: result.model,
+      memoryRegistered: proposedCount > 0,
+      createdAt: assistantMsg.created_at,
+    }),
   });
 }
