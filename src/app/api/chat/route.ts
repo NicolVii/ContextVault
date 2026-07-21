@@ -2,13 +2,22 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getMemoryProvider } from "@/lib/memory";
 import { extractCandidates } from "@/lib/memory/extraction";
-import { buildSystemPrompt } from "@/lib/ai/context";
+import {
+  buildSystemPrompt,
+  composeChatMessages,
+  directIdentityAnswer,
+  toUserIdentity,
+} from "@/lib/ai/context";
 import { getChatProvider, type ChatMessage } from "@/lib/ai";
 import { isValidModel } from "@/lib/ai/models";
+import { displayNameFromUser } from "@/lib/profile";
 import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
 import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
+
+/** Always resolve identity fresh — never serve a cached chat handler. */
+export const dynamic = "force-dynamic";
 
 const MIN_SIMILARITY = 0.05;
 const HISTORY_LIMIT = 10;
@@ -80,10 +89,26 @@ export async function POST(request: Request) {
     (c) => c.similarity >= MIN_SIMILARITY
   );
 
-  // 3. Build the system prompt with a separated USER CONTEXT section.
-  const { systemPrompt } = buildSystemPrompt(usedMemories, usedChunks);
+  // 3. Load allowlisted account identity (name / persona only) for this user.
+  // Prefer profiles.display_name; fall back to auth metadata / email local-part
+  // so Google users still get a name when the profiles row was never filled in.
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("display_name, persona")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profileError) {
+    console.error("chat profile identity load failed", profileError.message);
+  }
+  const identity = toUserIdentity({
+    display_name: profile?.display_name?.trim() || displayNameFromUser(user),
+    persona: profile?.persona ?? null,
+  });
 
-  // 4. Load recent history for conversational continuity.
+  // 4. Build the system prompt with USER IDENTITY + USER CONTEXT sections.
+  const { systemPrompt } = buildSystemPrompt(usedMemories, usedChunks, identity);
+
+  // 5. Load recent history for conversational continuity.
   const { data: history } = await supabase
     .from("chat_messages")
     .select("role, content")
@@ -95,7 +120,7 @@ export async function POST(request: Request) {
     .reverse()
     .map((m) => ({ role: m.role, content: m.content }));
 
-  // 5. Persist the user's message.
+  // 6. Persist the user's message.
   await supabase.from("chat_messages").insert({
     session_id: sessionId,
     user_id: user.id,
@@ -103,22 +128,34 @@ export async function POST(request: Request) {
     content: message,
   });
 
-  // 6. Call the model through the active chat provider (OpenRouter or mock).
-  let result;
-  try {
-    result = await getChatProvider().complete(model, [
-      { role: "system", content: systemPrompt },
-      ...historyMsgs,
-      { role: "user", content: message },
-    ]);
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Model request failed" },
-      { status: 502 }
-    );
+  // 7. Answer name questions from structured identity when possible; otherwise
+  // call the model with identity in the system prompt and outbound user turn.
+  let result: { content: string; model: string; mocked?: boolean };
+  let identityDirect = false;
+  const direct = directIdentityAnswer(message, identity);
+  if (direct) {
+    identityDirect = true;
+    result = { content: direct, model, mocked: false };
+  } else {
+    try {
+      result = await getChatProvider().complete(
+        model,
+        composeChatMessages({
+          systemPrompt,
+          history: historyMsgs,
+          userMessage: message,
+          identity,
+        })
+      );
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Model request failed" },
+        { status: 502 }
+      );
+    }
   }
 
-  // 7. Persist the assistant message and its context provenance.
+  // 8. Persist the assistant message and its context provenance.
   const { data: assistantMsg, error: amErr } = await supabase
     .from("chat_messages")
     .insert({
@@ -150,7 +187,7 @@ export async function POST(request: Request) {
     await supabase.from("message_context").insert(contextRows);
   }
 
-  // 8. Extract candidate memories → review queue (never auto-active).
+  // 9. Extract candidate memories → review queue (never auto-active).
   // Uses the ExtractionProvider (LLM when available, heuristics offline).
   const candidates = await extractCandidates(message);
   let proposedCount = 0;
@@ -191,6 +228,8 @@ export async function POST(request: Request) {
       model: result.model,
       memories_used: usedMemories.length,
       chunks_used: usedChunks.length,
+      identity_used: Boolean(identity.displayName || identity.persona),
+      identity_direct: identityDirect,
       proposed: proposedCount,
     },
   });
@@ -200,6 +239,8 @@ export async function POST(request: Request) {
     message: assistantMsg,
     usedMemories,
     usedChunks,
+    usedIdentity: identity,
+    identityDirectAnswer: identityDirect,
     proposedCount,
     mocked: result.mocked,
   });

@@ -53,6 +53,15 @@ export interface Profile {
   updated_at: string;
 }
 
+/**
+ * Allowlisted account identity injected into every chat system prompt.
+ * Only these fields — never email or other profile columns.
+ */
+export interface UserIdentity {
+  displayName?: string;
+  persona?: string;
+}
+
 export interface DocumentRecord {
   id: string;
   user_id: string;

@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { Send, Info, Sparkles, BookOpen } from "lucide-react";
 import { CHAT_MODELS } from "@/lib/ai/models";
-import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
+import type { RetrievedChunk, RetrievedMemory, UserIdentity } from "@/lib/types";
 
 interface UIMessage {
   role: "user" | "assistant";
@@ -11,6 +11,11 @@ interface UIMessage {
   model?: string;
   usedMemories?: RetrievedMemory[];
   usedChunks?: RetrievedChunk[];
+  usedIdentity?: UserIdentity;
+}
+
+function hasIdentity(identity?: UserIdentity): boolean {
+  return Boolean(identity?.displayName || identity?.persona);
 }
 
 export function ChatView({ initialModel }: { initialModel: string }) {
@@ -52,6 +57,7 @@ export function ChatView({ initialModel }: { initialModel: string }) {
           model: json.message.model,
           usedMemories: json.usedMemories,
           usedChunks: json.usedChunks,
+          usedIdentity: json.usedIdentity,
         },
       ]);
       if (json.proposedCount > 0) {
@@ -97,63 +103,91 @@ export function ChatView({ initialModel }: { initialModel: string }) {
             </div>
           )}
 
-          {messages.map((m, i) => (
-            <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-              <div className={m.role === "user" ? "max-w-[80%]" : "max-w-[85%]"}>
-                <div
-                  className={
-                    m.role === "user"
-                      ? "rounded-2xl rounded-br-sm bg-brand-600 px-4 py-2.5 text-sm text-white"
-                      : "rounded-2xl rounded-bl-sm bg-sand-100 px-4 py-2.5 text-sm text-brand-900"
-                  }
-                >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
-                </div>
-
-                {m.role === "assistant" && (
-                  <div className="mt-1.5 pl-1">
-                    <span className="text-xs text-brand-400">{m.model}</span>
-                    {(m.usedMemories?.length || m.usedChunks?.length) ? (
-                      <button
-                        className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
-                        onClick={() => setOpenContext(openContext === i ? null : i)}
-                      >
-                        <Info className="h-3.5 w-3.5" />
-                        Why does the AI know this? (
-                        {(m.usedMemories?.length ?? 0) + (m.usedChunks?.length ?? 0)})
-                      </button>
-                    ) : (
-                      <span className="ml-2 text-xs text-brand-400">No saved context used</span>
-                    )}
-
-                    {openContext === i && (
-                      <div className="mt-2 space-y-2 rounded-xl border border-brand-100 bg-white p-3">
-                        {m.usedMemories?.map((mem) => (
-                          <div key={mem.id} className="text-xs">
-                            <span className="badge bg-brand-50 text-brand-700">{mem.type}</span>{" "}
-                            <span className="text-brand-800">{mem.content}</span>
-                            <span className="text-brand-400">
-                              {" "}
-                              · {(mem.similarity * 100).toFixed(0)}% match · from {mem.source.replace("_", " ")}
-                            </span>
-                          </div>
-                        ))}
-                        {m.usedChunks?.map((c) => (
-                          <div key={c.id} className="flex items-start gap-1 text-xs">
-                            <BookOpen className="mt-0.5 h-3.5 w-3.5 text-brand-500" />
-                            <span className="text-brand-800">
-                              {c.filename}
-                              {c.page_number ? ` p.${c.page_number}` : ""}: {c.content.slice(0, 120)}…
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+          {messages.map((m, i) => {
+            const contextCount =
+              (m.usedMemories?.length ?? 0) +
+              (m.usedChunks?.length ?? 0) +
+              (hasIdentity(m.usedIdentity) ? 1 : 0);
+            return (
+              <div
+                key={i}
+                className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
+              >
+                <div className={m.role === "user" ? "max-w-[80%]" : "max-w-[85%]"}>
+                  <div
+                    className={
+                      m.role === "user"
+                        ? "rounded-2xl rounded-br-sm bg-brand-600 px-4 py-2.5 text-sm text-white"
+                        : "rounded-2xl rounded-bl-sm bg-sand-100 px-4 py-2.5 text-sm text-brand-900"
+                    }
+                  >
+                    <p className="whitespace-pre-wrap">{m.content}</p>
                   </div>
-                )}
+
+                  {m.role === "assistant" && (
+                    <div className="mt-1.5 pl-1">
+                      <span className="text-xs text-brand-400">{m.model}</span>
+                      {contextCount > 0 ? (
+                        <button
+                          className="ml-2 inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
+                          onClick={() => setOpenContext(openContext === i ? null : i)}
+                        >
+                          <Info className="h-3.5 w-3.5" />
+                          Why does the AI know this? ({contextCount})
+                        </button>
+                      ) : (
+                        <span className="ml-2 text-xs text-brand-400">No saved context used</span>
+                      )}
+
+                      {openContext === i && (
+                        <div className="mt-2 space-y-2 rounded-xl border border-brand-100 bg-white p-3">
+                          {hasIdentity(m.usedIdentity) && (
+                            <div className="text-xs">
+                              <span className="badge bg-brand-50 text-brand-700">identity</span>{" "}
+                              <span className="text-brand-800">
+                                {[
+                                  m.usedIdentity?.displayName
+                                    ? `Name: ${m.usedIdentity.displayName}`
+                                    : null,
+                                  m.usedIdentity?.persona
+                                    ? `Persona: ${m.usedIdentity.persona}`
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                              <span className="text-brand-400"> · from profile</span>
+                            </div>
+                          )}
+                          {m.usedMemories?.map((mem) => (
+                            <div key={mem.id} className="text-xs">
+                              <span className="badge bg-brand-50 text-brand-700">{mem.type}</span>{" "}
+                              <span className="text-brand-800">{mem.content}</span>
+                              <span className="text-brand-400">
+                                {" "}
+                                · {(mem.similarity * 100).toFixed(0)}% match · from{" "}
+                                {mem.source.replace("_", " ")}
+                              </span>
+                            </div>
+                          ))}
+                          {m.usedChunks?.map((c) => (
+                            <div key={c.id} className="flex items-start gap-1 text-xs">
+                              <BookOpen className="mt-0.5 h-3.5 w-3.5 text-brand-500" />
+                              <span className="text-brand-800">
+                                {c.filename}
+                                {c.page_number ? ` p.${c.page_number}` : ""}:{" "}
+                                {c.content.slice(0, 120)}…
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={scrollRef} />
         </div>
 

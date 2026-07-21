@@ -131,6 +131,59 @@ describe("semantic retrieval", () => {
   });
 });
 
+describe("profile isolation (RLS)", () => {
+  it("lets each user read only their own profile identity fields", async () => {
+    const aliceName = `Alice-${alice.id.slice(0, 8)}`;
+    const bobName = `Bob-${bob.id.slice(0, 8)}`;
+    const alicePersona = "Alice-only persona for chat identity";
+    const bobPersona = "Bob-only persona for chat identity";
+
+    const { error: aliceErr } = await alice.client
+      .from("profiles")
+      .update({ display_name: aliceName, persona: alicePersona })
+      .eq("id", alice.id);
+    expect(aliceErr).toBeNull();
+
+    const { error: bobErr } = await bob.client
+      .from("profiles")
+      .update({ display_name: bobName, persona: bobPersona })
+      .eq("id", bob.id);
+    expect(bobErr).toBeNull();
+
+    // Same query shape as POST /api/chat — scoped to the authenticated user id.
+    const { data: aliceProfile, error: aliceReadErr } = await alice.client
+      .from("profiles")
+      .select("display_name, persona")
+      .eq("id", alice.id)
+      .maybeSingle();
+    expect(aliceReadErr).toBeNull();
+    expect(aliceProfile).toEqual({
+      display_name: aliceName,
+      persona: alicePersona,
+    });
+
+    const { data: bobAsAlice } = await alice.client
+      .from("profiles")
+      .select("display_name, persona")
+      .eq("id", bob.id)
+      .maybeSingle();
+    expect(bobAsAlice).toBeNull();
+
+    const { data: aliceAsBob } = await bob.client
+      .from("profiles")
+      .select("display_name, persona")
+      .eq("id", alice.id)
+      .maybeSingle();
+    expect(aliceAsBob).toBeNull();
+
+    const { data: bobList } = await bob.client.from("profiles").select("id, display_name, persona");
+    expect(bobList ?? []).toHaveLength(1);
+    expect(bobList![0].id).toBe(bob.id);
+    expect(bobList![0].display_name).toBe(bobName);
+    expect(bobList![0].persona).toBe(bobPersona);
+  });
+});
+
 describe("deletion", () => {
   it("permanently deletes a memory the user owns", async () => {
     const { data: created } = await alice.client

@@ -1,14 +1,15 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { Profile } from "@/lib/types";
 
-function displayNameFromUser(user: User): string | null {
+/** Resolve a display name from auth user metadata / email (never email itself). */
+export function displayNameFromUser(user: User): string | null {
   const meta = user.user_metadata ?? {};
   const fromMeta =
     (typeof meta.full_name === "string" && meta.full_name) ||
     (typeof meta.name === "string" && meta.name) ||
     (typeof meta.display_name === "string" && meta.display_name) ||
     null;
-  if (fromMeta) return fromMeta.slice(0, 120);
+  if (fromMeta) return fromMeta.trim().slice(0, 120) || null;
   if (user.email) return user.email.split("@")[0] ?? null;
   return null;
 }
@@ -34,7 +35,24 @@ export async function ensureUserProfile(
   if (selectError) {
     console.error("ensureUserProfile select failed", selectError.message);
   }
-  if (existing) return existing as Profile;
+  if (existing) {
+    // Hosted Google signups often create a row with a null/blank display_name
+    // (the auth trigger only reads metadata.display_name, not full_name/name).
+    // Backfill once so Profile UI and chat identity stay in sync.
+    if (!existing.display_name?.trim()) {
+      const fallback = displayNameFromUser(user);
+      if (fallback) {
+        const { data: updated } = await supabase
+          .from("profiles")
+          .update({ display_name: fallback })
+          .eq("id", user.id)
+          .select("*")
+          .maybeSingle();
+        if (updated) return updated as Profile;
+      }
+    }
+    return existing as Profile;
+  }
 
   const insertPayload = {
     id: user.id,
