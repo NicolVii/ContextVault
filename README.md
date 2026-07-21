@@ -248,6 +248,43 @@ Historical checklist of the MVP work that is already in tree (not a roadmap):
 **Next process work (Phase 2, not implemented here):** GitHub Actions, required
 checks, Vercel preview/production, hosted Supabase, and env separation.
 
+## Billing & providers
+
+Inference is metered in **Cortaix credits** (internal). Customers see **Auto**
+vs **Frontier** on Plan & Usage (`/vault/plan`). Launch plans: **Free**, **Lite**,
+and **Pro** (EUR). Team/Max are not offered. Optional BYOK is **Pro-only** and
+skips credit debit when the plan allows it.
+
+**Model selection vs configuration:** everyday Auto / presets / models live in
+the Thinking composer **+** menu. Provider keys and the account default model
+live under Vault → Settings → Advanced.
+
+Locally, when `STRIPE_SECRET_KEY` is unset and `NODE_ENV !== production`, use
+**Dev top-up** on Plan & Usage. Dev top-up is **unconditionally disabled**
+in production (no env override). Configure Stripe price ids via `STRIPE_PRICE_*`
+env vars (see `.env.example`). Legal readiness checklist:
+[`docs/legal-readiness-checklist.md`](docs/legal-readiness-checklist.md).
+
+### BYOK encryption
+
+- Set `BYOK_ENCRYPTION_KEY` to a long random secret (32+ bytes recommended).
+- **Production requires** `BYOK_ENCRYPTION_KEY`. The service role key is **not**
+  an allowed fallback outside local development.
+- Keys are stored as AES-256-GCM ciphertext + IV in `user_provider_keys`.
+- Missing key → API returns an error; existing ciphertext cannot be decrypted
+  with a different secret.
+- **Rotation path (future):** introduce `BYOK_ENCRYPTION_KEY_PREVIOUS`, decrypt
+  with previous then re-encrypt with current in a background job, then remove
+  the previous secret. Derivation salt version is `cortaix-byok-v1`
+  (`BYOK_KEY_DERIVATION_VERSION`).
+
+### Stripe webhooks
+
+Each Stripe `event.id` is inserted into `stripe_webhook_events` (unique PK)
+before credits are granted. Retries of the same event return success without
+double-granting. If handling fails after claim, the row is deleted so Stripe
+can retry safely.
+
 ## Security risks & mitigations
 
 | Risk | Mitigation |

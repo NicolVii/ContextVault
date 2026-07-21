@@ -4,6 +4,7 @@ import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { isValidSelection } from "@/lib/inference/models";
 import { InsufficientCreditsError } from "@/lib/inference/credits";
+import { PlanUsageBlockedError } from "@/lib/billing/plan-usage";
 import { runChatOrchestrator } from "@/lib/orchestration/chat";
 
 /** Always resolve identity fresh — never serve a cached chat handler. */
@@ -62,6 +63,12 @@ export async function POST(request: Request) {
           balance: err.balance,
           required: err.required,
         },
+        { status: 402 }
+      );
+    }
+    if (err instanceof PlanUsageBlockedError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
         { status: 402 }
       );
     }

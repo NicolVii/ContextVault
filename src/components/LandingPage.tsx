@@ -10,6 +10,11 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/Logo";
 import { BRAND } from "@/lib/brand";
+import {
+  formatEurCents,
+  getPublicPlans,
+  type SubscriptionPlan,
+} from "@/lib/billing/products";
 
 const FEATURES = [
   {
@@ -44,8 +49,20 @@ const FEATURES = [
   },
 ];
 
+function priceLabel(plan: SubscriptionPlan): string {
+  if (plan.amountEurCentsMonthly === 0) return "€0";
+  return `${formatEurCents(plan.amountEurCentsMonthly)} / month`;
+}
+
+function signupHref(plan: SubscriptionPlan): string {
+  if (plan.id === "free") return "/signup";
+  return `/signup?plan=${plan.id}`;
+}
+
 /** Temporary public marketing page — full redesign lands in Stage 3. */
 export function LandingPage() {
+  const plans = getPublicPlans();
+
   return (
     <div className="bg-atmosphere min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -91,6 +108,62 @@ export function LandingPage() {
               <p className="mt-2 text-sm leading-relaxed text-ink-muted">{body}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section id="pricing" className="border-t border-mist-200 bg-white/50 py-16">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="font-display text-3xl font-medium tracking-tight text-ink">
+              Pricing
+            </h2>
+            <p className="mt-3 text-ink-muted">
+              One memory. Every leading model. Start free — upgrade when you need more.
+            </p>
+          </div>
+          <div className="mt-10 grid gap-6 lg:grid-cols-3">
+            {plans.map((plan) => (
+              <div
+                key={plan.id}
+                className="flex flex-col rounded-2xl border border-mist-200 bg-white p-6 shadow-soft"
+              >
+                <p className="text-sm font-semibold text-ink">{plan.label}</p>
+                <p className="mt-1 text-xs text-ink-muted">{plan.purpose}</p>
+                <p className="mt-4 font-display text-3xl font-medium text-ink">
+                  {priceLabel(plan)}
+                </p>
+                {plan.amountEurCentsAnnual ? (
+                  <p className="mt-1 text-xs text-ink-faint">
+                    or {formatEurCents(plan.amountEurCentsAnnual)} / year
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-ink-faint">Keep your memory alive</p>
+                )}
+                {plan.id === "pro" && plan.foundingEurCentsMonthly && (
+                  <p className="mt-2 text-xs text-accent">
+                    Founding offer {formatEurCents(plan.foundingEurCentsMonthly)} / month
+                  </p>
+                )}
+                <ul className="mt-5 flex-1 space-y-2">
+                  {plan.features.map((f) => (
+                    <li key={f} className="text-sm text-ink-muted">
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <Link
+                  href={signupHref(plan)}
+                  className={
+                    plan.id === "pro"
+                      ? "btn-primary mt-6 justify-center text-sm"
+                      : "btn-secondary mt-6 justify-center text-sm"
+                  }
+                >
+                  {plan.id === "free" ? "Start free" : `Choose ${plan.label}`}
+                </Link>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

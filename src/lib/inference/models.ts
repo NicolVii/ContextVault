@@ -72,7 +72,10 @@ export const MODEL_CATALOG: ModelProfile[] = [
       fast: 0.9,
       vision: 0.7,
     },
-    bindings: [{ provider: "openrouter", providerModelId: "openai/gpt-4o-mini" }],
+    bindings: [
+      { provider: "openrouter", providerModelId: "openai/gpt-4o-mini" },
+      { provider: "openai", providerModelId: "gpt-4o-mini" },
+    ],
     legacyIds: ["openai/gpt-4o-mini"],
   },
   {
@@ -97,7 +100,10 @@ export const MODEL_CATALOG: ModelProfile[] = [
       fast: 0.55,
       vision: 0.85,
     },
-    bindings: [{ provider: "openrouter", providerModelId: "openai/gpt-4o" }],
+    bindings: [
+      { provider: "openrouter", providerModelId: "openai/gpt-4o" },
+      { provider: "openai", providerModelId: "gpt-4o" },
+    ],
     legacyIds: ["openai/gpt-4o"],
   },
   {
@@ -124,6 +130,7 @@ export const MODEL_CATALOG: ModelProfile[] = [
     },
     bindings: [
       { provider: "openrouter", providerModelId: "anthropic/claude-3.5-sonnet" },
+      { provider: "anthropic", providerModelId: "claude-3-5-sonnet-20241022" },
     ],
     legacyIds: ["anthropic/claude-3.5-sonnet"],
   },
@@ -151,6 +158,7 @@ export const MODEL_CATALOG: ModelProfile[] = [
     },
     bindings: [
       { provider: "openrouter", providerModelId: "google/gemini-flash-1.5" },
+      { provider: "google", providerModelId: "gemini-1.5-flash" },
     ],
     legacyIds: ["google/gemini-flash-1.5"],
   },
@@ -181,6 +189,7 @@ export const MODEL_CATALOG: ModelProfile[] = [
         provider: "openrouter",
         providerModelId: "meta-llama/llama-3.1-70b-instruct",
       },
+      { provider: "groq", providerModelId: "llama-3.1-70b-versatile" },
     ],
     legacyIds: ["meta-llama/llama-3.1-70b-instruct"],
   },

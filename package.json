@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "CV_REQUIRE_SUPABASE=1 vitest run",
     "test:watch": "vitest",
-    "test:unit": "vitest run --exclude tests/memory.test.ts",
-    "test:integration": "CV_INTEGRATION=1 vitest run tests/memory.test.ts",
+    "test:unit": "vitest run --exclude 'tests/**/*.integration.test.ts' --exclude tests/memory.test.ts",
+    "test:integration": "CV_INTEGRATION=1 vitest run tests/memory.test.ts tests/stripe-webhook.integration.test.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test:unit",
     "check:full": "pnpm check && pnpm test:integration",
     "env:sync": "node --import tsx scripts/env-sync.ts",
@@ -30,6 +30,7 @@
     "pdf-parse": "^1.1.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "stripe": "^22.3.2",
     "tailwind-merge": "^2.5.4",
     "zod": "^3.23.8"
   },
@@ -48,6 +49,9 @@
     "vitest": "^2.1.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "unrs-resolver"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "unrs-resolver"
+    ]
   }
 }

@@ -13,10 +13,20 @@ export interface SettlementResult {
   balanceAfter: number | null;
 }
 
+/** Pure credit calculation — BYOK and mock never debit the Cortaix wallet. */
+export function computeCreditsCharged(
+  draft: Pick<UsageDraft, "billingMode" | "provider" | "modelId" | "measures">
+): number {
+  if (draft.billingMode === "byok" || draft.provider === "mock") return 0;
+  const inputTokens = draft.measures.inputTokens ?? 0;
+  const outputTokens = draft.measures.outputTokens ?? 0;
+  return estimateCredits(draft.modelId, inputTokens, outputTokens);
+}
+
 /**
  * Idempotent usage settlement keyed by request_id.
  * Writes usage_events and debits the credit wallet when billingMode=platform
- * and credits_charged > 0.
+ * and credits_charged > 0. Failover retries share one request_id → one debit.
  */
 export async function settleUsage(draft: UsageDraft): Promise<SettlementResult> {
   const admin = createSupabaseAdminClient();
@@ -41,11 +51,7 @@ export async function settleUsage(draft: UsageDraft): Promise<SettlementResult> 
     draft.measures.totalTokens ??
     (inputTokens + outputTokens > 0 ? inputTokens + outputTokens : 0);
 
-  // Platform mock completions and BYOK are free on the Cortaix ledger.
-  const creditsCharged =
-    draft.billingMode === "byok" || draft.provider === "mock"
-      ? 0
-      : estimateCredits(draft.modelId, inputTokens, outputTokens);
+  const creditsCharged = computeCreditsCharged(draft);
 
   const providerCost =
     draft.provider === "mock"
