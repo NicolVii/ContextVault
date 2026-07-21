@@ -2,13 +2,28 @@
 
 Context Vault — a model-independent personal AI memory platform. Next.js
 (App Router) + TypeScript + Tailwind, Supabase (Auth/Postgres/pgvector/Storage)
-and OpenRouter for chat. See `README.md` for full setup and architecture.
+and OpenRouter for chat. See [`README.md`](README.md) for architecture and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for branch / commit / PR rules.
 
-## Cursor Cloud specific instructions
+## Agent process (required)
+
+1. **Feature branch only.** Create or use a dedicated branch (e.g.
+   `cursor/<topic>-…`). Never commit to, push to, or reset `main`.
+2. **Small commits.** Prefer reviewable, imperative commits; stage only
+   task-related files.
+3. **Validate.** Run `pnpm check` before handoff. Run `pnpm check:full` when
+   touching DB, auth, memory, API routes, or migrations (Supabase must be up).
+4. **Preserve features.** Do not delete pages, providers, APIs, or tests unless
+   they are proven obsolete/broken and explicitly in scope.
+5. **Scope.** Do not invent CI/CD, Vercel, or hosted Supabase work unless asked
+   (Phase 2). Do not change product scope while working on tooling/docs.
+
+## Cursor Cloud boot
 
 The base VM already has Node, pnpm, Docker and the Supabase CLI installed, and
 the update script runs `pnpm install`. The Docker daemon and the Supabase
-containers are **not** running at session start — start them manually:
+containers are **not** running at session start — start them manually, then use
+the same scripts as a laptop:
 
 ```bash
 # 1. Start the Docker daemon (needed for the local Supabase stack) and make the
@@ -17,51 +32,53 @@ sudo dockerd > /tmp/dockerd.log 2>&1 &
 sleep 8
 sudo chmod 666 /var/run/docker.sock
 
-# 2. Start Supabase and apply migrations + seed the demo data.
-supabase start          # prints ANON_KEY / SERVICE_ROLE_KEY (also: supabase status)
-supabase db reset       # applies migrations in supabase/migrations
-pnpm db:seed            # demo@contextvault.local / demo-password-123
+# 2. One-command bootstrap (env + supabase start + migrate + demo seed).
+pnpm setup
+#    Or step-by-step:
+#    pnpm db:start && pnpm env:sync && pnpm db:reset
 
-# 3. Run the dev server.
+# 3. Confirm health, then run the app.
+pnpm doctor
 pnpm dev                # http://localhost:3000
 ```
 
-Notes and non-obvious gotchas:
+Demo login: `demo@contextvault.local` / `demo-password-123`.
 
-- **`.env.local`** holds the well-known local Supabase keys and is git-ignored.
-  If it is missing, copy `.env.example` and fill `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-  and `SUPABASE_SERVICE_ROLE_KEY` from `supabase status`. The local demo keys
-  are stable across `supabase start` runs, so the committed values usually work.
-- **Offline by default:** with no `OPENROUTER_API_KEY` the chat uses a local
-  mock model that echoes the injected context, and memory extraction falls
-  back to deterministic heuristics; with `EMBEDDING_PROVIDER=local`
-  (default) embeddings are deterministic and need no network. The app is fully
-  demoable without any external API keys.
-- **Table grants matter:** recent Supabase does not auto-expose new `public`
-  tables to the PostgREST roles. `supabase/migrations/*_grants.sql` grants the
-  `authenticated` and `service_role` roles. If you add a new table you must add
-  grants there or every API query fails with "permission denied for table".
-- **pgvector dimension is fixed at 1536** (`EMBEDDING_DIM`). Keep local and
-  OpenAI providers at the same dimension or the vector columns break.
+## Local scripts (agents)
+
+| Command | Purpose |
+| --- | --- |
+| `pnpm setup` | Install, sync `.env.local`, start Supabase, migrate + seed |
+| `pnpm env:sync` | Create/update `.env.local` (from example + `supabase status`) |
+| `pnpm doctor` | Validate Node/pnpm/Docker/CLI/env/Supabase API |
+| `pnpm db:start` | `supabase start` |
+| `pnpm db:reset` | Migrations + `pnpm db:seed` |
+| `pnpm db:seed` | Demo user + sample data (`scripts/seed.ts`) |
+| `pnpm check` | lint + typecheck + unit tests |
+| `pnpm check:full` | `check` + integration tests |
+| `pnpm test:unit` / `pnpm test:integration` | Split suites |
+
+## Gotchas
+
+- **`.env.local`:** git-ignored. Create it with `pnpm env:sync` or `pnpm setup`
+  **before** `pnpm db:seed`. `.env.example` ships well-known **local-only**
+  demo JWTs; `env:sync` refreshes them from `supabase status` when the stack
+  is up. Never use those JWTs in hosted environments.
+- **`db:reset` vs `db:seed`:** `pnpm db:reset` = `supabase db reset` then the
+  Node demo seed. `supabase/seed.sql` is a no-op placeholder so CLI reset
+  succeeds; demo data always comes from `scripts/seed.ts`.
+- **Offline by default:** no `OPENROUTER_API_KEY` → mock chat + heuristic
+  extraction; `EMBEDDING_PROVIDER=local` → deterministic embeddings.
+- **Table grants:** new `public` tables need grants in
+  `supabase/migrations/*_grants.sql` or PostgREST returns permission denied.
+- **pgvector dimension is fixed at 1536** (`EMBEDDING_DIM`).
 - **Disabled Supabase services:** realtime, edge runtime, analytics and vector
-  storage are turned off in `supabase/config.toml` to speed up `supabase start`.
+  storage are off in `supabase/config.toml` to speed up `supabase start`.
   Email confirmations are disabled locally so signup logs in immediately.
-- **Tests** (`pnpm test`) run against the running local stack and create/delete
-  real users via the service role, so Supabase must be started first.
-- Lint / typecheck / build: `pnpm lint`, `pnpm typecheck`, `pnpm build`.
-- **Chat provider:** chat uses the `ChatProvider` interface in `src/lib/ai/`.
-  With `OPENROUTER_API_KEY` set it calls OpenRouter; otherwise it uses the
-  offline `MockChatProvider`. No code change is needed to switch.
-- **Memory extraction:** uses the `ExtractionProvider` interface in
-  `src/lib/memory/extraction/`. With a real chat backend it runs structured
-  LLM extraction; offline (or on LLM failure / timeout) it uses
-  `HeuristicExtractionProvider`. Trivial greetings/acks and impersonal
-  questions are skipped before calling the model. Candidates are always
-  inserted as `proposed`; redaction in `src/lib/memory/redaction.ts` still
-  blocks secrets and flags sensitive content. Optional `EXTRACTION_MODEL` and
-  `EXTRACTION_TIMEOUT_MS` override the extraction model and per-call budget.
-- **Google Sign-In:** enabled in `supabase/config.toml`, reading
-  `SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` / `_SECRET`. The Supabase CLI only
-  substitutes `env(...)` values that are exported in the shell **before**
-  `supabase start`, so export them (or leave unset to keep Google disabled) and
-  restart the stack after changing them. OAuth returns to `/auth/callback`.
+- **Integration tests** need a running local stack and filled env
+  (`pnpm check:full` / `pnpm test:integration`).
+- **Google Sign-In:** `SUPABASE_AUTH_EXTERNAL_GOOGLE_*` must be exported in the
+  shell **before** `supabase start` (CLI `env(...)` substitution). OAuth
+  returns to `/auth/callback`. Leave unset to keep Google disabled locally.
+
+For chat / memory / extraction / Mem0 provider details, see `README.md`.
