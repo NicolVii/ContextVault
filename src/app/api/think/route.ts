@@ -9,17 +9,23 @@ import {
   directIdentityAnswer,
   toUserIdentity,
 } from "@/lib/ai/context";
-import { getChatProvider, type ChatMessage } from "@/lib/ai";
+import type { ChatMessage } from "@/lib/ai";
 import {
   isValidModel,
-  CHAT_MODELS,
   AUTO_MODEL_ID,
   resolvedModelDisplay,
+  parseSelection,
+  DEFAULT_MODEL_ID,
 } from "@/lib/ai/models";
 import { displayNameFromUser } from "@/lib/profile";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
 import { classifyIntent, stripRememberPrefix } from "@/lib/think/intent";
+import {
+  runInference,
+  InsufficientCreditsError,
+  type SelectionPolicy,
+} from "@/lib/inference";
 import { z } from "zod";
 import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
 
@@ -74,18 +80,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unknown model" }, { status: 400 });
   }
 
-  let resolvedModel = CHAT_MODELS[0].id;
   const { data: profile } = await supabase
     .from("profiles")
     .select("default_model")
     .eq("id", user.id)
     .maybeSingle();
-  if (profile?.default_model && isValidModel(profile.default_model) && profile.default_model !== AUTO_MODEL_ID) {
-    resolvedModel = profile.default_model;
-  }
-  if (modelChoice !== AUTO_MODEL_ID) {
-    resolvedModel = modelChoice;
-  }
+
+  const selection = resolveThinkSelection(modelChoice, profile?.default_model);
+  // Placeholder until inference resolves; statements/instructions use this for meta.
+  let resolvedModel =
+    selection.type === "model" ? selection.modelId : DEFAULT_MODEL_ID;
 
   if (intent === "statement") {
     return handleStatement(ctx, message, modelChoice, resolvedModel);
@@ -96,14 +100,44 @@ export async function POST(request: Request) {
     if (handled) return handled;
   }
 
-  return handleQuestion(
-    ctx,
-    message,
-    modelChoice,
-    resolvedModel,
-    parsed.data.sessionId ?? null,
-    intent === "instruction" ? "instruction" : "question"
-  );
+  try {
+    return await handleQuestion(
+      ctx,
+      message,
+      modelChoice,
+      selection,
+      parsed.data.sessionId ?? null,
+      intent === "instruction" ? "instruction" : "question"
+    );
+  } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return NextResponse.json(
+        {
+          error: err.message,
+          code: "insufficient_credits",
+          balance: err.balance,
+          required: err.required,
+        },
+        { status: 402 }
+      );
+    }
+    throw err;
+  }
+}
+
+function resolveThinkSelection(
+  modelChoice: string,
+  profileDefault?: string | null
+): SelectionPolicy {
+  if (modelChoice !== AUTO_MODEL_ID) return parseSelection(modelChoice);
+  if (
+    profileDefault &&
+    profileDefault !== AUTO_MODEL_ID &&
+    isValidModel(profileDefault)
+  ) {
+    return parseSelection(profileDefault);
+  }
+  return { type: "auto" };
 }
 
 async function handleStatement(
@@ -252,17 +286,23 @@ async function handleQuestion(
   ctx: NonNullable<Awaited<ReturnType<typeof getSessionContext>>>,
   message: string,
   modelChoice: string,
-  model: string,
+  selection: SelectionPolicy,
   existingSessionId: string | null,
   intent: "question" | "instruction"
 ) {
   const { supabase, user } = ctx;
+  const selectionKey =
+    selection.type === "auto"
+      ? "auto"
+      : selection.type === "preset"
+        ? `preset:${selection.preset}`
+        : selection.modelId;
 
   let sessionId = existingSessionId;
   if (!sessionId) {
     const { data: session, error } = await supabase
       .from("chat_sessions")
-      .insert({ user_id: user.id, model, title: message.slice(0, 60) })
+      .insert({ user_id: user.id, model: selectionKey, title: message.slice(0, 60) })
       .select("id")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -330,53 +370,56 @@ async function handleQuestion(
     content: message,
   });
 
-  let result: { content: string; model: string; mocked?: boolean };
+  let content: string;
+  let resolvedModel: string;
+  let mocked = false;
   let identityDirect = false;
+  let reasonCode: string | undefined;
 
-  if (intent === "instruction") {
-    // Short confirmation-style reply for unhandled instructions.
-    try {
-      result = await getChatProvider().complete(
-        model,
-        composeChatMessages({
-          systemPrompt:
-            systemPrompt +
-            "\n\nThe user gave an instruction. Reply with a brief confirmation of what you did or will do. One or two sentences maximum. Do not lecture.",
-          history: historyMsgs,
-          userMessage: message,
-          identity,
-        })
-      );
-    } catch (err) {
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : "Model request failed" },
-        { status: 502 }
-      );
-    }
+  const direct =
+    intent === "question" ? directIdentityAnswer(message, identity) : null;
+  if (direct) {
+    identityDirect = true;
+    content = direct;
+    resolvedModel =
+      selection.type === "model" ? selection.modelId : DEFAULT_MODEL_ID;
   } else {
-    const direct = directIdentityAnswer(message, identity);
-    if (direct) {
-      identityDirect = true;
-      result = { content: direct, model, mocked: false };
-    } else {
-      try {
-        result = await getChatProvider().complete(
-          model,
-          composeChatMessages({
-            systemPrompt,
-            history: historyMsgs,
-            userMessage: message,
-            identity,
-          })
-        );
-      } catch (err) {
-        return NextResponse.json(
-          { error: err instanceof Error ? err.message : "Model request failed" },
-          { status: 502 }
-        );
-      }
-    }
+    const composed = composeChatMessages({
+      systemPrompt:
+        intent === "instruction"
+          ? systemPrompt +
+            "\n\nThe user gave an instruction. Reply with a brief confirmation of what you did or will do. One or two sentences maximum. Do not lecture."
+          : systemPrompt,
+      history: historyMsgs,
+      userMessage: message,
+      identity,
+    });
+    const contextChars =
+      systemPrompt.length +
+      historyMsgs.reduce((n, m) => n + m.content.length, 0) +
+      message.length;
+
+    const inference = await runInference({
+      requestId: crypto.randomUUID(),
+      tenantId: user.id,
+      userId: user.id,
+      purpose: "chat",
+      input: {
+        messages: composed,
+        contextChars,
+        hasVisionAttachment: false,
+      },
+      selection,
+      billingMode: "platform",
+    });
+
+    content = inference.output.message;
+    resolvedModel = inference.resolved.modelId;
+    mocked = inference.meta.mocked;
+    reasonCode = inference.resolved.reasonCode;
   }
+
+  const displayModel = mocked ? `${resolvedModel} (mock)` : resolvedModel;
 
   const { data: assistantMsg, error: amErr } = await supabase
     .from("chat_messages")
@@ -384,8 +427,8 @@ async function handleQuestion(
       session_id: sessionId,
       user_id: user.id,
       role: "assistant",
-      content: result.content,
-      model: result.model,
+      content,
+      model: displayModel,
     })
     .select("id, content, model, created_at")
     .single();
@@ -446,24 +489,30 @@ async function handleQuestion(
     entityId: sessionId,
     metadata: {
       intent,
-      model: result.model,
+      model: displayModel,
+      reason_code: reasonCode ?? (identityDirect ? "identity_direct" : null),
       memories_used: usedMemories.length,
       chunks_used: usedChunks.length,
-      proposed: proposedCount,
       identity_direct: identityDirect,
+      proposed: proposedCount,
     },
   });
 
   return NextResponse.json({
     intent,
     sessionId,
+    reply: content,
     message: assistantMsg,
-    confirmation: intent === "instruction" ? assistantMsg.content : undefined,
+    confirmation: intent === "instruction" ? content : undefined,
+    usedMemories,
+    usedChunks,
+    usedIdentity: identity,
+    identityDirectAnswer: identityDirect,
     proposedCount,
-    mocked: result.mocked,
+    mocked,
     ...responseMeta({
       modelChoice,
-      resolvedModel: result.model,
+      resolvedModel,
       memoryRegistered: proposedCount > 0,
       createdAt: assistantMsg.created_at,
     }),

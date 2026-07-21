@@ -17,7 +17,6 @@ export {
 
 import {
   CHAT_MODELS,
-  DEFAULT_MODEL_ID,
   isValidSelection,
   resolveModelProfile,
 } from "@/lib/inference/models";
@@ -51,5 +50,3 @@ export function resolvedModelDisplay(choice: string, resolvedId: string): string
   }
   return modelLabel(choice);
 }
-
-export { DEFAULT_MODEL_ID };
