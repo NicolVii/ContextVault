@@ -248,7 +248,16 @@ Historical checklist of the MVP work that is already in tree (not a roadmap):
 **Next process work (Phase 2, not implemented here):** GitHub Actions, required
 checks, Vercel preview/production, hosted Supabase, and env separation.
 
-## Security risks & mitigations
+## Billing & providers
+
+Inference is metered in **Cortaix credits**. Users buy credit packs or subscribe
+via Stripe (`/vault/settings` → Billing). OpenRouter / OpenAI / Anthropic /
+Google / Groq are adapters behind the Inference Router; optional BYOK keys are
+encrypted at rest and skip credit debit for matching providers.
+
+Locally, when `STRIPE_SECRET_KEY` is unset, use **Dev top-up** on the billing
+panel. Configure Stripe price ids via `STRIPE_PRICE_*` env vars (see `.env.example`).
+
 
 | Risk | Mitigation |
 | --- | --- |
