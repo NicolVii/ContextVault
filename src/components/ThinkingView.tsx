@@ -62,13 +62,15 @@ function greetingFor(name?: string | null) {
 export function ThinkingView({
   displayName,
   reviewCount = 0,
+  initialSessionId = null,
 }: {
   displayName?: string | null;
   reviewCount?: number;
+  initialSessionId?: string | null;
 }) {
   const [input, setInput] = useState("");
   const [thread, setThread] = useState<ThreadItem[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
@@ -81,6 +83,30 @@ export function ThinkingView({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   const hasContent = input.trim().length > 0 || Boolean(pendingFile);
+
+  useEffect(() => {
+    if (!initialSessionId) return;
+    let cancelled = false;
+    async function restore() {
+      const res = await fetch(`/api/sessions/${initialSessionId}`);
+      const json = await res.json();
+      if (!res.ok || cancelled) return;
+      setSessionId(json.session?.id ?? initialSessionId);
+      const items: ThreadItem[] = (json.messages ?? []).map(
+        (m: { id: string; role: string; content: string }) => {
+          if (m.role === "user") {
+            return { id: m.id, kind: "user" as const, content: m.content };
+          }
+          return { id: m.id, kind: "answer" as const, content: m.content };
+        }
+      );
+      setThread(items);
+    }
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialSessionId]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });

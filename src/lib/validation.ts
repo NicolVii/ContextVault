@@ -20,6 +20,8 @@ export const updateMemorySchema = z.object({
     .enum(["active", "proposed", "rejected", "superseded", "archived"])
     .optional(),
   expires_at: z.string().datetime().optional().nullable(),
+  /** ISO timestamp to pin; null to unpin. */
+  pinned_at: z.string().datetime().optional().nullable(),
 });
 
 export const chatRequestSchema = z.object({

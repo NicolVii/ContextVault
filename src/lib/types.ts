@@ -39,6 +39,7 @@ export interface Memory {
   status: MemoryStatus;
   is_sensitive: boolean;
   expires_at: string | null;
+  pinned_at?: string | null;
   created_at: string;
   updated_at: string;
 }
