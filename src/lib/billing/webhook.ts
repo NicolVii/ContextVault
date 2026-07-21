@@ -6,14 +6,6 @@ import {
   planForStripePrice,
 } from "./products";
 
-function userIdFromCustomerMetadata(
-  customer: Stripe.Customer | Stripe.DeletedCustomer | string | null
-): string | null {
-  if (!customer || typeof customer === "string") return null;
-  if ("deleted" in customer && customer.deleted) return null;
-  return (customer as Stripe.Customer).metadata?.cortaix_user_id ?? null;
-}
-
 async function resolveUserId(opts: {
   stripeCustomerId?: string | null;
   metadataUserId?: string | null;
