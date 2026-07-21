@@ -5,6 +5,25 @@ import { updateMemorySchema } from "@/lib/validation";
 import { isSensitive } from "@/lib/memory/redaction";
 import { recordAudit } from "@/lib/audit";
 
+export async function GET(
+  _request: Request,
+  { params }: { params: { id: string } }
+) {
+  const ctx = await getSessionContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { data, error } = await ctx.supabase
+    .from("memories")
+    .select("*")
+    .eq("id", params.id)
+    .neq("status", "deleted")
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ memory: data });
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }

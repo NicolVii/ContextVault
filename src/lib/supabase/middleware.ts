@@ -4,6 +4,7 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
 const PROTECTED_PREFIXES = [
+  "/vault",
   "/dashboard",
   "/memories",
   "/review",

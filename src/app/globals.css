@@ -3,8 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --background: #faf9f6;
-  --foreground: #233c3a;
+  --background: #f7f8fa;
+  --foreground: #1a1c1e;
+  --accent: #3d5a80;
 }
 
 body {
@@ -13,32 +14,50 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Soft mist atmosphere */
+.bg-atmosphere {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(61, 90, 128, 0.08), transparent 60%),
+    linear-gradient(180deg, #f7f8fa 0%, #eef1f4 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-accent/40 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn bg-accent text-white hover:bg-accent-strong;
   }
   .btn-secondary {
-    @apply btn border border-brand-200 bg-white text-brand-700 hover:bg-brand-50;
+    @apply btn border border-mist-200 bg-white text-ink hover:bg-mist-50;
   }
   .btn-ghost {
-    @apply btn text-brand-700 hover:bg-brand-50;
+    @apply btn text-ink-muted hover:bg-mist-100 hover:text-ink;
   }
   .btn-danger {
     @apply btn bg-red-600 text-white hover:bg-red-700;
   }
   .card {
-    @apply rounded-2xl border border-brand-100 bg-white shadow-soft;
+    @apply rounded-2xl border border-mist-200 bg-white shadow-soft;
   }
   .input {
-    @apply w-full rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm text-brand-900 placeholder:text-brand-300 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100;
+    @apply w-full rounded-xl border border-mist-200 bg-white px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20;
   }
   .label {
-    @apply mb-1 block text-sm font-medium text-brand-800;
+    @apply mb-1 block text-sm font-medium text-ink;
   }
   .badge {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
   }
 }
