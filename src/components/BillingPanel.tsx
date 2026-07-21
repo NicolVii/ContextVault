@@ -8,12 +8,14 @@ export function BillingPanel({
   planId,
   planStatus,
   stripeConfigured,
+  allowDevTopup,
   recent,
 }: {
   balance: number;
   planId: string;
   planStatus: string | null;
   stripeConfigured: boolean;
+  allowDevTopup: boolean;
   recent: {
     request_id: string;
     purpose: string;
@@ -126,7 +128,7 @@ export function BillingPanel({
             </li>
           ))}
         </ul>
-        {!stripeConfigured && (
+        {!stripeConfigured && allowDevTopup && (
           <button
             type="button"
             className="btn-secondary mt-3 text-xs"

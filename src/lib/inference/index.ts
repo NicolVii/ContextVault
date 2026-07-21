@@ -29,5 +29,6 @@ export {
   grantCredits,
   InsufficientCreditsError,
 } from "./credits";
-export { settleUsage } from "./meter";
+export { settleUsage, computeCreditsCharged } from "./meter";
 export { runInference } from "./complete";
+

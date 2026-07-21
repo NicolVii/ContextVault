@@ -21,7 +21,59 @@ async function resolveUserId(opts: {
   return (data?.user_id as string) ?? null;
 }
 
-export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
+/**
+ * Persist Stripe event id with a unique constraint.
+ * Returns "claimed" on first sight, "duplicate" if already processed.
+ */
+export async function claimStripeEvent(
+  eventId: string,
+  eventType: string
+): Promise<"claimed" | "duplicate"> {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.from("stripe_webhook_events").insert({
+    event_id: eventId,
+    event_type: eventType,
+  });
+  if (error) {
+    if (error.code === "23505") return "duplicate";
+    throw error;
+  }
+  return "claimed";
+}
+
+async function releaseStripeEventClaim(eventId: string): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  await admin.from("stripe_webhook_events").delete().eq("event_id", eventId);
+}
+
+export type HandleStripeEventResult = {
+  duplicate: boolean;
+  processed: boolean;
+};
+
+/**
+ * Idempotent Stripe event handler.
+ * Duplicate deliveries (same event.id) return success without re-granting credits.
+ * If processing fails after claim, the claim is released so Stripe retries can succeed.
+ */
+export async function handleStripeEvent(
+  event: Stripe.Event
+): Promise<HandleStripeEventResult> {
+  const claim = await claimStripeEvent(event.id, event.type);
+  if (claim === "duplicate") {
+    return { duplicate: true, processed: false };
+  }
+
+  try {
+    await dispatchStripeEvent(event);
+    return { duplicate: false, processed: true };
+  } catch (err) {
+    await releaseStripeEventClaim(event.id);
+    throw err;
+  }
+}
+
+async function dispatchStripeEvent(event: Stripe.Event): Promise<void> {
   switch (event.type) {
     case "checkout.session.completed":
       await onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
@@ -41,6 +93,11 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   }
 }
 
+/** Test/helper export for unit coverage of grant paths without claim wrapping. */
+export async function dispatchStripeEventForTests(event: Stripe.Event): Promise<void> {
+  await dispatchStripeEvent(event);
+}
+
 async function onCheckoutCompleted(session: Stripe.Checkout.Session) {
   const userId = await resolveUserId({
     stripeCustomerId:
@@ -54,10 +111,6 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session) {
     if (credits > 0) {
       await grantCredits(userId, credits, "stripe_topup");
     }
-  }
-
-  if (session.mode === "subscription" && session.subscription) {
-    // Subscription object sync happens via subscription events; grant happens on invoice.paid.
   }
 }
 

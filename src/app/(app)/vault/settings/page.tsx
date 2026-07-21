@@ -11,6 +11,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureUserProfile } from "@/lib/profile";
 import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
 import { isStripeConfigured } from "@/lib/billing/products";
+import { isDevTopupAllowed } from "@/lib/billing/dev-topup";
 import { formatDate } from "@/lib/utils";
 import type { Profile } from "@/lib/types";
 
@@ -83,6 +84,7 @@ export default async function VaultSettingsPage() {
             planId={(sub?.plan_id as string) ?? "free"}
             planStatus={(sub?.status as string) ?? null}
             stripeConfigured={isStripeConfigured()}
+            allowDevTopup={isDevTopupAllowed()}
             recent={recent ?? []}
           />
         </div>
@@ -128,14 +130,18 @@ export default async function VaultSettingsPage() {
           <div className="space-y-8 border-t border-mist-200 px-4 py-4">
             <div>
               <p className="mb-4 text-xs text-ink-muted">
-                Default model used when Auto is selected. Most people never need this.
+                Default model used when the Thinking composer is set to Auto.
+                Everyday Auto / preset / model switching stays in the Thinking +
+                menu — this only sets the account default.
               </p>
               <AdvancedModelSettings defaultModel={(profile as Profile).default_model} />
             </div>
             <div>
               <h3 className="text-sm font-medium text-ink">Bring your own key</h3>
               <p className="mt-1 text-xs text-ink-muted">
-                Optional. Inference on your key is not debited from Cortaix credits.
+                Optional provider credentials (configuration). Model selection
+                still happens in Thinking. Inference on your key is not debited
+                from Cortaix credits.
               </p>
               <div className="mt-3">
                 <ByokPanel initialKeys={keys ?? []} />

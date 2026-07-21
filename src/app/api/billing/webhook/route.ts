@@ -29,11 +29,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    await handleStripeEvent(event);
+    const result = await handleStripeEvent(event);
+    return NextResponse.json({
+      received: true,
+      duplicate: result.duplicate,
+      processed: result.processed,
+    });
   } catch (err) {
     console.error("stripe webhook handler failed", err);
     return NextResponse.json({ error: "Handler failed" }, { status: 500 });
   }
-
-  return NextResponse.json({ received: true });
 }
