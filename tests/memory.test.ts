@@ -7,11 +7,28 @@ import {
   vecFor,
   type TestUser,
 } from "./helpers";
+import { assertIntegrationEnv } from "./setup-env";
 
 let alice: TestUser;
 let bob: TestUser;
 
 beforeAll(async () => {
+  assertIntegrationEnv();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/auth/v1/health`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`health status ${res.status}`);
+  } catch (err) {
+    throw new Error(
+      [
+        `Supabase is not reachable at ${url}.`,
+        "Start the local stack with `pnpm db:start` (Docker required), then re-run.",
+        `Cause: ${err instanceof Error ? err.message : String(err)}`,
+      ].join("\n"),
+    );
+  }
   alice = await createTestUser();
   bob = await createTestUser();
 });
