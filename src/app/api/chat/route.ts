@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getMemoryProvider } from "@/lib/memory";
 import { extractCandidates } from "@/lib/memory/extraction";
-import { buildSystemPrompt, toUserIdentity } from "@/lib/ai/context";
+import { buildSystemPrompt, composeChatMessages, toUserIdentity } from "@/lib/ai/context";
 import { getChatProvider, type ChatMessage } from "@/lib/ai";
 import { isValidModel } from "@/lib/ai/models";
 import { displayNameFromUser } from "@/lib/profile";
@@ -121,13 +121,19 @@ export async function POST(request: Request) {
   });
 
   // 7. Call the model through the active chat provider (OpenRouter or mock).
+  // Identity is also prefixed onto the outbound user turn (not persisted) so
+  // models that overweight recent dialogue still see the account name.
   let result;
   try {
-    result = await getChatProvider().complete(model, [
-      { role: "system", content: systemPrompt },
-      ...historyMsgs,
-      { role: "user", content: message },
-    ]);
+    result = await getChatProvider().complete(
+      model,
+      composeChatMessages({
+        systemPrompt,
+        history: historyMsgs,
+        userMessage: message,
+        identity,
+      })
+    );
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Model request failed" },

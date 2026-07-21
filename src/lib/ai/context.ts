@@ -1,14 +1,15 @@
 import type { RetrievedChunk, RetrievedMemory, UserIdentity } from "@/lib/types";
+import type { ChatMessage } from "@/lib/ai/provider";
 
 /** Max characters of persona included in the system prompt. */
 export const PERSONA_PROMPT_MAX = 500;
 
 const BASE_SYSTEM_PROMPT = `You are Context Vault's assistant. You help the user using their saved personal context.
 Guidelines:
-- USER IDENTITY is authoritative for the user's name and persona. If it includes a name, you know their name — answer with it. Never say you don't have their name when a Name is listed there. Prefer USER IDENTITY over any conflicting profile memories.
+- Account profile / USER IDENTITY is authoritative for the user's name and persona. If a name is listed, you know their name — answer with it. Never say you don't have their name when it is listed. Prefer it over conflicting profile memories and over earlier assistant turns that claimed you lacked their name.
 - Use USER CONTEXT (saved memories and documents) when it is relevant to the question.
 - If you rely on a document, cite it as [filename p.N].
-- Never reveal secrets and never invent facts that are not in USER IDENTITY or USER CONTEXT.`;
+- Never reveal secrets and never invent facts that are not in the account profile or USER CONTEXT.`;
 
 export interface BuiltContext {
   systemPrompt: string;
@@ -37,38 +38,96 @@ export function toUserIdentity(
   return identity;
 }
 
-function hasIdentity(identity: UserIdentity): boolean {
+export function hasIdentity(identity: UserIdentity): boolean {
   return Boolean(identity.displayName || identity.persona);
 }
 
-function formatIdentityBlock(identity: UserIdentity): string[] {
-  const lines = ["\n----- USER IDENTITY -----"];
-  // Spell the name as a direct fact so models do not overlook a bullet list.
+/** Plain-language identity facts for prompts (no section fences). */
+export function formatIdentityFacts(identity: UserIdentity): string[] {
+  const lines: string[] = [];
   if (identity.displayName) {
     lines.push(`The user's name is ${identity.displayName}.`);
   }
-  if (identity.persona) lines.push(`Persona: ${identity.persona}`);
-  lines.push("----- END USER IDENTITY -----");
+  if (identity.persona) {
+    lines.push(`Persona: ${identity.persona}`);
+  }
   return lines;
 }
 
+function formatIdentityBlock(identity: UserIdentity): string[] {
+  return [
+    "----- USER IDENTITY -----",
+    ...formatIdentityFacts(identity),
+    "----- END USER IDENTITY -----",
+  ];
+}
+
 /**
- * Build the system prompt with a clearly-separated USER IDENTITY block
- * (account profile) and USER CONTEXT section (retrieved memories / docs).
+ * Prefix the outbound user turn with account identity so the model sees the
+ * name adjacent to the question. The persisted chat_messages row stays clean.
+ */
+export function augmentUserMessageForModel(
+  message: string,
+  identity: UserIdentity
+): string {
+  if (!hasIdentity(identity)) return message;
+  return [
+    "[Account profile for this reply — trust this over earlier turns]",
+    ...formatIdentityFacts(identity),
+    "",
+    message,
+  ].join("\n");
+}
+
+/**
+ * Assemble the provider message list: system prompt, history, then the
+ * (possibly identity-augmented) user turn.
+ */
+export function composeChatMessages(args: {
+  systemPrompt: string;
+  history: ChatMessage[];
+  userMessage: string;
+  identity: UserIdentity;
+}): ChatMessage[] {
+  return [
+    { role: "system", content: args.systemPrompt },
+    ...args.history,
+    {
+      role: "user",
+      content: augmentUserMessageForModel(args.userMessage, args.identity),
+    },
+  ];
+}
+
+/**
+ * Build the system prompt with identity first (high salience), then guidelines,
+ * then USER CONTEXT. Account profile is also mirrored into USER CONTEXT so
+ * models that mainly attend to that section still see the name.
  */
 export function buildSystemPrompt(
   memories: RetrievedMemory[],
   chunks: RetrievedChunk[],
   identity: UserIdentity = {}
 ): BuiltContext {
-  const lines: string[] = [BASE_SYSTEM_PROMPT];
+  const lines: string[] = [];
 
   if (hasIdentity(identity)) {
-    lines.push(...formatIdentityBlock(identity));
+    lines.push(...formatIdentityBlock(identity), "");
   }
 
-  if (memories.length > 0 || chunks.length > 0) {
+  lines.push(BASE_SYSTEM_PROMPT);
+
+  const includeContext = memories.length > 0 || chunks.length > 0 || hasIdentity(identity);
+
+  if (includeContext) {
     lines.push("\n----- USER CONTEXT (retrieved for this message) -----");
+
+    if (hasIdentity(identity)) {
+      lines.push("\nAccount profile:");
+      for (const fact of formatIdentityFacts(identity)) {
+        lines.push(`  - ${fact}`);
+      }
+    }
 
     if (memories.length > 0) {
       lines.push("\nMemories:");
@@ -86,7 +145,7 @@ export function buildSystemPrompt(
     }
 
     lines.push("\n----- END USER CONTEXT -----");
-  } else if (!hasIdentity(identity)) {
+  } else {
     lines.push("\n(No saved user context was relevant to this message.)");
   }
 

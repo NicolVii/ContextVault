@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   PERSONA_PROMPT_MAX,
+  augmentUserMessageForModel,
   buildSystemPrompt,
+  composeChatMessages,
   toUserIdentity,
 } from "../src/lib/ai/context";
 import type { RetrievedMemory } from "../src/lib/types";
@@ -63,21 +65,27 @@ describe("toUserIdentity", () => {
 });
 
 describe("buildSystemPrompt identity block", () => {
-  it("includes the user's name in USER IDENTITY", () => {
+  it("includes the user's name in USER IDENTITY before guidelines", () => {
     const { systemPrompt, identity } = buildSystemPrompt([], [], {
       displayName: "Alex Rivera",
     });
     expect(identity.displayName).toBe("Alex Rivera");
     expect(systemPrompt).toContain("----- USER IDENTITY -----");
     expect(systemPrompt).toContain("The user's name is Alex Rivera.");
-    expect(systemPrompt).toContain("USER IDENTITY is authoritative");
+    expect(systemPrompt.indexOf("USER IDENTITY")).toBeLessThan(
+      systemPrompt.indexOf("You are Context Vault")
+    );
+    expect(systemPrompt).toContain("Account profile / USER IDENTITY is authoritative");
   });
 
-  it("includes persona in USER IDENTITY", () => {
+  it("mirrors identity into USER CONTEXT account profile", () => {
     const { systemPrompt } = buildSystemPrompt([], [], {
+      displayName: "Alex Rivera",
       persona: "Prefer short, direct answers",
     });
+    expect(systemPrompt).toContain("Account profile:");
     expect(systemPrompt).toContain("Persona: Prefer short, direct answers");
+    expect(systemPrompt).toContain("----- USER CONTEXT");
   });
 
   it("omits the identity section when profile fields are empty", () => {
@@ -110,5 +118,44 @@ describe("buildSystemPrompt identity block", () => {
       systemPrompt.indexOf("USER CONTEXT")
     );
     expect(systemPrompt).toContain("Never say you don't have their name");
+    expect(systemPrompt).toContain("earlier assistant turns");
+  });
+});
+
+describe("augmentUserMessageForModel", () => {
+  it("prefixes the outbound user turn with identity facts", () => {
+    const out = augmentUserMessageForModel("What is my name?", {
+      displayName: "Alex Rivera",
+    });
+    expect(out).toContain("The user's name is Alex Rivera.");
+    expect(out).toContain("What is my name?");
+    expect(out.indexOf("Alex Rivera")).toBeLessThan(out.indexOf("What is my name?"));
+  });
+
+  it("leaves the message unchanged when identity is empty", () => {
+    expect(augmentUserMessageForModel("Hello", {})).toBe("Hello");
+  });
+});
+
+describe("composeChatMessages", () => {
+  it("keeps history then sends an identity-augmented user turn", () => {
+    const msgs = composeChatMessages({
+      systemPrompt: "system",
+      history: [
+        { role: "user", content: "What is my name?" },
+        {
+          role: "assistant",
+          content: "I don't have your name saved in my context.",
+        },
+      ],
+      userMessage: "What is my name?",
+      identity: { displayName: "Alex Rivera" },
+    });
+    expect(msgs[0]).toEqual({ role: "system", content: "system" });
+    expect(msgs[1]?.content).toBe("What is my name?");
+    expect(msgs[2]?.content).toContain("I don't have your name");
+    expect(msgs.at(-1)?.role).toBe("user");
+    expect(msgs.at(-1)?.content).toContain("The user's name is Alex Rivera.");
+    expect(msgs.at(-1)?.content).toContain("What is my name?");
   });
 });
