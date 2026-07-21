@@ -1,7 +1,7 @@
 /**
  * Validate the local development environment.
  *
- * Usage: pnpm doctor
+ * Usage: pnpm health
  */
 import { existsSync } from "node:fs";
 import {
@@ -84,10 +84,10 @@ async function main() {
   }
 
   if (failed) {
-    console.error(`\ndoctor: ${failed} check(s) failed`);
+    console.error(`\nhealth: ${failed} check(s) failed`);
     process.exit(1);
   }
-  console.log("\ndoctor: all checks passed");
+  console.log("\nhealth: all checks passed");
 }
 
 main().catch((err) => {

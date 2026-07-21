@@ -1,5 +1,5 @@
 /**
- * Shared helpers for local env files used by setup / doctor / env:sync / seed.
+ * Shared helpers for local env files used by bootstrap / health / env:sync / seed.
  */
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
 import { resolve } from "node:path";

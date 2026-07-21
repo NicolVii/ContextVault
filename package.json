@@ -15,8 +15,8 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test:unit",
     "check:full": "pnpm check && pnpm test:integration",
     "env:sync": "node --import tsx scripts/env-sync.ts",
-    "doctor": "node --import tsx scripts/doctor.ts",
-    "setup": "node --import tsx scripts/setup.ts",
+    "health": "node --import tsx scripts/doctor.ts",
+    "bootstrap": "node --import tsx scripts/setup.ts",
     "db:start": "supabase start",
     "db:reset": "supabase db reset && pnpm db:seed",
     "db:seed": "node --import tsx scripts/seed-runner.ts"

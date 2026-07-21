@@ -41,14 +41,14 @@ default to a deterministic local provider.
 ### Quick start
 
 ```bash
-pnpm setup          # install, .env.local, supabase start, migrate + seed
-pnpm doctor         # optional health check
+pnpm bootstrap          # install, .env.local, supabase start, migrate + seed
+pnpm health         # optional health check
 pnpm dev            # http://localhost:3000
 ```
 
 Demo login: `demo@contextvault.local` / `demo-password-123`.
 
-`pnpm setup` creates `.env.local` from `.env.example` (well-known **local-only**
+`pnpm bootstrap` creates `.env.local` from `.env.example` (well-known **local-only**
 demo JWTs) and refreshes keys from `supabase status` when the stack is up.
 To refresh env later: `pnpm env:sync`.
 
@@ -59,8 +59,8 @@ Cursor Cloud agents: see [`AGENTS.md`](AGENTS.md).
 
 | Command | Description |
 | --- | --- |
-| `pnpm setup` | Install deps, sync env, start Supabase, migrate + seed |
-| `pnpm doctor` | Validate Node/pnpm/Docker/CLI/env/Supabase API |
+| `pnpm bootstrap` | Install deps, sync env, start Supabase, migrate + seed |
+| `pnpm health` | Validate Node/pnpm/Docker/CLI/env/Supabase API |
 | `pnpm env:sync` | Create/update `.env.local` from example + `supabase status` |
 | `pnpm dev` | Start the Next.js dev server |
 | `pnpm build` | Production build |
@@ -169,7 +169,7 @@ src/
     ratelimit.ts, audit.ts, validation.ts
 supabase/migrations/      # schema, RLS, functions, storage, grants
 tests/                    # automated tests (unit + integration)
-scripts/                  # setup, doctor, env-sync, seed
+scripts/                  # bootstrap, health, env-sync, seed
 CONTRIBUTING.md           # branch / commit / PR process
 AGENTS.md                 # Cursor Cloud + agent rules
 ```
@@ -228,7 +228,7 @@ Historical checklist of the MVP work that is already in tree (not a roadmap):
    structured extraction into the review queue (OpenRouter or offline mock).
 7. **Documents** — upload → validate → store → extract → chunk → embed → cite.
 8. **Quality** — automated tests, lint, typecheck, build, seed data; local
-   `setup` / `doctor` / `check` scripts for reproducible development.
+   `bootstrap` / `health` / `check` scripts for reproducible development.
 
 **Next process work (Phase 2, not implemented here):** GitHub Actions, required
 checks, Vercel preview/production, hosted Supabase, and env separation.

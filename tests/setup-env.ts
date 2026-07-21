@@ -50,7 +50,7 @@ export function assertIntegrationEnv(): void {
         "Integration tests require a running local Supabase stack and filled env.",
         hasLocal
           ? `Missing keys: ${missing.join(", ")}. Run \`pnpm env:sync\`.`
-          : "No .env.local found. Run `pnpm setup` or `pnpm env:sync`.",
+          : "No .env.local found. Run `pnpm bootstrap` or `pnpm env:sync`.",
         "Then: `pnpm db:start` (if needed) and re-run `pnpm test:integration` or `pnpm check:full`.",
       ].join("\n"),
     );

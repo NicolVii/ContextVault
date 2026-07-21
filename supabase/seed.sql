@@ -1,4 +1,4 @@
 -- Local SQL seed placeholder.
 -- Demo user + sample memories/documents are seeded by `pnpm db:seed`
--- (scripts/seed.ts), which `pnpm db:reset` and `pnpm setup` run after
+-- (scripts/seed.ts), which `pnpm db:reset` and `pnpm bootstrap` run after
 -- migrations. Keep this file so `supabase db reset` can resolve sql_paths.

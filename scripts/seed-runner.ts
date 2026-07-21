@@ -8,7 +8,7 @@ import { ENV_LOCAL, loadEnvLocalIntoProcess } from "./env";
 
 if (!existsSync(ENV_LOCAL)) {
   console.error(
-    `.env.local not found. Run \`pnpm env:sync\` (or \`pnpm setup\`) before seeding.`,
+    `.env.local not found. Run \`pnpm env:sync\` (or \`pnpm bootstrap\`) before seeding.`,
   );
   process.exit(1);
 }

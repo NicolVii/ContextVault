@@ -2,11 +2,14 @@
  * One-command local bootstrap:
  *   pnpm install → env → Supabase up → db reset + seed
  *
- * Usage: pnpm setup
+ * Usage: pnpm bootstrap
  *
  * Does not start Docker itself on Cursor Cloud — start dockerd first
  * (see AGENTS.md). On a normal laptop, start Docker Desktop / the daemon
  * before running this script.
+ *
+ * Note: the script file is setup.ts; the package script is named
+ * `bootstrap` because bare `pnpm setup` is a pnpm builtin that mutates PATH.
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -46,7 +49,7 @@ function main() {
     throw new Error(
       "Docker is not reachable. Start Docker Desktop (or on Cursor Cloud: " +
         "`sudo dockerd > /tmp/dockerd.log 2>&1 &; sleep 8; sudo chmod 666 /var/run/docker.sock`) " +
-        "then re-run `pnpm setup`.",
+        "then re-run `pnpm bootstrap`.",
     );
   }
 
@@ -78,7 +81,7 @@ Setup complete.
 
   Demo login:  demo@contextvault.local / demo-password-123
   App:         pnpm dev   → http://localhost:3000
-  Health:      pnpm doctor
+  Health:      pnpm health
   Fast checks: pnpm check
   Full checks: pnpm check:full   (requires Supabase)
 `);

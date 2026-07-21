@@ -13,8 +13,8 @@ Cursor Cloud boot details live in [`AGENTS.md`](AGENTS.md).
 ## Bootstrap
 
 ```bash
-pnpm setup          # install, env, supabase start, migrate + seed
-pnpm doctor         # validate toolchain, .env.local, Supabase API
+pnpm bootstrap          # install, env, supabase start, migrate + seed
+pnpm health         # validate toolchain, .env.local, Supabase API
 pnpm dev            # http://localhost:3000
 ```
 
@@ -43,7 +43,7 @@ values from `supabase status`; falls back to the local demo JWTs in
 ## Commits
 
 - Prefer **small, reviewable commits** over one large dump.
-- Use imperative, descriptive subjects (e.g. `Add doctor script for local health checks`).
+- Use imperative, descriptive subjects (e.g. `Add health script for local checks`).
 - Stage only files related to the task — no drive-by refactors or unrelated docs.
 
 ## Preserve existing features

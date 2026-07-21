@@ -33,12 +33,12 @@ sleep 8
 sudo chmod 666 /var/run/docker.sock
 
 # 2. One-command bootstrap (env + supabase start + migrate + demo seed).
-pnpm setup
+pnpm bootstrap
 #    Or step-by-step:
 #    pnpm db:start && pnpm env:sync && pnpm db:reset
 
 # 3. Confirm health, then run the app.
-pnpm doctor
+pnpm health
 pnpm dev                # http://localhost:3000
 ```
 
@@ -48,9 +48,9 @@ Demo login: `demo@contextvault.local` / `demo-password-123`.
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm setup` | Install, sync `.env.local`, start Supabase, migrate + seed |
+| `pnpm bootstrap` | Install, sync `.env.local`, start Supabase, migrate + seed |
 | `pnpm env:sync` | Create/update `.env.local` (from example + `supabase status`) |
-| `pnpm doctor` | Validate Node/pnpm/Docker/CLI/env/Supabase API |
+| `pnpm health` | Validate Node/pnpm/Docker/CLI/env/Supabase API |
 | `pnpm db:start` | `supabase start` |
 | `pnpm db:reset` | Migrations + `pnpm db:seed` |
 | `pnpm db:seed` | Demo user + sample data (`scripts/seed.ts`) |
@@ -60,7 +60,7 @@ Demo login: `demo@contextvault.local` / `demo-password-123`.
 
 ## Gotchas
 
-- **`.env.local`:** git-ignored. Create it with `pnpm env:sync` or `pnpm setup`
+- **`.env.local`:** git-ignored. Create it with `pnpm env:sync` or `pnpm bootstrap`
   **before** `pnpm db:seed`. `.env.example` ships well-known **local-only**
   demo JWTs; `env:sync` refreshes them from `supabase status` when the stack
   is up. Never use those JWTs in hosted environments.
