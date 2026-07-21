@@ -10,7 +10,7 @@ const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 /**
  * Chat provider backed by OpenRouter. The API key is server-only
  * (OPENROUTER_API_KEY) and is never sent to the browser. Model ids use
- * OpenRouter's "vendor/model" form (see src/lib/ai/models.ts).
+ * the provider's "vendor/model" form from registry bindings.
  */
 export class OpenRouterChatProvider implements ChatProvider {
   readonly name = "openrouter";
@@ -45,7 +45,6 @@ export class OpenRouterChatProvider implements ChatProvider {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
-        // Optional attribution headers recommended by OpenRouter.
         "HTTP-Referer": this.referer,
         "X-Title": this.title,
       },
@@ -58,11 +57,29 @@ export class OpenRouterChatProvider implements ChatProvider {
 
     const json = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+      };
     };
+
+    const usage = json.usage;
     return {
       content: json.choices?.[0]?.message?.content ?? "",
       model,
       mocked: false,
+      providerUsage: usage,
+      usage: usage
+        ? {
+            measures: {
+              inputTokens: usage.prompt_tokens,
+              outputTokens: usage.completion_tokens,
+              totalTokens: usage.total_tokens,
+            },
+            measuresSource: "provider",
+          }
+        : undefined,
     };
   }
 }

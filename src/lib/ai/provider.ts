@@ -1,3 +1,5 @@
+import type { MeasuresSource, UsageMeasures } from "@/lib/inference/types";
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -5,10 +7,20 @@ export interface ChatMessage {
 
 export interface ChatCompletion {
   content: string;
-  /** The resolved model label shown in the UI (may be suffixed, e.g. "(mock)"). */
+  /** Display / resolved model label (may be suffixed, e.g. "(mock)"). */
   model: string;
-  /** True when the local mock model produced the response. */
   mocked: boolean;
+  /** Canonical usage measures when the adapter could produce them. */
+  usage?: {
+    measures: UsageMeasures;
+    measuresSource: MeasuresSource;
+  };
+  /** Raw OpenAI-compatible usage blob for mappers (OpenRouter). */
+  providerUsage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
 }
 
 /** Optional knobs for a single completion (used by extraction and chat). */
@@ -19,10 +31,8 @@ export interface ChatCompletionOptions {
 }
 
 /**
- * Internal chat-provider interface. A concrete provider owns how a chat
- * completion is produced. The default `OpenRouterChatProvider` calls OpenRouter;
- * `MockChatProvider` keeps the app demoable offline. This mirrors the
- * MemoryProvider / EmbeddingProvider abstractions so backends stay swappable.
+ * Outbound LLM adapter port. Adapters speak provider model ids.
+ * Product code should prefer the Inference Router (`runInference`) instead.
  */
 export interface ChatProvider {
   readonly name: string;

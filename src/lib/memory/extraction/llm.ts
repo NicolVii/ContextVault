@@ -2,7 +2,11 @@ import type { ChatProvider } from "@/lib/ai";
 import type { ExtractionProvider, RawExtractedCandidate } from "./provider";
 import { parseExtractionResponse } from "./schema";
 
-const DEFAULT_MODEL = "openai/gpt-4o-mini";
+import { toProviderModelId, DEFAULT_MODEL_ID } from "@/lib/inference/models";
+
+const DEFAULT_MODEL = toProviderModelId(
+  process.env.EXTRACTION_MODEL ?? DEFAULT_MODEL_ID
+);
 
 export const EXTRACTION_SYSTEM_PROMPT = `You extract durable personal memories from a user's chat message for a personal AI memory vault.
 
@@ -35,7 +39,9 @@ export class LlmExtractionProvider implements ExtractionProvider {
 
   constructor(chat: ChatProvider, model?: string) {
     this.chat = chat;
-    this.model = model ?? process.env.EXTRACTION_MODEL ?? DEFAULT_MODEL;
+    this.model = model
+      ? toProviderModelId(model)
+      : DEFAULT_MODEL;
   }
 
   async extract(text: string): Promise<RawExtractedCandidate[]> {

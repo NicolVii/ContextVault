@@ -21,7 +21,7 @@ behind an internal memory-service interface.
 - **Add / edit / archive / delete** memories with confirmation before permanent deletion.
 - **Review queue** — LLM-extracted (or heuristic, offline) memories are always `proposed` and must be approved; sensitive items are never auto-approved.
 - **Documents** — upload PDF/text, extract + chunk + embed with `pgvector`, cited by filename and page.
-- **Multi-model chat** — pick an OpenRouter model; relevant memories/documents are retrieved and injected into a separated `USER CONTEXT` block; every reply shows exactly which memories were used.
+- **Multi-model chat** — Auto / presets / explicit models via the Inference Router; relevant memories/documents are retrieved and injected into a separated `USER CONTEXT` block; every reply shows exactly which memories were used.
 - **Privacy** — JSON export, delete-all-memories, and full account deletion; audit log of security-relevant actions.
 
 Works fully **offline for development**: with no `OPENROUTER_API_KEY` a local
@@ -86,21 +86,32 @@ Set these in `.env.local` (server-only — never exposed to the browser):
   structured LLM memory extraction (optional `EXTRACTION_MODEL`).
 - `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` — use real embeddings.
 
-### Chat provider (OpenRouter)
+### Chat / inference
 
-Chat goes through a `ChatProvider` interface (`src/lib/ai/`). When
-`OPENROUTER_API_KEY` is set, `OpenRouterChatProvider` calls OpenRouter's
-`/chat/completions` API using the `vendor/model` ids in `src/lib/ai/models.ts`;
-otherwise `MockChatProvider` is used so the app runs offline. No code changes
-are needed to switch — just set the key.
+Product chat goes through the **Context Orchestrator**
+(`src/lib/orchestration/`) which assembles identity, memories, and documents,
+then calls the **Inference Router** (`src/lib/inference/`). The router resolves
+Auto / presets / explicit models to a logical `cortaix` model id, maps that to
+a provider binding, gates the credit wallet, and calls a `ChatProvider`
+adapter.
 
-The same key enables `LlmExtractionProvider` for post-chat memory extraction
-(see Architecture → Memory extraction). Without it, extraction uses offline
-heuristics.
+OpenRouter is the first adapter (`src/lib/ai/openrouter.ts`), not the product
+backend. When `OPENROUTER_API_KEY` is set, `OpenRouterChatProvider` is used;
+otherwise `MockChatProvider` keeps the app offline-demoable (mock turns are
+free on the credit ledger).
+
+Canonical usage is recorded in `usage_events` and settled against
+`credit_accounts` using the Cortaix price book — independent of any vendor
+response shape.
+
+The same OpenRouter key enables `LlmExtractionProvider` for post-chat memory
+extraction (see Architecture → Memory extraction). Without it, extraction uses
+offline heuristics.
 
 1. Create a key at [openrouter.ai/keys](https://openrouter.ai/keys).
 2. Put it in `.env.local` as `OPENROUTER_API_KEY=...` (and restart `pnpm dev`).
-3. Optional: `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, `EXTRACTION_MODEL`.
+3. Optional: `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, `EXTRACTION_MODEL`
+   (cortaix id such as `openai.gpt-4o-mini`, or a legacy provider id).
 
 The key is only ever read server-side (chat + extraction) and is never sent to
 the browser.
@@ -156,18 +167,20 @@ rejects the request — so leave it unconfigured locally unless you have a clien
 src/
   app/                    # Pages (App Router) + API route handlers
     (app)/                # Authenticated area (dashboard, chat, documents, …)
-    api/                  # memories, chat, documents, export, account, profile
+    api/                  # memories, chat, documents, credits, export, account, profile
   components/             # UI components
   lib/
     supabase/             # server / browser / admin clients + middleware
     memory/               # MemoryProvider interface, Supabase + Mem0 providers,
                           # ExtractionProvider (LLM + heuristic), redaction
     embeddings/           # pluggable embedding providers (local + OpenAI)
-    ai/                   # ChatProvider interface (OpenRouter + mock), model
-                          # list, USER CONTEXT builder
-    documents/            # PDF/text extraction + chunking
+    inference/            # model registry, router, usage drafts, credits, metering
+    orchestration/        # Context Orchestrator (chat application service)
+    conversation/         # ConversationStore port
+    ai/                   # ChatProvider adapters (OpenRouter + mock), context builder
+    documents/            # PDF/text extraction, chunking, DocumentRetriever
     ratelimit.ts, audit.ts, validation.ts
-supabase/migrations/      # schema, RLS, functions, storage, grants
+supabase/migrations/      # schema, RLS, functions, storage, grants, metering
 tests/                    # automated tests (unit + integration)
 scripts/                  # bootstrap, health, env-sync, seed
 CONTRIBUTING.md           # branch / commit / PR process
@@ -205,7 +218,7 @@ returns candidates and is never delegated to the model alone: forbidden secrets
 (passwords, API keys, payment data, government IDs) are dropped; medical /
 financial / identity-attribute content is flagged `is_sensitive` for human
 review. Optional `EXTRACTION_MODEL` selects the extraction model (default
-`openai/gpt-4o-mini`); `EXTRACTION_TIMEOUT_MS` caps each call (default 8000).
+`openai.gpt-4o-mini`); `EXTRACTION_TIMEOUT_MS` caps each call (default 8000).
 Invalid JSON or schema-invalid LLM output triggers the heuristic fallback for
 that request; a valid `{"memories":[]}` is kept as intentionally empty.
 
@@ -217,15 +230,17 @@ Historical checklist of the MVP work that is already in tree (not a roadmap):
 
 1. **Foundation** — Next.js + TypeScript + Tailwind; Supabase local stack.
 2. **Data model** — enums, tables (`profiles`, `memories`, `documents`,
-   `document_chunks`, `chat_*`, `audit_log`, `rate_limits`), `pgvector` columns
+   `document_chunks`, `chat_*`, `audit_log`, `rate_limits`, `usage_events`,
+   `credit_accounts`, `credit_ledger`, `price_book`), `pgvector` columns
    and match functions.
 3. **Security first** — RLS on every table, explicit role grants, storage
    policies, service-role isolation.
 4. **Memory service** — provider interface, embeddings, ExtractionProvider
    (LLM + heuristic) + redaction; optional hybrid Mem0 provider.
 5. **Product surface** — the ten pages and their API routes.
-6. **Chat** — retrieval → context injection → provenance → post-response
-   structured extraction into the review queue (OpenRouter or offline mock).
+6. **Chat** — Context Orchestrator → Inference Router → provider adapter;
+   retrieval → context injection → provenance → post-response structured
+   extraction into the review queue; credit-gated metering on platform turns.
 7. **Documents** — upload → validate → store → extract → chunk → embed → cite.
 8. **Quality** — automated tests, lint, typecheck, build, seed data; local
    `bootstrap` / `health` / `check` scripts for reproducible development.

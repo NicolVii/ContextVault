@@ -1,27 +1,42 @@
-export interface ChatModel {
-  id: string;
-  label: string;
-  vendor: string;
-}
+/**
+ * Back-compat surface for Thinking / Vault UI.
+ * Canonical catalog lives in `@/lib/inference/models`.
+ */
+export {
+  CHAT_MODELS,
+  type ChatModel,
+  DEFAULT_MODEL_ID,
+  MODEL_PRESETS,
+  parseSelection,
+  isValidSelection,
+  chatPickerOptions,
+  toProviderModelId,
+  resolveModelProfile,
+  selectionToStorageKey,
+} from "@/lib/inference/models";
 
-/** Session / request value meaning “use the user’s default model”. */
+import {
+  CHAT_MODELS,
+  DEFAULT_MODEL_ID,
+  isValidSelection,
+  resolveModelProfile,
+} from "@/lib/inference/models";
+
+/** Session / request value meaning “use the user’s default model” / router Auto. */
 export const AUTO_MODEL_ID = "auto" as const;
 
-/** A curated shortlist of models exposed in the Thinking plus menu. */
-export const CHAT_MODELS: ChatModel[] = [
-  { id: "openai/gpt-4o-mini", label: "GPT-4o mini", vendor: "OpenAI" },
-  { id: "openai/gpt-4o", label: "GPT-4o", vendor: "OpenAI" },
-  { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", vendor: "Anthropic" },
-  { id: "google/gemini-flash-1.5", label: "Gemini 1.5 Flash", vendor: "Google" },
-  { id: "meta-llama/llama-3.1-70b-instruct", label: "Llama 3.1 70B", vendor: "Meta" },
-];
-
 export function isValidModel(id: string): boolean {
-  return id === AUTO_MODEL_ID || CHAT_MODELS.some((m) => m.id === id);
+  return id === AUTO_MODEL_ID || isValidSelection(id);
 }
 
 export function modelLabel(id: string): string {
   if (id === AUTO_MODEL_ID) return "Auto";
+  if (id.startsWith("preset:")) {
+    const preset = id.slice("preset:".length);
+    return preset.charAt(0).toUpperCase() + preset.slice(1).replace(/-/g, " ");
+  }
+  const profile = resolveModelProfile(id);
+  if (profile) return profile.displayName;
   return CHAT_MODELS.find((m) => m.id === id)?.label ?? id;
 }
 
@@ -31,5 +46,10 @@ export function resolvedModelDisplay(choice: string, resolvedId: string): string
     const resolved = modelLabel(resolvedId);
     return resolved === resolvedId ? "Auto" : `Auto (${resolved})`;
   }
+  if (choice.startsWith("preset:")) {
+    return `${modelLabel(choice)} (${modelLabel(resolvedId)})`;
+  }
   return modelLabel(choice);
 }
+
+export { DEFAULT_MODEL_ID };

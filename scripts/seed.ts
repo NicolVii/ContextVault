@@ -68,9 +68,15 @@ async function main() {
       display_name: "Sam Rivera",
       persona: "Freelance product designer who values concise, practical answers.",
       onboarding_completed: true,
-      default_model: "openai/gpt-4o-mini",
+      default_model: "openai.gpt-4o-mini",
     })
     .eq("id", userId);
+
+  // Ensure demo wallet has credits for platform inference.
+  await admin.from("credit_accounts").upsert(
+    { user_id: userId, balance: 1_000_000 },
+    { onConflict: "user_id" }
+  );
 
   // Reset existing demo data for idempotency.
   await admin.from("memories").delete().eq("user_id", userId);
