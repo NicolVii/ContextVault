@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getMemoryProvider } from "@/lib/memory";
 import { extractCandidates } from "@/lib/memory/extraction";
-import { buildSystemPrompt, composeChatMessages, toUserIdentity } from "@/lib/ai/context";
+import {
+  buildSystemPrompt,
+  composeChatMessages,
+  directIdentityAnswer,
+  toUserIdentity,
+} from "@/lib/ai/context";
 import { getChatProvider, type ChatMessage } from "@/lib/ai";
 import { isValidModel } from "@/lib/ai/models";
 import { displayNameFromUser } from "@/lib/profile";
@@ -10,6 +15,9 @@ import { chatRequestSchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
 import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
+
+/** Always resolve identity fresh — never serve a cached chat handler. */
+export const dynamic = "force-dynamic";
 
 const MIN_SIMILARITY = 0.05;
 const HISTORY_LIMIT = 10;
@@ -120,25 +128,31 @@ export async function POST(request: Request) {
     content: message,
   });
 
-  // 7. Call the model through the active chat provider (OpenRouter or mock).
-  // Identity is also prefixed onto the outbound user turn (not persisted) so
-  // models that overweight recent dialogue still see the account name.
-  let result;
-  try {
-    result = await getChatProvider().complete(
-      model,
-      composeChatMessages({
-        systemPrompt,
-        history: historyMsgs,
-        userMessage: message,
-        identity,
-      })
-    );
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Model request failed" },
-      { status: 502 }
-    );
+  // 7. Answer name questions from structured identity when possible; otherwise
+  // call the model with identity in the system prompt and outbound user turn.
+  let result: { content: string; model: string; mocked?: boolean };
+  let identityDirect = false;
+  const direct = directIdentityAnswer(message, identity);
+  if (direct) {
+    identityDirect = true;
+    result = { content: direct, model, mocked: false };
+  } else {
+    try {
+      result = await getChatProvider().complete(
+        model,
+        composeChatMessages({
+          systemPrompt,
+          history: historyMsgs,
+          userMessage: message,
+          identity,
+        })
+      );
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Model request failed" },
+        { status: 502 }
+      );
+    }
   }
 
   // 8. Persist the assistant message and its context provenance.
@@ -215,6 +229,7 @@ export async function POST(request: Request) {
       memories_used: usedMemories.length,
       chunks_used: usedChunks.length,
       identity_used: Boolean(identity.displayName || identity.persona),
+      identity_direct: identityDirect,
       proposed: proposedCount,
     },
   });
@@ -225,6 +240,7 @@ export async function POST(request: Request) {
     usedMemories,
     usedChunks,
     usedIdentity: identity,
+    identityDirectAnswer: identityDirect,
     proposedCount,
     mocked: result.mocked,
   });

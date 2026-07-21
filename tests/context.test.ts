@@ -4,6 +4,7 @@ import {
   augmentUserMessageForModel,
   buildSystemPrompt,
   composeChatMessages,
+  directIdentityAnswer,
   toUserIdentity,
 } from "../src/lib/ai/context";
 import type { RetrievedMemory } from "../src/lib/types";
@@ -157,5 +158,25 @@ describe("composeChatMessages", () => {
     expect(msgs.at(-1)?.role).toBe("user");
     expect(msgs.at(-1)?.content).toContain("The user's name is Alex Rivera.");
     expect(msgs.at(-1)?.content).toContain("What is my name?");
+  });
+});
+
+describe("directIdentityAnswer", () => {
+  it("answers name questions from structured identity without the LLM", () => {
+    expect(directIdentityAnswer("What is my name?", { displayName: "Alex Rivera" })).toBe(
+      "Your name is Alex Rivera."
+    );
+    expect(directIdentityAnswer("who am I?", { displayName: "Alex Rivera" })).toBe(
+      "Your name is Alex Rivera."
+    );
+    expect(directIdentityAnswer("Do you know my name?", { displayName: "Sam" })).toBe(
+      "Your name is Sam."
+    );
+  });
+
+  it("does not short-circuit unrelated questions", () => {
+    expect(directIdentityAnswer("Where do I live?", { displayName: "Alex Rivera" })).toBeNull();
+    expect(directIdentityAnswer("What is my name?", {})).toBeNull();
+    expect(directIdentityAnswer("What is my name?", { persona: "Engineer" })).toBeNull();
   });
 });

@@ -100,6 +100,30 @@ export function composeChatMessages(args: {
 }
 
 /**
+ * When the account profile already has a display name, answer name questions
+ * from structured identity instead of asking the LLM. Soft prompt injection
+ * has proven unreliable across models/history in production.
+ */
+export function directIdentityAnswer(
+  message: string,
+  identity: UserIdentity
+): string | null {
+  const name = identity.displayName?.trim();
+  if (!name) return null;
+
+  const text = message.trim();
+  if (!text) return null;
+
+  const asksName =
+    /\b(?:what(?:['’]?s| is|s)?\s+my\s+name|what(?:['’]?s| is)?\s+the\s+user['’]?s\s+name|who\s+am\s+i|do\s+you\s+(?:know|remember)\s+my\s+name|remind\s+me\s+(?:of\s+)?my\s+name|what\s+name\s+do\s+you\s+have(?:\s+for\s+me)?|have\s+you\s+(?:got|saved)\s+my\s+name)\b/i.test(
+      text
+    ) || /^(?:my\s+)?name\??$/i.test(text);
+
+  if (!asksName) return null;
+  return `Your name is ${name}.`;
+}
+
+/**
  * Build the system prompt with identity first (high salience), then guidelines,
  * then USER CONTEXT. Account profile is also mirrored into USER CONTEXT so
  * models that mainly attend to that section still see the name.
