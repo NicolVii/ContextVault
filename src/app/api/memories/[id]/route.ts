@@ -36,9 +36,17 @@ export async function PATCH(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Keep the embedding in sync when the content changes.
+  const provider = getMemoryProvider();
   if (parsed.data.content !== undefined) {
-    await getMemoryProvider().reembed(ctx.supabase, params.id, parsed.data.content);
+    await provider.reembed(ctx.supabase, params.id, parsed.data.content);
+  } else if (
+    parsed.data.status !== undefined ||
+    parsed.data.type !== undefined ||
+    parsed.data.category !== undefined ||
+    parsed.data.confidence !== undefined ||
+    parsed.data.expires_at !== undefined
+  ) {
+    await provider.syncMetadata(ctx.supabase, params.id);
   }
 
   await recordAudit({
@@ -58,6 +66,8 @@ export async function DELETE(
 ) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  await getMemoryProvider().remove(ctx.supabase, params.id);
 
   const { error } = await ctx.supabase
     .from("memories")
