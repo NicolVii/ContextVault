@@ -1,17 +1,15 @@
 import { redirect } from "next/navigation";
-import { ShieldCheck, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { ShieldCheck, ChevronDown, ChevronRight } from "lucide-react";
 import { DangerZone } from "@/components/DangerZone";
 import { ProfileFields } from "@/components/ProfileFields";
 import { AdvancedModelSettings } from "@/components/AdvancedModelSettings";
-import { BillingPanel } from "@/components/BillingPanel";
 import { ByokPanel } from "@/components/ByokPanel";
 import { WorkspacePanel } from "@/components/WorkspacePanel";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureUserProfile } from "@/lib/profile";
-import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
-import { isStripeConfigured } from "@/lib/billing/products";
-import { isDevTopupAllowed } from "@/lib/billing/dev-topup";
+import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
 import { formatDate } from "@/lib/utils";
 import type { Profile } from "@/lib/types";
 
@@ -25,33 +23,15 @@ export default async function VaultSettingsPage() {
   const profile = await ensureUserProfile(supabase, user);
   if (!profile) redirect("/onboarding");
 
-  await ensureCreditAccount(user.id);
-  const balance = await getCreditBalance(user.id);
   const admin = createSupabaseAdminClient();
+  const snap = await getPlanUsageSnapshot(user.id);
 
-  const [
-    { data: audit },
-    { data: sub },
-    { data: recent },
-    { data: keys },
-    { data: workspaces },
-  ] = await Promise.all([
+  const [{ data: audit }, { data: keys }, { data: workspaces }] = await Promise.all([
     supabase
       .from("audit_log")
       .select("action, created_at, entity_type")
       .order("created_at", { ascending: false })
       .limit(10),
-    admin
-      .from("subscriptions")
-      .select("plan_id, status")
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    admin
-      .from("usage_events")
-      .select("request_id, purpose, model_id, credits_charged, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(12),
     admin
       .from("user_provider_keys")
       .select("provider, label, created_at")
@@ -74,20 +54,18 @@ export default async function VaultSettingsPage() {
       </section>
 
       <section>
-        <h2 className="text-sm font-semibold text-ink">Billing</h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          Credits power inference. You buy from Cortaix — providers stay behind the scenes.
-        </p>
-        <div className="mt-4">
-          <BillingPanel
-            balance={balance}
-            planId={(sub?.plan_id as string) ?? "free"}
-            planStatus={(sub?.status as string) ?? null}
-            stripeConfigured={isStripeConfigured()}
-            allowDevTopup={isDevTopupAllowed()}
-            recent={recent ?? []}
-          />
-        </div>
+        <Link
+          href="/vault/plan"
+          className="flex items-center gap-3 rounded-2xl border border-mist-200 px-4 py-4 transition-colors hover:bg-mist-50"
+        >
+          <div className="flex-1">
+            <span className="text-sm font-medium text-ink">Plan &amp; Usage</span>
+            <p className="mt-0.5 text-xs text-ink-faint">
+              Current plan, usage, and billing management
+            </p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-ink-faint" />
+        </Link>
       </section>
 
       <section>
@@ -138,19 +116,30 @@ export default async function VaultSettingsPage() {
             </div>
             <div>
               <h3 className="text-sm font-medium text-ink">Bring your own key</h3>
-              <p className="mt-1 text-xs text-ink-muted">
-                Optional provider credentials (configuration). Model selection
-                still happens in Thinking. Inference on your key is not debited
-                from Cortaix credits.
-              </p>
-              <div className="mt-3">
-                <ByokPanel initialKeys={keys ?? []} />
-              </div>
+              {snap.entitlements.byok ? (
+                <>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    Optional provider credentials. Inference on your key is not debited from
+                    Cortaix usage.
+                  </p>
+                  <div className="mt-3">
+                    <ByokPanel initialKeys={keys ?? []} />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-1 text-xs text-ink-muted">
+                  BYOK is included with Pro.{" "}
+                  <Link href="/vault/plan" className="underline">
+                    View plans
+                  </Link>
+                </p>
+              )}
             </div>
             <div>
               <h3 className="text-sm font-medium text-ink">Workspaces</h3>
               <p className="mt-1 text-xs text-ink-muted">
-                Project defaults and optional monthly credit budgets.
+                Personal project labels and optional monthly budgets. Shared team workspaces are
+                not part of the launch plans.
               </p>
               <div className="mt-3">
                 <WorkspacePanel initial={workspaces ?? []} />

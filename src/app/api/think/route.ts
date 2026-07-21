@@ -26,6 +26,7 @@ import {
   InsufficientCreditsError,
   type SelectionPolicy,
 } from "@/lib/inference";
+import { PlanUsageBlockedError } from "@/lib/billing/plan-usage";
 import { z } from "zod";
 import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
 
@@ -118,6 +119,12 @@ export async function POST(request: Request) {
           balance: err.balance,
           required: err.required,
         },
+        { status: 402 }
+      );
+    }
+    if (err instanceof PlanUsageBlockedError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
         { status: 402 }
       );
     }

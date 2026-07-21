@@ -74,6 +74,8 @@ export interface InferenceRequest {
     temperature?: number;
     json?: boolean;
   };
+  /** When true (Free plan), Auto routing stays on Auto-class models only. */
+  cheapOnlyRouting?: boolean;
   billingMode: BillingMode;
 }
 

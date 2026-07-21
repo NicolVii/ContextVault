@@ -63,7 +63,17 @@ export default async function VaultHubPage() {
         ))}
       </nav>
 
-      <nav className="mt-6 overflow-hidden rounded-2xl border border-mist-200 bg-white">
+      <nav className="mt-6 divide-y divide-mist-100 overflow-hidden rounded-2xl border border-mist-200 bg-white">
+        <Link
+          href="/vault/plan"
+          className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-mist-50"
+        >
+          <div className="flex-1">
+            <span className="text-sm font-medium text-ink">Plan &amp; Usage</span>
+            <p className="mt-0.5 text-xs text-ink-faint">Plan, usage, and billing</p>
+          </div>
+          <ChevronRight className="h-4 w-4 text-ink-faint" />
+        </Link>
         <Link
           href="/vault/settings"
           className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-mist-50"

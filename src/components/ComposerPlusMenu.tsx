@@ -3,7 +3,16 @@
 import { useEffect, useRef } from "react";
 import { Check, Paperclip } from "lucide-react";
 import { AUTO_MODEL_ID, CHAT_MODELS, MODEL_PRESETS } from "@/lib/ai/models";
+import { isFrontierModelId } from "@/lib/billing/usage-intensity";
 import { cn } from "@/lib/utils";
+
+export type ComposerPlanHints = {
+  attachments: boolean;
+  frontierAllowed: boolean;
+  frontierRemaining: number | null;
+  byok: boolean;
+  voice: boolean;
+};
 
 export function ComposerPlusMenu({
   open,
@@ -11,12 +20,14 @@ export function ComposerPlusMenu({
   modelChoice,
   onSelectModel,
   onUploadFile,
+  plan,
 }: {
   open: boolean;
   onClose: () => void;
   modelChoice: string;
   onSelectModel: (id: string) => void;
   onUploadFile: () => void;
+  plan?: ComposerPlanHints | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -40,6 +51,9 @@ export function ComposerPlusMenu({
 
   if (!open) return null;
 
+  const frontierAllowed = plan?.frontierAllowed ?? true;
+  const attachments = plan?.attachments ?? true;
+
   return (
     <div
       ref={ref}
@@ -62,32 +76,51 @@ export function ComposerPlusMenu({
         <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
           Presets
         </p>
-        {MODEL_PRESETS.map((p) => (
-          <ModelOption
-            key={p.id}
-            selected={modelChoice === `preset:${p.id}`}
-            label={p.label}
-            hint={p.description}
-            onClick={() => {
-              onSelectModel(`preset:${p.id}`);
-              onClose();
-            }}
-          />
-        ))}
+        {MODEL_PRESETS.map((p) => {
+          const frontierPreset = !["cheap", "fast"].includes(p.id);
+          const locked = frontierPreset && !frontierAllowed;
+          return (
+            <ModelOption
+              key={p.id}
+              selected={modelChoice === `preset:${p.id}`}
+              label={p.label}
+              hint={locked ? "Lite or Pro" : p.description}
+              disabled={locked}
+              onClick={() => {
+                if (locked) return;
+                onSelectModel(`preset:${p.id}`);
+                onClose();
+              }}
+            />
+          );
+        })}
         <p className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
           Models
         </p>
-        {CHAT_MODELS.map((m) => (
-          <ModelOption
-            key={m.id}
-            selected={modelChoice === m.id}
-            label={m.label}
-            onClick={() => {
-              onSelectModel(m.id);
-              onClose();
-            }}
-          />
-        ))}
+        {CHAT_MODELS.map((m) => {
+          const frontier = isFrontierModelId(m.id);
+          const locked = frontier && !frontierAllowed;
+          return (
+            <ModelOption
+              key={m.id}
+              selected={modelChoice === m.id}
+              label={m.label}
+              hint={
+                locked
+                  ? "Lite or Pro"
+                  : frontier && plan?.frontierRemaining != null
+                    ? `${plan.frontierRemaining} Frontier left`
+                    : undefined
+              }
+              disabled={locked}
+              onClick={() => {
+                if (locked) return;
+                onSelectModel(m.id);
+                onClose();
+              }}
+            />
+          );
+        })}
 
         <div className="my-1.5 border-t border-mist-100" />
 
@@ -97,14 +130,19 @@ export function ComposerPlusMenu({
         <button
           type="button"
           role="menuitem"
-          className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm text-ink hover:bg-mist-50"
+          disabled={!attachments}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm",
+            attachments ? "text-ink hover:bg-mist-50" : "cursor-not-allowed text-ink-faint"
+          )}
           onClick={() => {
+            if (!attachments) return;
             onUploadFile();
             onClose();
           }}
         >
           <Paperclip className="h-4 w-4 text-ink-muted" />
-          Upload file
+          {attachments ? "Upload file" : "Upload file · Lite or Pro"}
         </button>
       </div>
     </div>
@@ -116,32 +154,34 @@ function ModelOption({
   label,
   hint,
   onClick,
+  disabled,
 }: {
   selected: boolean;
   label: string;
   hint?: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
-      role="menuitemradio"
-      aria-checked={selected}
+      role="menuitem"
+      disabled={disabled}
       className={cn(
-        "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition-colors",
-        selected ? "bg-accent-soft text-ink" : "text-ink hover:bg-mist-50"
+        "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm",
+        disabled
+          ? "cursor-not-allowed text-ink-faint"
+          : selected
+            ? "bg-mist-50 text-ink"
+            : "text-ink hover:bg-mist-50"
       )}
       onClick={onClick}
     >
-      <span className="flex h-4 w-4 items-center justify-center">
-        {selected && <Check className="h-3.5 w-3.5 text-accent" />}
-      </span>
       <span className="flex-1">
-        {label}
-        {hint && (
-          <span className="ml-1.5 text-xs font-normal text-ink-faint">{hint}</span>
-        )}
+        <span className="block font-medium">{label}</span>
+        {hint && <span className="block text-[11px] text-ink-faint">{hint}</span>}
       </span>
+      {selected && !disabled && <Check className="h-4 w-4 text-accent" />}
     </button>
   );
 }

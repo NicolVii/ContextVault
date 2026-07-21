@@ -107,5 +107,7 @@ export function providerCostUsdMicros(
   return Math.round(input + output);
 }
 
-/** Starting wallet for new / demo users (admin-grant style). */
-export const DEFAULT_SIGNUP_CREDITS = 100_000;
+export {
+  DEFAULT_SIGNUP_CREDITS,
+  STANDARD_CONVERSATION_CREDITS,
+} from "@/lib/billing/constants";
