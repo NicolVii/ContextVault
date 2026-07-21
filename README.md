@@ -35,45 +35,48 @@ default to a deterministic local provider.
 ### Prerequisites
 
 - Node.js 20+ and [pnpm](https://pnpm.io)
-- [Docker](https://docs.docker.com/get-docker/) (for the local Supabase stack)
+- [Docker](https://docs.docker.com/get-docker/) running (for the local Supabase stack)
 - [Supabase CLI](https://supabase.com/docs/guides/cli)
 
-### Steps
+### Quick start
 
 ```bash
-# 1. Install dependencies
-pnpm install
-
-# 2. Start the local Supabase stack (Postgres, Auth, Storage, pgvector)
-supabase start
-
-# 3. Apply migrations (and reset the DB to a clean state)
-supabase db reset
-
-# 4. Configure environment
-cp .env.example .env.local
-#   Fill NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY from
-#   the output of `supabase status`. The defaults point at the local stack.
-
-# 5. Seed demo data (optional but recommended)
-pnpm db:seed
-#   Demo login →  demo@contextvault.local  /  demo-password-123
-
-# 6. Run the app
+pnpm bootstrap          # install, .env.local, supabase start, migrate + seed
+pnpm health         # optional health check
 pnpm dev            # http://localhost:3000
 ```
+
+Demo login: `demo@contextvault.local` / `demo-password-123`.
+
+`pnpm bootstrap` creates `.env.local` from `.env.example` (well-known **local-only**
+demo JWTs) and refreshes keys from `supabase status` when the stack is up.
+To refresh env later: `pnpm env:sync`.
+
+Contributing (branches, commits, PR rules): see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Cursor Cloud agents: see [`AGENTS.md`](AGENTS.md).
 
 ### Scripts
 
 | Command | Description |
 | --- | --- |
+| `pnpm bootstrap` | Install deps, sync env, start Supabase, migrate + seed |
+| `pnpm health` | Validate Node/pnpm/Docker/CLI/env/Supabase API |
+| `pnpm env:sync` | Create/update `.env.local` from example + `supabase status` |
 | `pnpm dev` | Start the Next.js dev server |
 | `pnpm build` | Production build |
 | `pnpm lint` | ESLint |
 | `pnpm typecheck` | TypeScript check |
-| `pnpm test` | Vitest (auth, memory isolation, retrieval, deletion) |
-| `pnpm db:reset` | Reapply migrations + seed |
+| `pnpm check` | lint + typecheck + unit tests (no Docker) |
+| `pnpm check:full` | `check` + integration tests (requires Supabase) |
+| `pnpm test` | Full Vitest suite (unit + integration) |
+| `pnpm test:unit` | Unit tests only |
+| `pnpm test:integration` | DB-backed tests (requires Supabase) |
+| `pnpm db:start` | `supabase start` |
+| `pnpm db:reset` | Reapply migrations + run Node demo seed |
 | `pnpm db:seed` | Seed the demo user and sample data |
+
+Migrate-only (no Node seed): `supabase db reset`. Demo data always comes from
+`scripts/seed.ts`; `supabase/seed.sql` is a no-op placeholder for the CLI.
 
 ### Using real AI providers
 
@@ -165,8 +168,10 @@ src/
     documents/            # PDF/text extraction + chunking
     ratelimit.ts, audit.ts, validation.ts
 supabase/migrations/      # schema, RLS, functions, storage, grants
-tests/                    # automated tests
-scripts/seed.ts           # demo data
+tests/                    # automated tests (unit + integration)
+scripts/                  # bootstrap, health, env-sync, seed
+CONTRIBUTING.md           # branch / commit / PR process
+AGENTS.md                 # Cursor Cloud + agent rules
 ```
 
 ### Swapping the memory backend
@@ -206,7 +211,9 @@ that request; a valid `{"memories":[]}` is kept as intentionally empty.
 
 ---
 
-## Development plan
+## Shipped foundation
+
+Historical checklist of the MVP work that is already in tree (not a roadmap):
 
 1. **Foundation** — Next.js + TypeScript + Tailwind; Supabase local stack.
 2. **Data model** — enums, tables (`profiles`, `memories`, `documents`,
@@ -215,12 +222,16 @@ that request; a valid `{"memories":[]}` is kept as intentionally empty.
 3. **Security first** — RLS on every table, explicit role grants, storage
    policies, service-role isolation.
 4. **Memory service** — provider interface, embeddings, ExtractionProvider
-   (LLM + heuristic) + redaction.
+   (LLM + heuristic) + redaction; optional hybrid Mem0 provider.
 5. **Product surface** — the ten pages and their API routes.
 6. **Chat** — retrieval → context injection → provenance → post-response
-   structured extraction into the review queue.
+   structured extraction into the review queue (OpenRouter or offline mock).
 7. **Documents** — upload → validate → store → extract → chunk → embed → cite.
-8. **Quality** — automated tests, lint, typecheck, build, seed data.
+8. **Quality** — automated tests, lint, typecheck, build, seed data; local
+   `bootstrap` / `health` / `check` scripts for reproducible development.
+
+**Next process work (Phase 2, not implemented here):** GitHub Actions, required
+checks, Vercel preview/production, hosted Supabase, and env separation.
 
 ## Security risks & mitigations
 

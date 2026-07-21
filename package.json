@@ -8,10 +8,18 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "CV_REQUIRE_SUPABASE=1 vitest run",
     "test:watch": "vitest",
-    "db:reset": "supabase db reset",
-    "db:seed": "node --env-file=.env.local --import tsx scripts/seed.ts"
+    "test:unit": "vitest run --exclude tests/memory.test.ts",
+    "test:integration": "CV_INTEGRATION=1 vitest run tests/memory.test.ts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test:unit",
+    "check:full": "pnpm check && pnpm test:integration",
+    "env:sync": "node --import tsx scripts/env-sync.ts",
+    "health": "node --import tsx scripts/doctor.ts",
+    "bootstrap": "node --import tsx scripts/setup.ts",
+    "db:start": "supabase start",
+    "db:reset": "supabase db reset && pnpm db:seed",
+    "db:seed": "node --import tsx scripts/seed-runner.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
