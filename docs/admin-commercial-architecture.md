@@ -13,7 +13,7 @@ Status legend used below:
 
 This document is an **audit of the current codebase**, not a redesign. Related checklist: [`legal-readiness-checklist.md`](./legal-readiness-checklist.md). Demo / offline verification matrix: [`demo-mode-test-matrix.md`](./demo-mode-test-matrix.md).
 
-Staff ops use the protected **Admin Console** under `/admin` (RBAC via `user_roles`, mutations audited in `admin_audit_log`). Stripe Dashboard remains the source of paid subscription truth; the console covers demo grants, simulations, bonuses, usage resets, **plan catalog editing**, and audit browse.
+Staff ops use the protected **Admin Console** under `/admin` (RBAC via `user_roles`, mutations audited in `admin_audit_log`). Stripe Dashboard remains the source of paid subscription truth; the console covers demo grants, simulations, bonuses, usage resets, **plan catalog editing**, **Usage & Economics**, provider ops, and audit browse.
 
 ---
 
@@ -239,13 +239,15 @@ Memory: `MEMORY_PROVIDER=supabase` (default) or `mem0` — orthogonal to Stripe;
 
 ---
 
-## 10. Telemetry
+## 10. Telemetry & Usage / Economics admin
 
-**Status: Fully functional write path · no admin analytics UI**
+**Status: Fully functional write path · admin analytics UI on `/admin/usage`**
 
 `recordBillingTelemetry` → `billing_telemetry_events` (fire-and-forget; never breaks product paths).
 
 Observed event names: `checkout_started`, `subscription_period_granted`, `payment_failed`, `inference_restricted`, `charge_refunded`, `subscription_canceled`, `inference_turn`. Inference turns include `meta.excludeFromRevenue` / `meta.entitlementSource` so demo grants and simulations can be filtered out of revenue analytics.
+
+Staff **Usage & Economics** (`/admin/usage`, `GET /api/admin/usage`) aggregates `usage_events`, `provider_ops_events`, subscriptions, memories, and documents **server-side**. Filters: date window, plan, provider, model, Auto/Frontier, billing mode, real/demo. The client receives summary JSON only (no raw event dump). Provider COGS and catalog MRR are labeled **estimated**; Stripe Dashboard remains paid-revenue truth.
 
 ---
 
@@ -332,7 +334,7 @@ Gaps relative to a go-live audit: no end-to-end Stripe Checkout/Portal test; no 
 | Vault Plan & Usage UI | Fully functional (local paths) |
 | BillingPanel | Deprecated shim |
 | Workspaces budgets | Scaffolded |
-| Admin commercial console | Fully functional V1 (`/admin`, users, user detail, audit) + entitlement/bonus/usage APIs; Stripe remains source of paid truth |
+| Admin commercial console | Fully functional V1 (`/admin`, usage & economics, users, plans, providers, audit) + entitlement/bonus/usage APIs; Stripe remains source of paid truth |
 | Price book COGS micros | Configured but unverified (placeholders) |
 
 ---
@@ -343,4 +345,4 @@ Gaps relative to a go-live audit: no end-to-end Stripe Checkout/Portal test; no 
 2. Stripe test mode: set secret, webhook secret, price IDs, forward webhooks to `/api/billing/webhook`, configure Portal + Tax in Dashboard.
 3. Production: never enable Stripe without legal checklist + `BYOK_ENCRYPTION_KEY` + verified price book; keep `NODE_ENV=production` so dev top-up cannot run.
 4. Refunds today only emit telemetry — manual ops/support confirm unused credit lots before clawback.
-5. Use `/admin` for demo entitlements, bonuses, usage resets, and audit; keep Stripe Dashboard for paid subscription truth and `billing_telemetry_events` for commercial analytics.
+5. Use `/admin` for demo entitlements, bonuses, usage resets, Usage & Economics, and audit; keep Stripe Dashboard for paid subscription truth and `billing_telemetry_events` as the commercial event log.

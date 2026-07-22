@@ -8,6 +8,7 @@ import type { AppRole } from "@/lib/admin/roles";
 
 const NAV = [
   { href: "/admin", label: "Overview", exact: true },
+  { href: "/admin/usage", label: "Usage" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/plans", label: "Plans" },
   { href: "/admin/providers", label: "Providers" },
