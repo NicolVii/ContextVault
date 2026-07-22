@@ -5,6 +5,11 @@ import { getCreditPack, getSubscriptionPlan } from "@/lib/billing/products";
 import { assertCheckoutAllowed } from "@/lib/billing/commercial";
 import { recordBillingTelemetry } from "@/lib/billing/telemetry";
 import { ensurePlanConfigLoaded } from "@/lib/billing/plan-config-loader";
+import {
+  getPromotionById,
+  listRedemptionsForUser,
+  resolveCheckoutDiscountFromPromotion,
+} from "@/lib/billing";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +21,8 @@ const bodySchema = z.object({
   interval: z.enum(["monthly", "annual"]).optional().default("monthly"),
   /** Apply founding Pro coupon when configured */
   founding: z.boolean().optional(),
+  /** Optional Cortaix promotion id previously redeemed by the user */
+  promotionId: z.string().uuid().optional(),
 });
 
 export async function POST(request: Request) {
@@ -108,7 +115,51 @@ export async function POST(request: Request) {
   }
 
   const discounts: { coupon: string }[] = [];
+  let trialDays: number | null = null;
+  let appliedPromotionId: string | null = null;
+
+  if (parsed.data.promotionId) {
+    const redemptions = await listRedemptionsForUser(ctx.user.id);
+    const redeemed = redemptions.find(
+      (r) =>
+        r.promotionId === parsed.data.promotionId &&
+        r.status === "applied" &&
+        r.priceDiscountApplied
+    );
+    if (!redeemed) {
+      return NextResponse.json(
+        { error: "Promotion not redeemed or has no price discount" },
+        { status: 400 }
+      );
+    }
+    const promo = await getPromotionById(parsed.data.promotionId);
+    if (!promo) {
+      return NextResponse.json({ error: "Promotion not found" }, { status: 400 });
+    }
+    const mapped = resolveCheckoutDiscountFromPromotion({ promotion: promo });
+    if (mapped.demoSimulatedDiscount) {
+      // Live checkout must never receive demo-simulated discounts.
+      return NextResponse.json(
+        {
+          error:
+            "Promotion price discount is demo-simulated and cannot be used in live Checkout",
+          code: "promotion_demo_simulated",
+        },
+        { status: 400 }
+      );
+    }
+    if (mapped.liveDiscounts?.length) {
+      discounts.push(...mapped.liveDiscounts);
+      appliedPromotionId = promo.id;
+    }
+    if (mapped.trialDays) {
+      trialDays = mapped.trialDays;
+      appliedPromotionId = promo.id;
+    }
+  }
+
   if (
+    discounts.length === 0 &&
     parsed.data.founding &&
     plan.id === "pro" &&
     process.env.STRIPE_COUPON_PRO_FOUNDING?.trim()
@@ -137,12 +188,19 @@ export async function POST(request: Request) {
       cortaix_user_id: ctx.user.id,
       plan_id: plan.id,
       interval: parsed.data.interval,
+      ...(appliedPromotionId
+        ? { cortaix_promotion_id: appliedPromotionId }
+        : {}),
     },
     subscription_data: {
       metadata: {
         cortaix_user_id: ctx.user.id,
         plan_id: plan.id,
+        ...(appliedPromotionId
+          ? { cortaix_promotion_id: appliedPromotionId }
+          : {}),
       },
+      ...(trialDays ? { trial_period_days: trialDays } : {}),
     },
   });
 
@@ -150,7 +208,11 @@ export async function POST(request: Request) {
     userId: ctx.user.id,
     eventName: "checkout_started",
     planId: plan.id,
-    meta: { kind: "subscription", interval: parsed.data.interval },
+    meta: {
+      kind: "subscription",
+      interval: parsed.data.interval,
+      promotionId: appliedPromotionId,
+    },
   });
 
   return NextResponse.json({ url: session.url });

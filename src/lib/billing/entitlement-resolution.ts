@@ -57,6 +57,16 @@ export interface SubscriptionEntitlementInput {
   cancelAtPeriodEnd: boolean;
 }
 
+/** Additive promotion bonus overlay (never replaces plan; never demo). */
+export interface PromotionBonusOverlay {
+  id: string;
+  autoTurnBonus: number;
+  frontierTurnBonus: number;
+  storageBytesBonus: number;
+  featureOverrides: FeatureOverrides;
+  expiresAt: string | null;
+}
+
 export interface ResolvedEntitlement {
   planId: LaunchPlanId;
   source: EntitlementSource;
@@ -75,6 +85,8 @@ export interface ResolvedEntitlement {
   autoTurnBonus: number;
   frontierTurnBonus: number;
   creditBonus: number;
+  /** Ids of active promotion redemptions stacked onto entitlements. */
+  promotionRedemptionIds: string[];
 }
 
 export function isLaunchPlanId(value: string): value is LaunchPlanId {
@@ -179,6 +191,65 @@ export function applyOverrideBonuses(
   };
 }
 
+/**
+ * Stack promotion usage bonuses onto an already-resolved entitlement.
+ * Does not change plan source / demo / revenue flags.
+ */
+export function applyPromotionBonusOverlays(
+  resolved: ResolvedEntitlement,
+  overlays: PromotionBonusOverlay[],
+  now: Date = new Date()
+): ResolvedEntitlement {
+  const active = overlays.filter((o) => {
+    if (!o.expiresAt) return true;
+    const end = new Date(o.expiresAt);
+    return !Number.isNaN(end.getTime()) && end.getTime() > now.getTime();
+  });
+  if (active.length === 0) return { ...resolved, promotionRedemptionIds: [] };
+
+  let ents = resolved.entitlements;
+  let autoTurnBonus = resolved.autoTurnBonus;
+  let frontierTurnBonus = resolved.frontierTurnBonus;
+
+  for (const overlay of active) {
+    const autoBonus = Math.max(0, overlay.autoTurnBonus || 0);
+    const frontierBonus = Math.max(0, overlay.frontierTurnBonus || 0);
+    const storageBonus = Math.max(0, overlay.storageBytesBonus || 0);
+    autoTurnBonus += autoBonus;
+    frontierTurnBonus += frontierBonus;
+
+    const autoMonthlyTurns =
+      ents.autoMonthlyTurns == null
+        ? null
+        : ents.autoMonthlyTurns + autoBonus;
+    const frontierMonthlyTurns =
+      ents.frontierMonthlyTurns == null
+        ? null
+        : ents.frontierMonthlyTurns + frontierBonus;
+    const features = overlay.featureOverrides ?? {};
+
+    ents = {
+      ...ents,
+      autoMonthlyTurns,
+      unlimitedAuto: autoMonthlyTurns == null,
+      frontierMonthlyTurns,
+      storageBytes: ents.storageBytes + storageBonus,
+      attachments: features.attachments ?? ents.attachments,
+      byok: features.byok ?? ents.byok,
+      voice: features.voice ?? ents.voice,
+      elevatedLimits: features.elevatedLimits ?? ents.elevatedLimits,
+    };
+  }
+
+  return {
+    ...resolved,
+    entitlements: ents,
+    autoTurnBonus,
+    frontierTurnBonus,
+    promotionRedemptionIds: active.map((o) => o.id),
+  };
+}
+
 function fromOverride(
   source: "plan_simulation" | "admin_grant",
   row: EntitlementOverrideInput
@@ -201,6 +272,7 @@ function fromOverride(
     autoTurnBonus: row.autoTurnBonus,
     frontierTurnBonus: row.frontierTurnBonus,
     creditBonus: row.creditBonus,
+    promotionRedemptionIds: [],
   };
 }
 
@@ -232,6 +304,7 @@ function fromSubscription(
       autoTurnBonus: 0,
       frontierTurnBonus: 0,
       creditBonus: 0,
+      promotionRedemptionIds: [],
     };
   }
 
@@ -251,27 +324,39 @@ function fromSubscription(
     autoTurnBonus: 0,
     frontierTurnBonus: 0,
     creditBonus: 0,
+    promotionRedemptionIds: [],
   };
 }
 
 /**
  * Pure entitlement resolution. Callers supply already-fetched rows;
  * this function applies priority without I/O.
+ *
+ * Promotion bonuses stack additively after the base source is chosen and
+ * never flip isDemo / excludeFromRevenue.
  */
 export function resolveEffectiveEntitlement(input: {
   now?: Date;
   simulations?: EntitlementOverrideInput[];
   grants?: EntitlementOverrideInput[];
   subscription?: SubscriptionEntitlementInput | null;
+  promotionBonuses?: PromotionBonusOverlay[];
 }): ResolvedEntitlement {
   const now = input.now ?? new Date();
   const simulation = pickActiveOverride(input.simulations ?? [], now);
-  if (simulation) return fromOverride("plan_simulation", simulation);
+  const base = simulation
+    ? fromOverride("plan_simulation", simulation)
+    : (() => {
+        const grant = pickActiveOverride(input.grants ?? [], now);
+        if (grant) return fromOverride("admin_grant", grant);
+        return fromSubscription(input.subscription ?? null);
+      })();
 
-  const grant = pickActiveOverride(input.grants ?? [], now);
-  if (grant) return fromOverride("admin_grant", grant);
-
-  return fromSubscription(input.subscription ?? null);
+  return applyPromotionBonusOverlays(
+    base,
+    input.promotionBonuses ?? [],
+    now
+  );
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   type ResolvedEntitlement,
 } from "./entitlement-resolution";
 import { ensurePlanConfigLoaded } from "./plan-config-loader";
+import { listActivePromotionBonusesForUser } from "./promotions";
 
 export class PlanUsageBlockedError extends Error {
   readonly code:
@@ -77,10 +78,11 @@ async function loadResolvedEntitlement(
 ): Promise<ResolvedEntitlement> {
   const admin = createSupabaseAdminClient();
   // Warm DB-backed plan catalog (TTL cache); sync entitlement helpers read it.
-  const [, simulations, grants, subRes] = await Promise.all([
+  const [, simulations, grants, promotionBonuses, subRes] = await Promise.all([
     ensurePlanConfigLoaded(),
     listPlanSimulationsForUser(userId),
     listEntitlementGrantsForUser(userId),
+    listActivePromotionBonusesForUser(userId),
     admin
       .from("subscriptions")
       .select("plan_id, status, current_period_end, cancel_at_period_end")
@@ -92,6 +94,7 @@ async function loadResolvedEntitlement(
   return resolveEffectiveEntitlement({
     simulations,
     grants,
+    promotionBonuses,
     subscription: sub
       ? {
           planId: (sub.plan_id as string) ?? "free",
