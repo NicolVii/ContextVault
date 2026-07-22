@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/stripe";
-import { assertPortalAllowed } from "@/lib/billing/commercial";
+import { assertPortalAllowedAsync } from "@/lib/billing/commercial";
 import {
   assertMaintenanceAllowed,
   OperationalControlError,
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  const gate = assertPortalAllowed();
+  const gate = await assertPortalAllowedAsync();
   if (!gate.ok) {
     return NextResponse.json(
       { error: gate.error, code: gate.code },

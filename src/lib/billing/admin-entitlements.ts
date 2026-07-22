@@ -1,3 +1,15 @@
+/**
+ * Admin entitlement grants and plan simulations.
+ *
+ * These temporarily extend product entitlements for demos / support.
+ * They MUST NOT rewrite Stripe financial history:
+ * - never update `subscriptions.stripe_*` columns
+ * - never invent paid MRR (`exclude_from_revenue` is always true)
+ * - never create Stripe customers, invoices, or Checkout sessions
+ *
+ * Stripe remains the source of truth for real paid subscriptions.
+ */
+
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { recordAdminAudit } from "@/lib/admin/audit";
 import { grantCredits } from "@/lib/inference/credits";

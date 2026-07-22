@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/stripe";
 import { getCreditPack, getSubscriptionPlan } from "@/lib/billing/products";
-import { assertCheckoutAllowed } from "@/lib/billing/commercial";
+import { assertCheckoutAllowedAsync } from "@/lib/billing/commercial";
 import {
   assertCheckoutControlAllowed,
   OperationalControlError,
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     throw err;
   }
 
-  const gate = assertCheckoutAllowed();
+  const gate = await assertCheckoutAllowedAsync();
   if (!gate.ok) {
     return NextResponse.json(
       { error: gate.error, code: gate.code },

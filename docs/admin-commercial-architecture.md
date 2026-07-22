@@ -171,19 +171,35 @@ APIs: `GET/POST/PATCH /api/admin/promotions`, `POST /api/admin/promotions/redemp
 | `GET/PUT/DELETE /api/billing/byok` | Encrypted provider keys (Pro) | **Fully functional** with encryption env rules |
 | `POST /api/billing/dev-topup` | Local credit grant | **Fully functional** locally; **Disabled** in production |
 
-Checkout / Portal require `COMMERCIAL_MODE=live` **and** Stripe credentials (`assertCheckoutAllowed` / `assertPortalAllowed`). Demo and disabled modes return 403 and never create sessions — even if `STRIPE_*` is set. When allowed: billing address, tax ID collection, Stripe Tax, ToS consent copy, founding Pro coupon (`STRIPE_COUPON_PRO_FOUNDING`).
+Checkout / Portal require `COMMERCIAL_MODE=live` **and** the live-readiness
+validator (`evaluateLiveReadiness` / `assertCheckoutAllowedAsync`): Stripe
+secret, webhook secret, all four Lite/Pro price IDs, `NEXT_PUBLIC_APP_URL`,
+and webhook health when paid subscriptions already exist. `sk_live_*` also
+requires `STRIPE_ALLOW_LIVE_KEYS=1` (prefer `sk_test_*` first). Demo and
+disabled modes return 403 and never create sessions — even if `STRIPE_*` is
+set. When allowed: billing address, tax ID collection, Stripe Tax, ToS
+consent copy, founding Pro coupon (`STRIPE_COUPON_PRO_FOUNDING`), and
+promotion codes (`allow_promotion_codes` or mapped Cortaix coupons).
+
+Admin ops: `GET/POST /api/admin/billing/readiness` for readiness report and
+Stripe→DB reconciliation (`reconcileUserSubscription` /
+`reconcileAllSubscriptions`). Admin entitlement grants never rewrite
+`subscriptions.stripe_*` financial columns.
 
 ### Webhook handlers (`webhook.ts`)
 
 | Event | Behavior |
 | --- | --- |
-| `checkout.session.completed` | One-time payment: grant credits from session metadata |
+| `checkout.session.completed` | Pack: grant credits. Subscription: upsert local row from Stripe sub + telemetry |
 | `invoice.paid` | Clear restriction; pack price → top-up; plan price → idempotent period grant + credits |
 | `invoice.payment_failed` | Start 7-day grace |
 | `charge.refunded` | Telemetry only (soft clawback signal) |
-| `customer.subscription.*` | Upsert / cancel → Free |
+| `customer.subscription.*` | Upsert / cancel → Free + telemetry |
 
-Idempotency: `stripe_webhook_events` unique `event_id`; claim released on handler failure so Stripe can retry. Period grants: `subscription_period_grants` unique `(stripe_subscription_id, period_start)`.
+Idempotency / replay protection: `stripe_webhook_events` unique `event_id`;
+claim released on handler failure so Stripe can retry. Period grants:
+`subscription_period_grants` unique `(stripe_subscription_id, period_start)`.
+Livemode mismatches against `sk_test_*` / `sk_live_*` are rejected.
 
 **Unsafe for public use** until Stripe Tax / Portal / legal docs / price verification in [`legal-readiness-checklist.md`](./legal-readiness-checklist.md) are done. Code alone is not a go-live.
 

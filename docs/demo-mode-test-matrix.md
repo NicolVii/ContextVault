@@ -37,8 +37,10 @@ Statuses: **OK** expected to work · **MOCK** demo substitute · **BLOCKED** int
 | Credit debit (platform) | N/A (mock = 0) | OK | OK | OK | `production-safety` computeCredits |
 | Plan turn recording | Skipped on mock | OK | OK | OK | Logic in `plan-usage`; RPC needs DB |
 | Dev top-up +100k | OK | OK | BLOCKED | BLOCKED | `production-safety` |
-| Checkout Lite/Pro | BLOCKED (403 demo) | BLOCKED (403 demo) | UNVERIFIED (live+Stripe) | UNVERIFIED | `commercial-mode` unit gates |
-| Customer Portal | BLOCKED | BLOCKED | UNVERIFIED | UNVERIFIED | `commercial-mode` unit gates |
+| Checkout Lite/Pro | BLOCKED (403 demo) | BLOCKED (403 demo) | Requires live readiness (test keys + prices + webhook secret + app URL) | Same + webhook health | `commercial-mode`, `live-readiness` |
+| Customer Portal | BLOCKED | BLOCKED | Same readiness gate | Same | `commercial-mode`, `live-readiness` |
+| Live readiness validator | N/A | N/A | Blocks incomplete live config; `sk_live_*` needs `STRIPE_ALLOW_LIVE_KEYS` | Required | `live-readiness` |
+| Reconciliation | N/A | N/A | Admin `POST /api/admin/billing/readiness` | Ops path | `stripe-subscription-sync` unit |
 | Webhook signature | N/A | N/A | UNVERIFIED live | Required | Unit constructEvent; claim integration |
 | Period credit grant | N/A | N/A | UNVERIFIED | Required | Mocked claim pattern only |
 | Payment grace / restrict | Manual DB possible | Same | UNVERIFIED | Required | Code path; no dedicated test |

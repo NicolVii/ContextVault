@@ -48,11 +48,34 @@ export {
   isCommercialDevTopupAllowed,
   assertCheckoutAllowed,
   assertPortalAllowed,
+  assertCheckoutAllowedAsync,
+  assertPortalAllowedAsync,
+  evaluateLiveConfigReadiness,
+  evaluateLiveReadiness,
+  assertLiveCommerceAllowed,
+  assertLiveConfigAllowed,
+  isStripeTestSecret,
+  isStripeLiveSecret,
   type CommercialMode,
   type FeatureFlags,
   type CommercialCapabilities,
   type CommercialGateResult,
+  type LiveReadinessReport,
+  type LiveReadinessCheck,
 } from "./commercial";
+export {
+  reconcileUserSubscription,
+  reconcileAllSubscriptions,
+  type ReconcileUserResult,
+  type ReconcileBatchResult,
+} from "./reconcile";
+export {
+  upsertSubscriptionFromStripe,
+  markSubscriptionCanceledLocally,
+  subscriptionSnapshotFromStripe,
+  subscriptionRowsDiffer,
+  type SyncedSubscriptionRow,
+} from "./subscription-sync";
 export {
   classifyUsageIntensity,
   isFrontierModelId,
