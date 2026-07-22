@@ -9,50 +9,66 @@ import { formatDate } from "@/lib/utils";
 
 export function DocumentLibrary({
   initialDocuments,
-  initialAttachmentsAllowed = true,
-  initialStorageUsed = 0,
-  initialStorageCap = 0,
+  initialAttachmentsAllowed,
+  initialStorageUsed,
+  initialStorageCap,
 }: {
   initialDocuments?: DocumentRecord[];
   initialAttachmentsAllowed?: boolean;
   initialStorageUsed?: number;
   initialStorageCap?: number;
 } = {}) {
-  const hasInitial = initialDocuments !== undefined;
+  const hasInitialDocs = initialDocuments !== undefined;
+  const hasInitialUsage =
+    initialAttachmentsAllowed !== undefined ||
+    initialStorageUsed !== undefined ||
+    initialStorageCap !== undefined;
   const [docs, setDocs] = useState<DocumentRecord[]>(initialDocuments ?? []);
-  const [loading, setLoading] = useState(!hasInitial);
+  const [docsLoading, setDocsLoading] = useState(!hasInitialDocs);
+  const [usageLoading, setUsageLoading] = useState(!hasInitialUsage);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<DocumentRecord | null>(null);
   const [busy, setBusy] = useState(false);
   const [attachmentsAllowed, setAttachmentsAllowed] = useState(
-    initialAttachmentsAllowed
+    initialAttachmentsAllowed ?? true
   );
-  const [storageUsed, setStorageUsed] = useState(initialStorageUsed);
-  const [storageCap, setStorageCap] = useState(initialStorageCap);
+  const [storageUsed, setStorageUsed] = useState(initialStorageUsed ?? 0);
+  const [storageCap, setStorageCap] = useState(initialStorageCap ?? 0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
-    const [docsRes, usageRes] = await Promise.all([
-      fetch("/api/documents"),
-      fetch("/api/billing/usage"),
-    ]);
+  const loadDocs = useCallback(async () => {
+    setDocsLoading(true);
+    const docsRes = await fetch("/api/documents");
     const json = await docsRes.json();
     setDocs(json.documents ?? []);
+    setDocsLoading(false);
+  }, []);
+
+  const loadUsage = useCallback(async () => {
+    setUsageLoading(true);
+    const usageRes = await fetch("/api/billing/usage");
     if (usageRes.ok) {
       const usage = await usageRes.json();
       setAttachmentsAllowed(Boolean(usage.entitlements?.attachments));
       setStorageCap(Number(usage.entitlements?.storageBytes) || 0);
       setStorageUsed(Number(usage.storageUsedBytes) || 0);
     }
-    setLoading(false);
+    setUsageLoading(false);
   }, []);
 
+  const reload = useCallback(async () => {
+    await Promise.all([loadDocs(), loadUsage()]);
+  }, [loadDocs, loadUsage]);
+
   useEffect(() => {
-    if (!hasInitial) {
-      void load();
+    if (!hasInitialDocs) {
+      void loadDocs();
     }
-  }, [hasInitial, load]);
+    if (!hasInitialUsage) {
+      void loadUsage();
+    }
+  }, [hasInitialDocs, hasInitialUsage, loadDocs, loadUsage]);
 
   async function upload(file: File) {
     setUploading(true);
@@ -67,7 +83,7 @@ export function DocumentLibrary({
       setError(json.error ?? "Upload failed");
       return;
     }
-    void load();
+    void reload();
   }
 
   async function remove() {
@@ -76,7 +92,7 @@ export function DocumentLibrary({
     await fetch(`/api/documents/${toDelete.id}`, { method: "DELETE" });
     setBusy(false);
     setToDelete(null);
-    void load();
+    void reload();
   }
 
   const storagePct =
@@ -84,7 +100,9 @@ export function DocumentLibrary({
 
   return (
     <div>
-      {storageCap > 0 && (
+      {usageLoading && !hasInitialUsage ? (
+        <div className="mb-4 h-8 animate-pulse rounded-lg bg-mist-100" aria-hidden />
+      ) : storageCap > 0 ? (
         <div className="mb-4">
           <div className="flex items-center justify-between text-xs text-ink-muted">
             <span>Library storage</span>
@@ -97,9 +115,15 @@ export function DocumentLibrary({
             />
           </div>
         </div>
-      )}
+      ) : null}
 
-      {!attachmentsAllowed ? (
+      {usageLoading ? (
+        <div
+          className="h-40 animate-pulse rounded-2xl border border-dashed border-mist-200 bg-mist-50"
+          aria-busy="true"
+          aria-label="Loading file entitlements"
+        />
+      ) : !attachmentsAllowed ? (
         <div className="rounded-2xl border border-mist-200 bg-mist-50 p-6 text-center">
           <p className="text-sm font-medium text-ink">Files are on Lite and Pro</p>
           <p className="mt-1 text-xs text-ink-muted">
@@ -146,7 +170,7 @@ export function DocumentLibrary({
       )}
 
       <div className="mt-6">
-        {loading ? (
+        {docsLoading ? (
           <div className="space-y-3" aria-busy="true" aria-label="Loading library">
             {[0, 1].map((i) => (
               <div key={i} className="card flex items-center gap-4 p-4">
