@@ -1,9 +1,9 @@
-"use client";
-
-import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Plus, Pin } from "lucide-react";
+import { getSessionContext } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
+import { timed } from "@/lib/perf";
 import type { Memory } from "@/lib/types";
 
 function dayLabel(iso: string): string {
@@ -24,41 +24,34 @@ function dayLabel(iso: string): string {
   });
 }
 
-export default function VaultMemoriesPage() {
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [loading, setLoading] = useState(true);
+export default async function VaultMemoriesPage() {
+  const ctx = await getSessionContext();
+  if (!ctx) redirect("/login");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch("/api/memories?status=active");
-    const json = await res.json();
-    setMemories(json.memories ?? []);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const pinned = useMemo(
-    () => memories.filter((m) => Boolean(m.pinned_at)),
-    [memories]
-  );
-  const unpinned = useMemo(
-    () => memories.filter((m) => !m.pinned_at),
-    [memories]
+  const { data, error } = await timed("vault.memories.list", () =>
+    ctx.supabase
+      .from("memories")
+      .select("*")
+      .eq("status", "active")
+      .order("pinned_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false })
   );
 
-  const groups = useMemo(() => {
-    const map = new Map<string, Memory[]>();
-    for (const m of unpinned) {
-      const key = dayLabel(m.created_at);
-      const list = map.get(key) ?? [];
-      list.push(m);
-      map.set(key, list);
-    }
-    return [...map.entries()];
-  }, [unpinned]);
+  if (error) {
+    console.error("vault memories list failed", error.message);
+  }
+
+  const memories = (data ?? []) as Memory[];
+  const pinned = memories.filter((m) => Boolean(m.pinned_at));
+  const unpinned = memories.filter((m) => !m.pinned_at);
+
+  const groups = new Map<string, Memory[]>();
+  for (const m of unpinned) {
+    const key = dayLabel(m.created_at);
+    const list = groups.get(key) ?? [];
+    list.push(m);
+    groups.set(key, list);
+  }
 
   return (
     <div className="mx-auto max-w-lg">
@@ -68,9 +61,7 @@ export default function VaultMemoriesPage() {
         </Link>
       </div>
 
-      {loading ? (
-        <p className="text-sm text-ink-faint">Loading…</p>
-      ) : memories.length === 0 ? (
+      {memories.length === 0 ? (
         <div className="py-16 text-center">
           <p className="font-display text-xl text-ink">No memories yet</p>
           <p className="mt-2 text-sm text-ink-muted">
@@ -94,7 +85,7 @@ export default function VaultMemoriesPage() {
               </ul>
             </section>
           )}
-          {groups.map(([label, items]) => (
+          {[...groups.entries()].map(([label, items]) => (
             <section key={label}>
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint">
                 {label}

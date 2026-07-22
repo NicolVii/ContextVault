@@ -1,14 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { MemoryCard } from "@/components/MemoryCard";
 import { SensitiveBadge } from "@/components/Badges";
 import type { Memory } from "@/lib/types";
 
-export function ReviewQueue() {
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [loading, setLoading] = useState(true);
+export function ReviewQueue({
+  initialMemories = [],
+}: {
+  initialMemories?: Memory[];
+}) {
+  const [memories, setMemories] = useState<Memory[]>(initialMemories);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -18,11 +22,15 @@ export function ReviewQueue() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (loading) return <p className="text-sm text-brand-500">Loading review queue…</p>;
+  if (loading) {
+    return (
+      <div className="space-y-4" aria-busy="true" aria-label="Loading review queue">
+        {[0, 1].map((i) => (
+          <div key={i} className="h-32 animate-pulse rounded-2xl bg-mist-100" />
+        ))}
+      </div>
+    );
+  }
 
   if (memories.length === 0) {
     return (

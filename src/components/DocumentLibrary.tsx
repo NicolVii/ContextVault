@@ -7,16 +7,29 @@ import { ConfirmModal } from "@/components/ConfirmModal";
 import type { DocumentRecord } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
-export function DocumentLibrary() {
-  const [docs, setDocs] = useState<DocumentRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+export function DocumentLibrary({
+  initialDocuments,
+  initialAttachmentsAllowed = true,
+  initialStorageUsed = 0,
+  initialStorageCap = 0,
+}: {
+  initialDocuments?: DocumentRecord[];
+  initialAttachmentsAllowed?: boolean;
+  initialStorageUsed?: number;
+  initialStorageCap?: number;
+} = {}) {
+  const hasInitial = initialDocuments !== undefined;
+  const [docs, setDocs] = useState<DocumentRecord[]>(initialDocuments ?? []);
+  const [loading, setLoading] = useState(!hasInitial);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<DocumentRecord | null>(null);
   const [busy, setBusy] = useState(false);
-  const [attachmentsAllowed, setAttachmentsAllowed] = useState(true);
-  const [storageUsed, setStorageUsed] = useState(0);
-  const [storageCap, setStorageCap] = useState(0);
+  const [attachmentsAllowed, setAttachmentsAllowed] = useState(
+    initialAttachmentsAllowed
+  );
+  const [storageUsed, setStorageUsed] = useState(initialStorageUsed);
+  const [storageCap, setStorageCap] = useState(initialStorageCap);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -36,8 +49,10 @@ export function DocumentLibrary() {
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!hasInitial) {
+      void load();
+    }
+  }, [hasInitial, load]);
 
   async function upload(file: File) {
     setUploading(true);
@@ -52,7 +67,7 @@ export function DocumentLibrary() {
       setError(json.error ?? "Upload failed");
       return;
     }
-    load();
+    void load();
   }
 
   async function remove() {
@@ -61,7 +76,7 @@ export function DocumentLibrary() {
     await fetch(`/api/documents/${toDelete.id}`, { method: "DELETE" });
     setBusy(false);
     setToDelete(null);
-    load();
+    void load();
   }
 
   const storagePct =
@@ -116,7 +131,7 @@ export function DocumentLibrary() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) upload(f);
+              if (f) void upload(f);
             }}
           />
           <button
@@ -132,12 +147,24 @@ export function DocumentLibrary() {
 
       <div className="mt-6">
         {loading ? (
-          <p className="text-sm text-brand-500">Loading library…</p>
+          <div className="space-y-3" aria-busy="true" aria-label="Loading library">
+            {[0, 1].map((i) => (
+              <div key={i} className="card flex items-center gap-4 p-4">
+                <div className="h-10 w-10 animate-pulse rounded-lg bg-mist-200/80" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-4 w-40 animate-pulse rounded bg-mist-200/80" />
+                  <div className="h-3 w-28 animate-pulse rounded bg-mist-100" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : docs.length === 0 ? (
           <div className="card flex flex-col items-center gap-2 p-10 text-center">
             <FileText className="h-10 w-10 text-brand-300" />
             <h3 className="text-lg font-semibold text-brand-900">No documents yet</h3>
-            <p className="text-sm text-brand-600">Upload your first document to make it searchable in chat.</p>
+            <p className="text-sm text-brand-600">
+              Upload your first document to make it searchable in chat.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">

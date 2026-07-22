@@ -1,26 +1,27 @@
 import { redirect } from "next/navigation";
 import { PlanUsagePanel } from "@/components/PlanUsagePanel";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCachedUser, getSessionContext } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureUserProfile } from "@/lib/profile";
 import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
 import { getCommercialCapabilities } from "@/lib/billing/commercial";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
+import { timed } from "@/lib/perf";
 
 export default async function VaultPlanPage() {
-  const supabase = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCachedUser();
   if (!user) redirect("/login");
 
-  const profile = await ensureUserProfile(supabase, user);
+  const ctx = await getSessionContext();
+  if (!ctx) redirect("/login");
+
+  const profile = await ensureUserProfile(ctx.supabase, user);
   if (!profile) redirect("/onboarding");
 
   await ensureCreditAccount(user.id);
   const [balance, snap, recentRes] = await Promise.all([
     getCreditBalance(user.id),
-    getPlanUsageSnapshot(user.id),
+    timed("vault.plan.planSnapshot", () => getPlanUsageSnapshot(user.id)),
     createSupabaseAdminClient()
       .from("usage_events")
       .select("request_id, purpose, model_id, credits_charged, created_at")

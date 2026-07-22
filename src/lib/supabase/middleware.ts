@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { appendServerTiming, isPerfTimingEnabled, serverTimingMetric } from "@/lib/perf";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -40,9 +41,22 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
+  const authStarted = performance.now();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const authMs = performance.now() - authStarted;
+
+  if (isPerfTimingEnabled()) {
+    console.info(`[perf] middleware.auth: ${authMs.toFixed(1)}ms`);
+    response.headers.set(
+      "Server-Timing",
+      appendServerTiming(
+        response.headers.get("Server-Timing"),
+        serverTimingMetric("mw-auth", authMs)
+      )
+    );
+  }
 
   const path = request.nextUrl.pathname;
   const isProtected = PROTECTED_PREFIXES.some((p) => path.startsWith(p));

@@ -1,23 +1,23 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { ChevronRight, Search } from "lucide-react";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCachedUser, getSessionContext } from "@/lib/auth";
 import { BRAND } from "@/lib/brand";
 import { SignOutButton } from "@/components/SignOutButton";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
 import { getSubscriptionPlan } from "@/lib/billing/products";
+import { timed } from "@/lib/perf";
 
 async function PlanNavRow() {
-  const supabase = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCachedUser();
 
   let planLabel = "Free";
   let planHint = "Free";
 
   if (user) {
-    const snap = await getPlanUsageSnapshot(user.id);
+    const snap = await timed("vault.hub.planSnapshot", () =>
+      getPlanUsageSnapshot(user.id)
+    );
     planLabel = getSubscriptionPlan(snap.planId ?? "free")?.label ?? "Free";
     planHint =
       snap.planId === "free" && snap.autoRemaining != null
@@ -61,11 +61,14 @@ function PlanNavRowFallback() {
 }
 
 export default async function VaultHubPage() {
-  const supabase = createSupabaseServerClient();
-  const { count: reviewCount } = await supabase
-    .from("memories")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "proposed");
+  const ctx = await getSessionContext();
+  const { count: reviewCount } = await timed("vault.hub.reviewCount", async () => {
+    if (!ctx) return { count: 0 };
+    return ctx.supabase
+      .from("memories")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "proposed");
+  });
 
   const pending = reviewCount ?? 0;
 

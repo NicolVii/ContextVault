@@ -12,18 +12,35 @@ import {
   OperationalControlError,
   operationalControlErrorResponse,
 } from "@/lib/admin/system-controls";
+import {
+  appendServerTiming,
+  isPerfTimingEnabled,
+  serverTimingMetric,
+  timed,
+} from "@/lib/perf";
 
 export const maxDuration = 60;
 
 export async function GET() {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { data, error } = await ctx.supabase
-    .from("documents")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const started = performance.now();
+  const { data, error } = await timed("api.documents.list", () =>
+    ctx.supabase
+      .from("documents")
+      .select("*")
+      .order("created_at", { ascending: false })
+  );
+  const listMs = performance.now() - started;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ documents: data });
+  const res = NextResponse.json({ documents: data });
+  if (isPerfTimingEnabled()) {
+    res.headers.set(
+      "Server-Timing",
+      appendServerTiming(null, serverTimingMetric("documents-list", listMs))
+    );
+  }
+  return res;
 }
 
 export async function POST(request: Request) {

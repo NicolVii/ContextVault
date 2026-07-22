@@ -2,32 +2,39 @@ import { redirect } from "next/navigation";
 import { LandingPage } from "@/components/LandingPage";
 import { ThinkingShell } from "@/components/ThinkingShell";
 import { ThinkingView } from "@/components/ThinkingView";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCachedUser, getSessionContext } from "@/lib/auth";
 import { ensureUserProfile, needsOnboarding } from "@/lib/profile";
+import { timed } from "@/lib/perf";
 
 export default async function HomePage({
   searchParams,
 }: {
   searchParams?: { session?: string };
 }) {
-  const supabase = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCachedUser();
 
   if (!user) {
     return <LandingPage />;
   }
 
-  const profile = await ensureUserProfile(supabase, user);
+  const ctx = await getSessionContext();
+  if (!ctx) {
+    return <LandingPage />;
+  }
+
+  const profile = await timed("home.ensureUserProfile", () =>
+    ensureUserProfile(ctx.supabase, user)
+  );
   if (needsOnboarding(profile)) {
     redirect("/onboarding");
   }
 
-  const { count } = await supabase
-    .from("memories")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "proposed");
+  const { count } = await timed("home.reviewCount", () =>
+    ctx.supabase
+      .from("memories")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "proposed")
+  );
 
   const sessionParam = searchParams?.session;
   const initialSessionId =

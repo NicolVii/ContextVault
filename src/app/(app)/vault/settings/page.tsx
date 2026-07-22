@@ -6,7 +6,7 @@ import { ProfileFields } from "@/components/ProfileFields";
 import { AdvancedModelSettings } from "@/components/AdvancedModelSettings";
 import { ByokPanel } from "@/components/ByokPanel";
 import { WorkspacePanel } from "@/components/WorkspacePanel";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCachedUser, getSessionContext } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureUserProfile } from "@/lib/profile";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
@@ -14,20 +14,20 @@ import { formatDate } from "@/lib/utils";
 import type { Profile } from "@/lib/types";
 
 export default async function VaultSettingsPage() {
-  const supabase = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCachedUser();
   if (!user) redirect("/login");
 
-  const profile = await ensureUserProfile(supabase, user);
+  const ctx = await getSessionContext();
+  if (!ctx) redirect("/login");
+
+  const profile = await ensureUserProfile(ctx.supabase, user);
   if (!profile) redirect("/onboarding");
 
   const admin = createSupabaseAdminClient();
   const snap = await getPlanUsageSnapshot(user.id);
 
   const [{ data: audit }, { data: keys }, { data: workspaces }] = await Promise.all([
-    supabase
+    ctx.supabase
       .from("audit_log")
       .select("action, created_at, entity_type")
       .order("created_at", { ascending: false })
@@ -36,7 +36,7 @@ export default async function VaultSettingsPage() {
       .from("user_provider_keys")
       .select("provider, label, created_at")
       .eq("user_id", user.id),
-    supabase
+    ctx.supabase
       .from("workspaces")
       .select("id, name, default_model, monthly_credit_budget")
       .eq("owner_id", user.id)
