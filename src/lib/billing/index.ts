@@ -2,6 +2,20 @@ export * from "./products";
 export * from "./entitlements";
 export * from "./constants";
 export {
+  resolveCommercialMode,
+  isStripeSecretConfigured,
+  isStripePaymentsEnabled,
+  getFeatureFlags,
+  getCommercialCapabilities,
+  isCommercialDevTopupAllowed,
+  assertCheckoutAllowed,
+  assertPortalAllowed,
+  type CommercialMode,
+  type FeatureFlags,
+  type CommercialCapabilities,
+  type CommercialGateResult,
+} from "./commercial";
+export {
   classifyUsageIntensity,
   isFrontierModelId,
   isAutoModelId,

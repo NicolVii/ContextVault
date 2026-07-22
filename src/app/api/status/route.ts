@@ -3,6 +3,7 @@ import { getChatProvider, readOpenRouterApiKey, resetChatProviderCache } from "@
 import { getEmbeddingProvider } from "@/lib/embeddings";
 import { getMemoryProvider } from "@/lib/memory";
 import { getExtractionProvider, resetExtractionProviderCache } from "@/lib/memory/extraction";
+import { getCommercialCapabilities } from "@/lib/billing/commercial";
 
 /** Always read live process env — never bake this at build time. */
 export const dynamic = "force-dynamic";
@@ -25,6 +26,8 @@ export async function GET() {
   const memory = getMemoryProvider();
   const extraction = getExtractionProvider();
 
+  const commercial = getCommercialCapabilities();
+
   return NextResponse.json({
     ok: true,
     chat: {
@@ -40,6 +43,13 @@ export async function GET() {
       router: "deterministic",
       metering: "usage_events",
       billing: "credit_wallet",
+    },
+    commercial: {
+      mode: commercial.mode,
+      stripeConfigured: commercial.stripeConfigured,
+      checkoutEnabled: commercial.checkoutEnabled,
+      portalEnabled: commercial.portalEnabled,
+      featureFlags: commercial.featureFlags,
     },
     embeddings: { provider: embeddings.name },
     memory: { provider: memory.name },

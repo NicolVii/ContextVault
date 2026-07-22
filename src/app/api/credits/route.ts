@@ -5,7 +5,7 @@ import {
   getCreditBalance,
 } from "@/lib/inference/credits";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { isStripeConfigured } from "@/lib/billing/products";
+import { getCommercialCapabilities } from "@/lib/billing/commercial";
 
 export const dynamic = "force-dynamic";
 
@@ -34,12 +34,16 @@ export async function GET() {
       .maybeSingle(),
   ]);
 
+  const commercial = getCommercialCapabilities();
+
   return NextResponse.json({
     balance,
     planId: (sub?.plan_id as string) ?? "free",
     planStatus: (sub?.status as string) ?? null,
     currentPeriodEnd: sub?.current_period_end ?? null,
-    stripeConfigured: isStripeConfigured(),
+    commercialMode: commercial.mode,
+    stripeConfigured: commercial.stripeConfigured,
+    checkoutEnabled: commercial.checkoutEnabled,
     recent: recent ?? [],
   });
 }

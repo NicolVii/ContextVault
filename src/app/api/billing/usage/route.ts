@@ -5,6 +5,7 @@ import {
   getPlanUsageSnapshot,
 } from "@/lib/billing/plan-usage";
 import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
+import { getCommercialCapabilities } from "@/lib/billing/commercial";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,9 @@ export async function GET() {
     (n, d) => n + (Number(d.size_bytes) || 0),
     0
   );
+  const commercial = getCommercialCapabilities();
+  const voiceEnabled =
+    commercial.featureFlags.voice && snap.entitlements.voice;
 
   return NextResponse.json({
     planId: snap.planId,
@@ -39,12 +43,15 @@ export async function GET() {
     frontierHeavy: snap.frontierHeavy,
     inferenceRestricted: snap.inferenceRestricted,
     gracePeriodEndsAt: snap.gracePeriodEndsAt,
-    showFoundingOffer: offer.showFoundingOffer,
+    commercialMode: commercial.mode,
+    checkoutEnabled: commercial.checkoutEnabled,
+    showFoundingOffer:
+      offer.showFoundingOffer && commercial.foundingOfferCheckoutEnabled,
     entitlements: {
       attachments: snap.entitlements.attachments,
       storageBytes: snap.entitlements.storageBytes,
       byok: snap.entitlements.byok,
-      voice: snap.entitlements.voice,
+      voice: voiceEnabled,
       unlimitedAuto: snap.entitlements.unlimitedAuto,
       autoMonthlyTurns: snap.entitlements.autoMonthlyTurns,
       frontierMonthlyTurns: snap.entitlements.frontierMonthlyTurns,

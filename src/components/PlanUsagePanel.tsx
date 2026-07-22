@@ -7,6 +7,7 @@ import {
   getPublicPlans,
   type SubscriptionPlan,
 } from "@/lib/billing/products";
+import type { CommercialMode } from "@/lib/billing/commercial";
 import type { PlanUsageSnapshot } from "@/lib/billing/plan-usage";
 
 function formatDate(iso: string | null): string {
@@ -102,13 +103,17 @@ function FrontierBlock({ snap }: { snap: PlanUsageSnapshot }) {
 
 export function PlanUsagePanel({
   snap,
-  stripeConfigured,
+  commercialMode,
+  checkoutEnabled,
+  portalEnabled,
   allowDevTopup,
   recent,
   creditBalance,
 }: {
   snap: PlanUsageSnapshot;
-  stripeConfigured: boolean;
+  commercialMode: CommercialMode;
+  checkoutEnabled: boolean;
+  portalEnabled: boolean;
   allowDevTopup: boolean;
   creditBalance: number;
   recent: {
@@ -127,7 +132,17 @@ export function PlanUsagePanel({
   const [spendSaved, setSpendSaved] = useState<string | null>(null);
   const plans = getPublicPlans();
 
+  const commercialHint =
+    commercialMode === "disabled"
+      ? "Billing is turned off in this environment."
+      : commercialMode === "demo"
+        ? "Demo mode — plans are shown for preview; checkout is unavailable."
+        : !checkoutEnabled
+          ? "Live billing is selected, but Stripe is not configured yet."
+          : null;
+
   async function saveSpendCap() {
+    if (!portalEnabled) return;
     setBusy("spend");
     setSpendSaved(null);
     setError(null);
@@ -161,6 +176,7 @@ export function PlanUsagePanel({
     productId: string,
     opts?: { founding?: boolean; interval?: "monthly" | "annual" }
   ) {
+    if (!checkoutEnabled) return;
     setBusy(productId);
     setError(null);
     try {
@@ -185,6 +201,7 @@ export function PlanUsagePanel({
   }
 
   async function portal() {
+    if (!portalEnabled) return;
     setBusy("portal");
     setError(null);
     try {
@@ -233,7 +250,7 @@ export function PlanUsagePanel({
       {snap.inferenceRestricted && (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-950">
           AI usage is paused due to a billing problem. Your memories and files are safe.{" "}
-          {stripeConfigured && (
+          {portalEnabled && (
             <button type="button" className="underline" onClick={portal}>
               Update billing
             </button>
@@ -244,6 +261,12 @@ export function PlanUsagePanel({
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-950">
           We couldn’t renew your plan. Update your payment method by{" "}
           {formatDate(snap.gracePeriodEndsAt)} to keep uninterrupted access.
+        </p>
+      )}
+
+      {commercialHint && (
+        <p className="rounded-xl border border-mist-200 bg-mist-50/80 px-3 py-2 text-sm text-ink-muted">
+          {commercialHint}
         </p>
       )}
 
@@ -326,18 +349,29 @@ export function PlanUsagePanel({
                   {plan.id !== "free" && (
                     <button
                       type="button"
-                      disabled={Boolean(busy) || !stripeConfigured || isCurrent}
+                      disabled={Boolean(busy) || !checkoutEnabled || isCurrent}
                       className="btn-primary shrink-0 text-xs"
                       onClick={() => checkout(plan.id)}
                     >
-                      {isCurrent ? "Current" : busy === plan.id ? "…" : "Upgrade"}
+                      {isCurrent
+                        ? "Current"
+                        : busy === plan.id
+                          ? "…"
+                          : checkoutEnabled
+                            ? "Upgrade"
+                            : commercialMode === "disabled"
+                              ? "Unavailable"
+                              : "Preview"}
                     </button>
                   )}
                 </div>
-                {plan.id === "pro" && plan.foundingEurCentsMonthly && !isCurrent && (
+                {plan.id === "pro" &&
+                  plan.foundingEurCentsMonthly &&
+                  !isCurrent &&
+                  checkoutEnabled && (
                   <button
                     type="button"
-                    disabled={Boolean(busy) || !stripeConfigured}
+                    disabled={Boolean(busy)}
                     className="mt-2 text-xs text-ink-muted underline"
                     onClick={() => checkout("pro", { founding: true, interval: "monthly" })}
                   >
@@ -348,7 +382,7 @@ export function PlanUsagePanel({
             );
           })}
         </ul>
-        {stripeConfigured && snap.planId !== "free" && (
+        {portalEnabled && snap.planId !== "free" && (
           <div className="rounded-xl border border-mist-200 px-3 py-3">
             <h3 className="text-sm font-semibold text-ink">Spending</h3>
             <p className="mt-1 text-xs text-ink-muted">
@@ -386,7 +420,7 @@ export function PlanUsagePanel({
             </button>
           </div>
         )}
-        {!stripeConfigured && allowDevTopup && (
+        {allowDevTopup && (
           <button
             type="button"
             className="btn-secondary text-xs"

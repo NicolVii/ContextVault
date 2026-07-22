@@ -6,9 +6,12 @@ import { formatEurCents, getSubscriptionPlan } from "@/lib/billing/products";
 
 export function FoundingOfferBanner({
   visible,
+  checkoutEnabled = false,
   onDismissed,
 }: {
   visible: boolean;
+  /** When false, hide the Checkout CTA so demo/disabled never hit Stripe. */
+  checkoutEnabled?: boolean;
   onDismissed: () => void;
 }) {
   const [busy, setBusy] = useState<"checkout" | "dismiss" | null>(null);
@@ -18,6 +21,7 @@ export function FoundingOfferBanner({
   if (!visible || !pro?.foundingEurCentsMonthly) return null;
 
   async function checkoutFounding() {
+    if (!checkoutEnabled) return;
     setBusy("checkout");
     setError(null);
     try {
@@ -78,17 +82,25 @@ export function FoundingOfferBanner({
       </p>
       {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className="btn-primary text-xs"
-          disabled={Boolean(busy)}
-          onClick={checkoutFounding}
-        >
-          {busy === "checkout" ? "…" : "Claim founding Pro"}
-        </button>
-        <Link href="/vault/plan" className="btn-secondary text-xs">
-          See plans
-        </Link>
+        {checkoutEnabled ? (
+          <button
+            type="button"
+            className="btn-primary text-xs"
+            disabled={Boolean(busy)}
+            onClick={checkoutFounding}
+          >
+            {busy === "checkout" ? "…" : "Claim founding Pro"}
+          </button>
+        ) : (
+          <Link href="/vault/plan" className="btn-primary text-xs">
+            See plans
+          </Link>
+        )}
+        {checkoutEnabled && (
+          <Link href="/vault/plan" className="btn-secondary text-xs">
+            See plans
+          </Link>
+        )}
         <button
           type="button"
           className="text-xs text-ink-muted underline"

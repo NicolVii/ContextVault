@@ -117,7 +117,7 @@ Free users also get `cheapOnlyRouting` in `runInference` so Auto stays on cheap 
 | `GET/PUT/DELETE /api/billing/byok` | Encrypted provider keys (Pro) | **Fully functional** with encryption env rules |
 | `POST /api/billing/dev-topup` | Local credit grant | **Fully functional** locally; **Disabled** in production |
 
-Checkout features when Stripe is configured: billing address, tax ID collection, Stripe Tax, ToS consent copy, founding Pro coupon (`STRIPE_COUPON_PRO_FOUNDING`).
+Checkout / Portal require `COMMERCIAL_MODE=live` **and** Stripe credentials (`assertCheckoutAllowed` / `assertPortalAllowed`). Demo and disabled modes return 403 and never create sessions — even if `STRIPE_*` is set. When allowed: billing address, tax ID collection, Stripe Tax, ToS consent copy, founding Pro coupon (`STRIPE_COUPON_PRO_FOUNDING`).
 
 ### Webhook handlers (`webhook.ts`)
 
@@ -191,7 +191,7 @@ Memory: `MEMORY_PROVIDER=supabase` (default) or `mem0` — orthogonal to Stripe;
 
 **Status: Fully functional in non-production · Disabled in production**
 
-`isDevTopupAllowed`: `NODE_ENV === "production"` → false (no env override). Route also refuses when `STRIPE_SECRET_KEY` is set. UI shows “Dev top-up” only when Stripe unset and top-up allowed. Covered by `tests/production-safety.test.ts`.
+`isDevTopupAllowed` / `isCommercialDevTopupAllowed`: requires `COMMERCIAL_MODE=demo` and non-production (no env override). Live mode and disabled mode both refuse. UI shows “Dev top-up” only when the commercial capability allows it. Covered by `tests/production-safety.test.ts` and `tests/commercial-mode.test.ts`.
 
 ---
 
@@ -241,19 +241,21 @@ Tables + `/api/workspaces` + Settings UI for personal labels / optional monthly 
 
 | Variable | Role |
 | --- | --- |
-| `STRIPE_SECRET_KEY` | Enables Stripe client + disables dev top-up |
+| `COMMERCIAL_MODE` | `disabled` \| `demo` \| `live`. Defaults: `demo` locally, `disabled` in production if unset. Checkout/Portal require `live` **and** Stripe. |
+| `STRIPE_SECRET_KEY` | Stripe client credentials (not sufficient alone for payments) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook signature verification |
 | `STRIPE_PRICE_LITE_*` / `STRIPE_PRICE_PRO_*` | Checkout line items |
 | `STRIPE_COUPON_PRO_FOUNDING` | Optional founding Pro discount |
 | `STRIPE_PRICE_PACK_FRONTIER_BOOST` | Non-public pack |
 | `NEXT_PUBLIC_APP_URL` | Checkout / portal return URLs |
+| `FEATURE_VOICE` / `FEATURE_AUTO_TOPUP` / `FEATURE_SPEND_CAP_ENFORCEMENT` / `FEATURE_WORKSPACE_BUDGETS` / `FEATURE_DAILY_FAIR_USE` / `FEATURE_CREDIT_PACK_STOREFRONT` | Unfinished feature flags (default off) |
 | `BYOK_ENCRYPTION_KEY` | Required in production for BYOK |
 | `OPENROUTER_API_KEY` / `OPENROUTER_API_KEYS` | Platform inference |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` / `GEMINI_API_KEY`, `GROQ_API_KEY` | Direct adapters |
 | `EMBEDDING_PROVIDER` | `local` (default) or `openai` |
 | `MEMORY_PROVIDER` / `MEM0_API_KEY` | Memory backend |
 
-See `.env.example` for comments. Local demo JWTs must never be used in hosted environments.
+Central module: `src/lib/billing/commercial.ts` (`getCommercialCapabilities`, `assertCheckoutAllowed`, `assertPortalAllowed`). See `.env.example` for comments. Local demo JWTs must never be used in hosted environments.
 
 ---
 
@@ -262,6 +264,7 @@ See `.env.example` for comments. Local demo JWTs must never be used in hosted en
 | Suite | What it covers | Needs DB |
 | --- | --- | --- |
 | `tests/billing-providers.test.ts` | Catalog, entitlements, intensity, adapters, BYOK list | No |
+| `tests/commercial-mode.test.ts` | Mode defaults, payment gates, feature flags, demo/disabled deny Checkout | No |
 | `tests/commercial-ux.test.ts` | Pricing copy, founding eligibility, Free gates | No |
 | `tests/production-safety.test.ts` | Dev top-up, BYOK crypto, credit skip, Stripe signature, mocked idempotency | No |
 | `tests/inference.test.ts` | Router, pricing estimates | No |

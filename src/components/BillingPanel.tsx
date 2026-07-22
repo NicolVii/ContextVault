@@ -10,7 +10,10 @@ export function BillingPanel(_props: {
   balance?: number;
   planId?: string;
   planStatus?: string | null;
+  /** @deprecated Prefer commercialMode / checkoutEnabled from getCommercialCapabilities. */
   stripeConfigured?: boolean;
+  commercialMode?: string;
+  checkoutEnabled?: boolean;
   allowDevTopup?: boolean;
   recent?: unknown[];
 }) {
