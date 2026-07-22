@@ -1,9 +1,14 @@
 import { resolveModelProfile } from "@/lib/inference/models";
+import {
+  getModelOverride,
+  getProviderOpsSync,
+} from "@/lib/inference/provider-ops";
 import type { SelectionPolicy } from "@/lib/inference/types";
 
 /**
  * Product taxonomy: Auto (efficient path) vs Frontier (premium models).
  * Classification drives entitlement pools — not customer-facing credit math.
+ * Ops overrides (autoEligible / frontierEligible) refine catalog defaults.
  */
 
 export type UsageIntensity = "auto" | "frontier";
@@ -12,6 +17,11 @@ export type UsageIntensity = "auto" | "frontier";
 export const AUTO_CHEAP_THRESHOLD = 0.7;
 
 export function isFrontierModelId(modelId: string): boolean {
+  const snapshot = getProviderOpsSync();
+  const override = getModelOverride(modelId, snapshot);
+  if (override.frontierEligible && !override.autoEligible) return true;
+  if (override.autoEligible && !override.frontierEligible) return false;
+
   const profile = resolveModelProfile(modelId);
   if (!profile) return true;
   return profile.suitability.cheap < AUTO_CHEAP_THRESHOLD;

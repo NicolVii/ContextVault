@@ -102,7 +102,7 @@ describe("deterministic router", () => {
     expect(decision.modelId).toBe("google.gemini-flash-1.5");
   });
 
-  it("auto-routes coding heuristics", () => {
+  it("auto-routes coding heuristics among Auto-eligible models", () => {
     const decision = resolveRoute(
       { type: "auto" },
       {
@@ -115,7 +115,8 @@ describe("deterministic router", () => {
       }
     );
     expect(decision.reasonCode).toBe("coding_heuristic");
-    expect(decision.modelId).toBe("anthropic.claude-3.5-sonnet");
+    // Frontier models (e.g. Claude) are excluded from Auto unless auto-eligible.
+    expect(decision.modelId).toBe("meta.llama-3.1-70b-instruct");
   });
 
   it("defaults cheap/fast for simple chat", () => {

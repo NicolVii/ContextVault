@@ -226,6 +226,7 @@ export function resolveModelProfile(idOrLegacy: string): ModelProfile | null {
 }
 
 export function getActiveModels(): ModelProfile[] {
+  // Catalog baseline. Runtime routing uses getRoutableModels() with ops overlays.
   return MODEL_CATALOG.filter((m) => m.status === "active");
 }
 
