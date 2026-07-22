@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { requireStaffPage } from "@/lib/admin/auth";
+import { AdminShell } from "@/components/admin/AdminShell";
 import { BRAND } from "@/lib/brand";
 
 export const metadata: Metadata = {
@@ -6,10 +8,20 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function AdminLayout({
+/**
+ * Protected admin console layout. Staff gate runs here so every nested
+ * page inherits server-side authorization (anon → login, user → 404).
+ */
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <div className="min-h-screen bg-atmosphere text-ink">{children}</div>;
+  const ctx = await requireStaffPage();
+
+  return (
+    <AdminShell role={ctx.role} userId={ctx.user.id}>
+      {children}
+    </AdminShell>
+  );
 }
