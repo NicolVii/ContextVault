@@ -136,6 +136,27 @@ Protected pages under `/admin/plans` and `/admin/plans/[planId]` (staff gate; mu
 
 Catalog loader merges active campaigns into entitlements (TTL cache). APIs: `GET/POST /api/admin/plans`, `GET/POST /api/admin/plans/[planId]`, `POST /api/admin/plans/campaigns`.
 
+### Cortaix promotions
+
+**Status: Fully functional (local / service-role; Stripe mapping live-gated)**
+
+Protected page `/admin/promotions` (staff read; admin+ mutate). Tables: `promotions`, `promotion_redemptions`.
+
+| Capability | Behavior |
+| --- | --- |
+| Price discounts | percentage, fixed EUR, trial days, limited billing periods — separate `price_effect` JSON |
+| Usage bonuses | extra Auto/Frontier turns, credits, storage, temporary feature access — separate `bonus_effect` JSON |
+| Distribution | `public_code` or `automatic` campaigns |
+| Eligibility | eligible plans, new/existing audience, start/end window, global + per-user redemption caps |
+| Pause / resume / end / archive | audited lifecycle; paused promotions cannot redeem |
+| Demo mode | price discounts are **simulated internally** (`demo_stripe_simulation`); **no Stripe objects** |
+| Live mode | price discounts may create Stripe Coupon + Promotion Code; usage bonuses stay in Cortaix |
+| Redemption | `redeem_promotion` RPC + `POST /api/billing/promotions`; bonuses stack onto entitlements without flipping demo/revenue flags |
+| Checkout | optional `promotionId` applies live coupon / trial; rejects demo-simulated discounts |
+| Audit | `admin.promotion.*` actions in `admin_audit_log`; billing telemetry `promotion_redeemed` |
+
+APIs: `GET/POST/PATCH /api/admin/promotions`, `POST /api/admin/promotions/redemptions`, `GET/POST /api/billing/promotions`.
+
 ---
 
 ## 4. Stripe billing routes

@@ -77,11 +77,13 @@ export {
   isOverrideActive,
   pickActiveOverride,
   applyOverrideBonuses,
+  applyPromotionBonusOverlays,
   parseFeatureOverrides,
   type EntitlementSource,
   type EntitlementOverrideInput,
   type ResolvedEntitlement,
   type FeatureOverrides,
+  type PromotionBonusOverlay,
 } from "./entitlement-resolution";
 export {
   createEntitlementGrant,
@@ -91,6 +93,55 @@ export {
   listEntitlementGrantsForUser,
   listPlanSimulationsForUser,
 } from "./admin-entitlements";
+export {
+  listPromotions,
+  getPromotionById,
+  getPromotionByCode,
+  getPromotionBySlug,
+  createPromotion,
+  activatePromotion,
+  pausePromotion,
+  resumePromotion,
+  endPromotion,
+  archivePromotion,
+  redeemPromotion,
+  revokeRedemption,
+  listRedemptionsForPromotion,
+  listRedemptionsForUser,
+  listEligibleAutomaticPromotions,
+  listActivePromotionBonusesForUser,
+  expireStaleRedemptions,
+  expireEndedPromotions,
+  evaluatePromotionEligibility,
+  mapPromotionRow,
+  mapRedemptionRow,
+  isPromotionWindowOpen,
+  normalizePromotionCode,
+  parseBonusEffect,
+  parsePriceEffect,
+  type PromotionRecord,
+  type PromotionRedemption,
+  type PromotionInput,
+  type PriceEffect,
+  type BonusEffect,
+  type RedeemPromotionResult,
+} from "./promotions";
+export {
+  promotionInputSchema,
+  priceEffectSchema,
+  bonusEffectSchema,
+  requirePromotionReason,
+  PROMOTION_STATUSES,
+  PROMOTION_DISTRIBUTIONS,
+  PROMOTION_AUDIENCES,
+  type PromotionStatus,
+  type PromotionDistribution,
+  type PromotionAudience,
+} from "./promotions-types";
+export {
+  syncPromotionPriceToStripe,
+  resolveCheckoutDiscountFromPromotion,
+} from "./promotions-stripe";
 export { recordBillingTelemetry } from "./telemetry";
 export { FUTURE_TIER_SPECS, type FutureTierSpec } from "./future-tiers";
 export { ensureFreeSubscription } from "./ensure-free";
