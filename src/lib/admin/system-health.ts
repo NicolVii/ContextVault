@@ -210,7 +210,9 @@ export async function getSystemHealthReport(): Promise<SystemHealthReport> {
     },
   });
 
-  // Migrations: prefer supabase_migrations.schema_migrations; fall back quietly.
+  // Migrations: prefer supabase_migrations.schema_migrations; fall back to
+  // verifying this feature's control table is queryable (PostgREST often cannot
+  // expose the migrations schema).
   let latestVersion: string | null = null;
   let recentVersions: string[] = [];
   let migError: string | null = null;
@@ -224,24 +226,45 @@ export async function getSystemHealthReport(): Promise<SystemHealthReport> {
     if (error) {
       migError = error.message;
     } else {
-      recentVersions = (data ?? []).map((r) => String((r as { version: string }).version));
+      recentVersions = (data ?? []).map((r) =>
+        String((r as { version: string }).version)
+      );
       latestVersion = recentVersions[0] ?? null;
     }
   } catch (err) {
     migError = err instanceof Error ? err.message : "unavailable";
   }
+
+  let controlsTableOk = false;
+  if (migError || !latestVersion) {
+    const { error: ctlErr } = await admin
+      .from("system_operational_controls")
+      .select("key")
+      .limit(1);
+    controlsTableOk = !ctlErr;
+  }
+
   checks.push({
     id: "migrations",
     label: "Database migrations",
-    status: migError ? "warn" : latestVersion ? "ok" : "unknown",
-    detail: migError
-      ? `Could not read schema_migrations (${migError})`
-      : latestVersion
-        ? `Latest applied: ${latestVersion}`
-        : "No migration rows found",
+    status: latestVersion
+      ? "ok"
+      : controlsTableOk
+        ? "ok"
+        : migError
+          ? "warn"
+          : "unknown",
+    detail: latestVersion
+      ? `Latest applied: ${latestVersion}`
+      : controlsTableOk
+        ? "schema_migrations not readable; operational controls table present"
+        : migError
+          ? `Could not read schema_migrations (${migError})`
+          : "No migration rows found",
     meta: {
       latest: latestVersion,
       recent: recentVersions,
+      controlsTableOk,
     },
   });
 
