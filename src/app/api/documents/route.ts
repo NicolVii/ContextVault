@@ -7,6 +7,11 @@ import { getEmbeddingProvider, toVectorLiteral } from "@/lib/embeddings";
 import { ALLOWED_UPLOAD_TYPES, MAX_UPLOAD_BYTES } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
+import {
+  assertFileUploadAllowed,
+  OperationalControlError,
+  operationalControlErrorResponse,
+} from "@/lib/admin/system-controls";
 
 export const maxDuration = 60;
 
@@ -24,6 +29,17 @@ export async function GET() {
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    await assertFileUploadAllowed();
+  } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
+    throw err;
+  }
 
   const { getPlanUsageSnapshot } = await import("@/lib/billing/plan-usage");
   const usage = await getPlanUsageSnapshot(ctx.user.id);
