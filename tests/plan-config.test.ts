@@ -68,6 +68,7 @@ function seedEntitlementRow(
     byok: e.byok,
     voice: e.voice,
     elevated_limits: e.elevatedLimits,
+    model_families: [...e.modelFamilies],
     ...overrides,
   };
 }

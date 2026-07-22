@@ -13,7 +13,7 @@ Status legend used below:
 
 This document is an **audit of the current codebase**, not a redesign. Related checklist: [`legal-readiness-checklist.md`](./legal-readiness-checklist.md). Demo / offline verification matrix: [`demo-mode-test-matrix.md`](./demo-mode-test-matrix.md).
 
-Staff ops use the protected **Admin Console** under `/admin` (RBAC via `user_roles`, mutations audited in `admin_audit_log`). Stripe Dashboard remains the source of paid subscription truth; the console covers demo grants, simulations, bonuses, usage resets, and audit browse.
+Staff ops use the protected **Admin Console** under `/admin` (RBAC via `user_roles`, mutations audited in `admin_audit_log`). Stripe Dashboard remains the source of paid subscription truth; the console covers demo grants, simulations, bonuses, usage resets, **plan catalog editing**, and audit browse.
 
 ---
 
@@ -117,6 +117,24 @@ Effective plan priority in `resolveEffectiveEntitlement` / `resolveUsagePeriod`:
 4. Free fallback
 
 Grants and simulations support temporary Free/Lite/Pro, start/expiry, Auto/Frontier turn bonuses, credit bonus, storage override, per-feature overrides, reason, and `created_by`. Mutations go through `POST /api/admin/entitlements` (admin+) and are appended to `admin_audit_log`. Rows always set `exclude_from_revenue=true` and never count as paid revenue. Thinking and Vault Plan show `DemoSubscriptionBanner` while a demo source is active.
+
+### Admin Plan Editor
+
+**Status: Fully functional (local / service-role)**
+
+Protected pages under `/admin/plans` and `/admin/plans/[planId]` (staff gate; mutations admin+).
+
+| Capability | Behavior |
+| --- | --- |
+| Edit pricing / visibility / features | Validated product snapshot written to `plans` + stored on `plan_versions.product_snapshot` |
+| Edit Auto / Frontier / fair-use / storage / attachments / voice / BYOK / elevated / model families | New `plan_entitlements` row on a new version |
+| Reason required | Rejected under 3 characters |
+| Versioning | `admin_publish_plan_version` RPC atomically retires the prior active version and activates the next |
+| Audit | `admin.plan_version.publish` / `.rollback` / `admin.plan_campaign.create` / `.revoke` |
+| Rollback | Publishes a **new** version copying a prior snapshot (does not revive retired rows in place) |
+| Campaigns | `plan_campaign_overrides` — dated entitlement overlays (e.g. Lite Frontier 10 → 25 for a month) without permanently changing the plan |
+
+Catalog loader merges active campaigns into entitlements (TTL cache). APIs: `GET/POST /api/admin/plans`, `GET/POST /api/admin/plans/[planId]`, `POST /api/admin/plans/campaigns`.
 
 ---
 

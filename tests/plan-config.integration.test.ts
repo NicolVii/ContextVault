@@ -82,7 +82,7 @@ describe("plan entitlement config migration + seed (integration)", () => {
     const { data: rows, error } = await admin
       .from("plan_entitlements")
       .select(
-        "plan_version_id, auto_monthly_turns, unlimited_auto, frontier_monthly_turns, attachments, storage_bytes, byok, voice, elevated_limits, plan_versions!inner(plan_id, status)"
+        "plan_version_id, auto_monthly_turns, unlimited_auto, frontier_monthly_turns, attachments, storage_bytes, byok, voice, elevated_limits, model_families, plan_versions!inner(plan_id, status)"
       );
 
     expect(error).toBeNull();
@@ -98,6 +98,7 @@ describe("plan entitlement config migration + seed (integration)", () => {
       byok: boolean;
       voice: boolean;
       elevated_limits: boolean;
+      model_families: string[];
       plan_versions:
         | { plan_id: string; status: string }
         | { plan_id: string; status: string }[];
@@ -118,12 +119,19 @@ describe("plan entitlement config migration + seed (integration)", () => {
     expect(free.attachments).toBe(false);
     expect(Number(free.storage_bytes)).toBe(0);
     expect(free.byok).toBe(false);
+    expect(free.model_families).toEqual([]);
 
     const lite = byPlan.get("lite")!;
     expect(lite.auto_monthly_turns).toBeNull();
     expect(lite.unlimited_auto).toBe(true);
     expect(lite.frontier_monthly_turns).toBe(10);
     expect(Number(lite.storage_bytes)).toBe(100 * 1024 * 1024);
+    expect(lite.model_families).toEqual([
+      "openai",
+      "anthropic",
+      "google",
+      "meta",
+    ]);
 
     const pro = byPlan.get("pro")!;
     expect(pro.frontier_monthly_turns).toBeNull();
@@ -131,6 +139,12 @@ describe("plan entitlement config migration + seed (integration)", () => {
     expect(pro.voice).toBe(true);
     expect(pro.elevated_limits).toBe(true);
     expect(Number(pro.storage_bytes)).toBe(5 * 1024 * 1024 * 1024);
+    expect(pro.model_families).toEqual([
+      "openai",
+      "anthropic",
+      "google",
+      "meta",
+    ]);
   });
 
   it("loads catalog from DB and keeps sync helpers behavior-compatible", async () => {
