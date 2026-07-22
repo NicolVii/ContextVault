@@ -1,9 +1,9 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { Plus, Pin } from "lucide-react";
-import { getSessionContext } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
-import { timed } from "@/lib/perf";
 import type { Memory } from "@/lib/types";
 
 function dayLabel(iso: string): string {
@@ -24,34 +24,45 @@ function dayLabel(iso: string): string {
   });
 }
 
-export default async function VaultMemoriesPage() {
-  const ctx = await getSessionContext();
-  if (!ctx) redirect("/login");
+/**
+ * Client-loaded list: Soft Navigation can paint chrome immediately instead of
+ * waiting for the full memories query on the server (V2 SSR regression).
+ */
+export default function VaultMemoriesPage() {
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const { data, error } = await timed("vault.memories.list", () =>
-    ctx.supabase
-      .from("memories")
-      .select("*")
-      .eq("status", "active")
-      .order("pinned_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false })
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await fetch("/api/memories?status=active");
+    const json = await res.json();
+    setMemories(json.memories ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const pinned = useMemo(
+    () => memories.filter((m) => Boolean(m.pinned_at)),
+    [memories]
+  );
+  const unpinned = useMemo(
+    () => memories.filter((m) => !m.pinned_at),
+    [memories]
   );
 
-  if (error) {
-    console.error("vault memories list failed", error.message);
-  }
-
-  const memories = (data ?? []) as Memory[];
-  const pinned = memories.filter((m) => Boolean(m.pinned_at));
-  const unpinned = memories.filter((m) => !m.pinned_at);
-
-  const groups = new Map<string, Memory[]>();
-  for (const m of unpinned) {
-    const key = dayLabel(m.created_at);
-    const list = groups.get(key) ?? [];
-    list.push(m);
-    groups.set(key, list);
-  }
+  const groups = useMemo(() => {
+    const map = new Map<string, Memory[]>();
+    for (const m of unpinned) {
+      const key = dayLabel(m.created_at);
+      const list = map.get(key) ?? [];
+      list.push(m);
+      map.set(key, list);
+    }
+    return [...map.entries()];
+  }, [unpinned]);
 
   return (
     <div className="mx-auto max-w-lg">
@@ -61,7 +72,17 @@ export default async function VaultMemoriesPage() {
         </Link>
       </div>
 
-      {memories.length === 0 ? (
+      {loading ? (
+        <div className="space-y-3" aria-busy="true" aria-label="Loading memories">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="space-y-2 rounded-2xl border border-mist-200 px-4 py-3">
+              <div className="h-4 w-full animate-pulse rounded bg-mist-200/80" />
+              <div className="h-4 w-4/5 animate-pulse rounded bg-mist-100" />
+              <div className="h-3 w-24 animate-pulse rounded bg-mist-100" />
+            </div>
+          ))}
+        </div>
+      ) : memories.length === 0 ? (
         <div className="py-16 text-center">
           <p className="font-display text-xl text-ink">No memories yet</p>
           <p className="mt-2 text-sm text-ink-muted">
@@ -85,7 +106,7 @@ export default async function VaultMemoriesPage() {
               </ul>
             </section>
           )}
-          {[...groups.entries()].map(([label, items]) => (
+          {groups.map(([label, items]) => (
             <section key={label}>
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-ink-faint">
                 {label}

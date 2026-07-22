@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { MemoryCard } from "@/components/MemoryCard";
 import { SensitiveBadge } from "@/components/Badges";
 import type { Memory } from "@/lib/types";
 
 export function ReviewQueue({
-  initialMemories = [],
+  initialMemories,
 }: {
+  /** When provided, skip the initial client fetch (optional SSR/hydration path). */
   initialMemories?: Memory[];
-}) {
-  const [memories, setMemories] = useState<Memory[]>(initialMemories);
-  const [loading, setLoading] = useState(false);
+} = {}) {
+  const hasInitial = initialMemories !== undefined;
+  const [memories, setMemories] = useState<Memory[]>(initialMemories ?? []);
+  const [loading, setLoading] = useState(!hasInitial);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -21,6 +23,12 @@ export function ReviewQueue({
     setMemories(json.memories ?? []);
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (!hasInitial) {
+      void load();
+    }
+  }, [hasInitial, load]);
 
   if (loading) {
     return (

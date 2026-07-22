@@ -108,8 +108,10 @@ export function PlanUsagePanel({
   checkoutEnabled,
   portalEnabled,
   allowDevTopup,
-  recent,
+  recent = [],
   creditBalance,
+  omitRecent = false,
+  recentSlot,
 }: {
   snap: PlanUsageSnapshot;
   commercialMode: CommercialMode;
@@ -117,17 +119,20 @@ export function PlanUsagePanel({
   portalEnabled: boolean;
   allowDevTopup: boolean;
   creditBalance: number;
-  recent: {
+  recent?: {
     request_id: string;
     purpose: string;
     model_id: string;
     credits_charged: number;
     created_at: string;
   }[];
+  /** When true, skip the Recent block (use {@link recentSlot} or {@link PlanRecentList}). */
+  omitRecent?: boolean;
+  /** Optional streamed Recent UI (e.g. Suspense-wrapped server slot). */
+  recentSlot?: React.ReactNode;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showDetails, setShowDetails] = useState(false);
   const [interval, setInterval] = useState<"monthly" | "annual">("monthly");
   const [spendCap, setSpendCap] = useState("");
   const [spendSaved, setSpendSaved] = useState<string | null>(null);
@@ -449,54 +454,96 @@ export function PlanUsagePanel({
         )}
       </section>
 
-      <section>
-        <h3 className="text-sm font-semibold text-ink">Recent</h3>
-        <ul className="mt-2 divide-y divide-mist-100 text-xs">
-          {recent.length === 0 ? (
-            <li className="py-2 text-ink-faint">No usage yet.</li>
-          ) : (
-            recent.slice(0, 8).map((row) => (
-              <li key={row.request_id} className="flex justify-between py-2 text-ink-muted">
-                <span>
-                  {row.purpose} · {row.model_id.replace(/^[^.]+\./, "")}
-                </span>
-                <span className="text-ink-faint">{formatDate(row.created_at)}</span>
-              </li>
-            ))
-          )}
-        </ul>
-        <button
-          type="button"
-          className="mt-3 text-xs text-ink-muted underline"
-          onClick={() => setShowDetails((v) => !v)}
-        >
-          {showDetails ? "Hide usage details" : "Usage details"}
-        </button>
-        {showDetails && (
-          <div className="mt-2 rounded-xl border border-mist-200 bg-white p-3 text-xs text-ink-muted">
-            <p>Internal credit balance: {creditBalance.toLocaleString()}</p>
-            <p className="mt-1">
-              Auto turns {snap.autoTurns}
-              {snap.entitlements.autoMonthlyTurns != null
-                ? ` / ${snap.entitlements.autoMonthlyTurns}`
-                : ""}{" "}
-              · Frontier turns {snap.frontierTurns}
-              {snap.entitlements.frontierMonthlyTurns != null
-                ? ` / ${snap.entitlements.frontierMonthlyTurns}`
-                : ""}
-            </p>
-            <p className="mt-2 text-ink-faint">
-              Credits are an internal meter. You buy from Cortaix — providers stay behind the
-              scenes.
-            </p>
-            <p className="mt-2">
-              <Link href="/legal/billing" className="underline">
-                Subscription &amp; Billing Terms
-              </Link>
-            </p>
-          </div>
+      {recentSlot}
+      {!omitRecent && !recentSlot && (
+        <PlanRecentList recent={recent} creditBalance={creditBalance} snap={snap} />
+      )}
+    </div>
+  );
+}
+
+type RecentRow = {
+  request_id: string;
+  purpose: string;
+  model_id: string;
+  credits_charged: number;
+  created_at: string;
+};
+
+export function PlanRecentList({
+  recent,
+  creditBalance,
+  snap,
+  showDetailsToggle = true,
+}: {
+  recent: RecentRow[];
+  creditBalance: number;
+  snap: PlanUsageSnapshot;
+  showDetailsToggle?: boolean;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+
+  return (
+    <section>
+      <h3 className="text-sm font-semibold text-ink">Recent</h3>
+      <ul className="mt-2 divide-y divide-mist-100 text-xs">
+        {recent.length === 0 ? (
+          <li className="py-2 text-ink-faint">No usage yet.</li>
+        ) : (
+          recent.slice(0, 8).map((row) => (
+            <li key={row.request_id} className="flex justify-between py-2 text-ink-muted">
+              <span>
+                {row.purpose} · {row.model_id.replace(/^[^.]+\./, "")}
+              </span>
+              <span className="text-ink-faint">{formatDate(row.created_at)}</span>
+            </li>
+          ))
         )}
-      </section>
+      </ul>
+      {showDetailsToggle && (
+        <>
+          <button
+            type="button"
+            className="mt-3 text-xs text-ink-muted underline"
+            onClick={() => setShowDetails((v) => !v)}
+          >
+            {showDetails ? "Hide usage details" : "Usage details"}
+          </button>
+          {showDetails && <UsageDetailsBody creditBalance={creditBalance} snap={snap} />}
+        </>
+      )}
+    </section>
+  );
+}
+
+function UsageDetailsBody({
+  creditBalance,
+  snap,
+}: {
+  creditBalance: number;
+  snap: PlanUsageSnapshot;
+}) {
+  return (
+    <div className="mt-2 rounded-xl border border-mist-200 bg-white p-3 text-xs text-ink-muted">
+      <p>Internal credit balance: {creditBalance.toLocaleString()}</p>
+      <p className="mt-1">
+        Auto turns {snap.autoTurns}
+        {snap.entitlements.autoMonthlyTurns != null
+          ? ` / ${snap.entitlements.autoMonthlyTurns}`
+          : ""}{" "}
+        · Frontier turns {snap.frontierTurns}
+        {snap.entitlements.frontierMonthlyTurns != null
+          ? ` / ${snap.entitlements.frontierMonthlyTurns}`
+          : ""}
+      </p>
+      <p className="mt-2 text-ink-faint">
+        Credits are an internal meter. You buy from Cortaix — providers stay behind the scenes.
+      </p>
+      <p className="mt-2">
+        <Link href="/legal/billing" className="underline">
+          Subscription &amp; Billing Terms
+        </Link>
+      </p>
     </div>
   );
 }
