@@ -73,3 +73,35 @@ export {
   type ProviderAdminView,
   type ModelAdminView,
 } from "@/lib/inference/provider-ops";
+
+export {
+  OPERATIONAL_CONTROL_KEYS,
+  OPERATIONAL_CONTROL_META,
+  OperationalControlError,
+  assertCheckoutControlAllowed,
+  assertFileUploadAllowed,
+  assertMaintenanceAllowed,
+  assertRegistrationAllowed,
+  assertVoiceAllowed,
+  ensureOperationalControlsSnapshot,
+  evaluateControlActive,
+  getControl,
+  isControlActive,
+  isModelShutDown,
+  isOperationalControlKey,
+  isProviderShutDown,
+  isVoiceShutdownActive,
+  listOperationalControls,
+  operationalControlErrorResponse,
+  updateOperationalControl,
+  type OperationalControlKey,
+  type OperationalControlState,
+  type OperationalControlsSnapshot,
+} from "@/lib/admin/system-controls";
+
+export {
+  getSystemHealthReport,
+  type HealthCheckItem,
+  type HealthStatus,
+  type SystemHealthReport,
+} from "@/lib/admin/system-health";

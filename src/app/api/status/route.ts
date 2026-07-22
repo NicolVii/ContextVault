@@ -4,6 +4,10 @@ import { getEmbeddingProvider } from "@/lib/embeddings";
 import { getMemoryProvider } from "@/lib/memory";
 import { getExtractionProvider, resetExtractionProviderCache } from "@/lib/memory/extraction";
 import { getCommercialCapabilities } from "@/lib/billing/commercial";
+import {
+  ensureOperationalControlsSnapshot,
+  isControlActive,
+} from "@/lib/admin/system-controls";
 
 /** Always read live process env — never bake this at build time. */
 export const dynamic = "force-dynamic";
@@ -27,6 +31,7 @@ export async function GET() {
   const extraction = getExtractionProvider();
 
   const commercial = getCommercialCapabilities();
+  const controls = await ensureOperationalControlsSnapshot();
 
   return NextResponse.json({
     ok: true,
@@ -51,11 +56,23 @@ export async function GET() {
       portalEnabled: commercial.portalEnabled,
       featureFlags: commercial.featureFlags,
     },
+    operational: {
+      maintenanceMode: isControlActive("maintenance_mode", controls),
+      mockOnlyMode: isControlActive("mock_only_mode", controls),
+      registrationShutdown: isControlActive("registration_shutdown", controls),
+      checkoutShutdown: isControlActive("checkout_shutdown", controls),
+      voiceShutdown: isControlActive("voice_shutdown", controls),
+    },
     embeddings: { provider: embeddings.name },
     memory: { provider: memory.name },
     extraction: { provider: extraction.name },
     supabaseUrlConfigured: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
     nodeEnv: process.env.NODE_ENV ?? null,
     vercelEnv: process.env.VERCEL_ENV ?? null,
+    deploymentId:
+      process.env.DEPLOYMENT_ID?.trim() ||
+      process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
+      process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+      null,
   });
 }

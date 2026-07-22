@@ -26,10 +26,19 @@ import {
   recordProviderOpsEvent,
   type ProviderOpsSnapshot,
 } from "./provider-ops";
+import {
+  ensureOperationalControlsSnapshot,
+  getControl,
+  isControlActive,
+  isModelShutDown,
+  isProviderShutDown,
+  OperationalControlError,
+  type OperationalControlsSnapshot,
+} from "@/lib/admin/system-controls";
 import { providerCostUsdMicros } from "./pricing";
 import type { InferenceRequest, InferenceResult, UsageDraft } from "./types";
 
-export { InsufficientCreditsError, PlanUsageBlockedError };
+export { InsufficientCreditsError, PlanUsageBlockedError, OperationalControlError };
 
 function platformKeysFor(provider: string): string[] {
   if (provider === "openrouter") {
@@ -91,12 +100,13 @@ async function resolveApiKey(
 function orderedBindings(
   routeBinding: ProviderBinding,
   profileBindings: ProviderBinding[],
-  snapshot: ProviderOpsSnapshot
+  snapshot: ProviderOpsSnapshot,
+  controls: OperationalControlsSnapshot
 ): ProviderBinding[] {
   const preferred = filterAndOrderBindings(
     [routeBinding, ...profileBindings],
     snapshot
-  );
+  ).filter((b) => !isProviderShutDown(b.provider, controls));
   // Dedupe while keeping ops priority order; ensure route binding wins ties.
   const seen = new Set<string>();
   const out: ProviderBinding[] = [];
@@ -129,6 +139,17 @@ function orderedBindings(
 export async function runInference(req: InferenceRequest): Promise<InferenceResult> {
   const started = Date.now();
   const snapshot = await ensureProviderOpsSnapshot();
+  const controls = await ensureOperationalControlsSnapshot();
+
+  if (isControlActive("maintenance_mode", controls)) {
+    const reason = getControl("maintenance_mode", controls).reason;
+    throw new OperationalControlError(
+      "maintenance_mode",
+      reason?.trim() ||
+        "The platform is in maintenance mode. Please try again later.",
+      503
+    );
+  }
 
   const snap = await getPlanUsageSnapshot(req.userId);
   const gatedReq: InferenceRequest = {
@@ -140,13 +161,41 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
   };
 
   const route = resolveRoute(gatedReq.selection, gatedReq, snapshot);
+  if (isModelShutDown(route.modelId, controls)) {
+    throw new OperationalControlError(
+      "model_shutdown",
+      "This model is temporarily unavailable.",
+      503
+    );
+  }
+
   const intensity = classifyUsageIntensity(gatedReq.selection, route.modelId);
+  if (intensity === "frontier" && isControlActive("frontier_shutdown", controls)) {
+    throw new OperationalControlError(
+      "frontier_shutdown",
+      "Frontier models are temporarily unavailable.",
+      503
+    );
+  }
+
   const profile = resolveModelProfile(route.modelId);
   const bindings = orderedBindings(
     { provider: route.provider, providerModelId: route.providerModelId },
     profile?.bindings ?? [],
-    snapshot
+    snapshot,
+    controls
   );
+
+  if (
+    isControlActive("provider_shutdown", controls) &&
+    getControl("provider_shutdown", controls).targetIds.length === 0
+  ) {
+    throw new OperationalControlError(
+      "provider_shutdown",
+      "Inference providers are temporarily unavailable.",
+      503
+    );
+  }
 
   const inputEstimate = Math.max(
     1,
@@ -154,24 +203,29 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
   );
   const hold = estimateCreditsForPreflight(route.modelId, inputEstimate);
 
+  const forceMock = isControlActive("mock_only_mode", controls);
+
   let hasRunnable = false;
-  for (const b of bindings) {
-    const underCeiling = await isProviderUnderDailyCeiling(b.provider, snapshot);
-    if (!underCeiling) continue;
-    if (
-      await resolveApiKey(
-        req.userId,
-        b.provider,
-        gatedReq.billingMode,
-        snap.entitlements.byok,
-        snapshot
-      )
-    ) {
-      hasRunnable = true;
-      break;
+  if (!forceMock) {
+    for (const b of bindings) {
+      if (isProviderShutDown(b.provider, controls)) continue;
+      const underCeiling = await isProviderUnderDailyCeiling(b.provider, snapshot);
+      if (!underCeiling) continue;
+      if (
+        await resolveApiKey(
+          req.userId,
+          b.provider,
+          gatedReq.billingMode,
+          snap.entitlements.byok,
+          snapshot
+        )
+      ) {
+        hasRunnable = true;
+        break;
+      }
     }
   }
-  const useMock = !hasRunnable;
+  const useMock = forceMock || !hasRunnable;
 
   const willCharge = gatedReq.billingMode === "platform" && !useMock;
   if (willCharge) {

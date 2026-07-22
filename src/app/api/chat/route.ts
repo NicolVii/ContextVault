@@ -5,6 +5,11 @@ import { checkRateLimit } from "@/lib/ratelimit";
 import { isValidSelection } from "@/lib/inference/models";
 import { InsufficientCreditsError } from "@/lib/inference/credits";
 import { PlanUsageBlockedError } from "@/lib/billing/plan-usage";
+import {
+  assertMaintenanceAllowed,
+  OperationalControlError,
+  operationalControlErrorResponse,
+} from "@/lib/admin/system-controls";
 import { runChatOrchestrator } from "@/lib/orchestration/chat";
 
 /** Always resolve identity fresh — never serve a cached chat handler. */
@@ -13,6 +18,17 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    await assertMaintenanceAllowed();
+  } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
+    throw err;
+  }
 
   const limit = await checkRateLimit(ctx.user.id, "chat", 30, 60);
   if (!limit.allowed) {
@@ -55,6 +71,11 @@ export async function POST(request: Request) {
       selection: result.selection,
     });
   } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
     if (err instanceof InsufficientCreditsError) {
       return NextResponse.json(
         {

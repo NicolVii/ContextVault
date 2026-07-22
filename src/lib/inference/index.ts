@@ -30,7 +30,7 @@ export {
   InsufficientCreditsError,
 } from "./credits";
 export { settleUsage, computeCreditsCharged } from "./meter";
-export { runInference } from "./complete";
+export { runInference, OperationalControlError } from "./complete";
 export {
   ensureProviderOpsSnapshot,
   filterAndOrderBindings,

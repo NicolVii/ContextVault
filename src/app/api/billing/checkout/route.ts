@@ -3,6 +3,11 @@ import { getSessionContext } from "@/lib/auth";
 import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/stripe";
 import { getCreditPack, getSubscriptionPlan } from "@/lib/billing/products";
 import { assertCheckoutAllowed } from "@/lib/billing/commercial";
+import {
+  assertCheckoutControlAllowed,
+  OperationalControlError,
+  operationalControlErrorResponse,
+} from "@/lib/admin/system-controls";
 import { recordBillingTelemetry } from "@/lib/billing/telemetry";
 import { ensurePlanConfigLoaded } from "@/lib/billing/plan-config-loader";
 import {
@@ -28,6 +33,17 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    await assertCheckoutControlAllowed();
+  } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
+    throw err;
+  }
 
   const gate = assertCheckoutAllowed();
   if (!gate.ok) {

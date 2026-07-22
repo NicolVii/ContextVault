@@ -27,6 +27,11 @@ import {
   type SelectionPolicy,
 } from "@/lib/inference";
 import { PlanUsageBlockedError } from "@/lib/billing/plan-usage";
+import {
+  assertMaintenanceAllowed,
+  OperationalControlError,
+  operationalControlErrorResponse,
+} from "@/lib/admin/system-controls";
 import { z } from "zod";
 import type { RetrievedChunk, RetrievedMemory } from "@/lib/types";
 
@@ -60,6 +65,17 @@ function responseMeta(opts: {
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    await assertMaintenanceAllowed();
+  } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
+    throw err;
+  }
 
   const limit = await checkRateLimit(ctx.user.id, "think", 40, 60);
   if (!limit.allowed) {
@@ -111,6 +127,11 @@ export async function POST(request: Request) {
       intent === "instruction" ? "instruction" : "question"
     );
   } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
     if (err instanceof InsufficientCreditsError) {
       return NextResponse.json(
         {

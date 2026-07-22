@@ -6,6 +6,7 @@ import {
 } from "@/lib/billing/plan-usage";
 import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 import { getCommercialCapabilities } from "@/lib/billing/commercial";
+import { isVoiceShutdownActive } from "@/lib/admin/system-controls";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -16,13 +17,14 @@ export async function GET() {
 
   await ensureFreeSubscription(ctx.user.id).catch(() => undefined);
 
-  const [snap, offer, docsRes] = await Promise.all([
+  const [snap, offer, docsRes, voiceShutdown] = await Promise.all([
     getPlanUsageSnapshot(ctx.user.id),
     getFoundingOfferState(ctx.user.id),
     createSupabaseAdminClient()
       .from("documents")
       .select("size_bytes")
       .eq("user_id", ctx.user.id),
+    isVoiceShutdownActive(),
   ]);
   const usedBytes = (docsRes.data ?? []).reduce(
     (n, d) => n + (Number(d.size_bytes) || 0),
@@ -30,7 +32,9 @@ export async function GET() {
   );
   const commercial = getCommercialCapabilities();
   const voiceEnabled =
-    commercial.featureFlags.voice && snap.entitlements.voice;
+    commercial.featureFlags.voice &&
+    snap.entitlements.voice &&
+    !voiceShutdown;
 
   return NextResponse.json({
     planId: snap.planId,

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStripe } from "@/lib/billing/stripe";
 import { handleStripeEvent } from "@/lib/billing/webhook";
+import { recordBillingTelemetry } from "@/lib/billing/telemetry";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,14 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     console.error("stripe webhook handler failed", err);
+    await recordBillingTelemetry({
+      eventName: "webhook_failed",
+      meta: {
+        eventId: event.id,
+        eventType: event.type,
+        error: err instanceof Error ? err.message : "Handler failed",
+      },
+    });
     return NextResponse.json({ error: "Handler failed" }, { status: 500 });
   }
 }

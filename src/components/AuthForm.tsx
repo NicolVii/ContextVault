@@ -45,7 +45,16 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     try {
       if (isSignup) {
         const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
+        if (error) {
+          const msg = error.message.toLowerCase();
+          if (
+            msg.includes("registration is temporarily disabled") ||
+            msg.includes("p0001")
+          ) {
+            throw new Error("New registrations are temporarily disabled.");
+          }
+          throw error;
+        }
         router.push("/onboarding");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });

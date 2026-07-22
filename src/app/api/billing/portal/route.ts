@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/stripe";
 import { assertPortalAllowed } from "@/lib/billing/commercial";
+import {
+  assertMaintenanceAllowed,
+  OperationalControlError,
+  operationalControlErrorResponse,
+} from "@/lib/admin/system-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +14,17 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    await assertMaintenanceAllowed();
+  } catch (err) {
+    if (err instanceof OperationalControlError) {
+      return NextResponse.json(operationalControlErrorResponse(err), {
+        status: err.status,
+      });
+    }
+    throw err;
+  }
 
   const gate = assertPortalAllowed();
   if (!gate.ok) {
