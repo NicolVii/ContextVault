@@ -6,7 +6,6 @@ import { BRAND } from "@/lib/brand";
 import { SignOutButton } from "@/components/SignOutButton";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
 import { getSubscriptionPlan } from "@/lib/billing/products";
-<<<<<<< HEAD
 import { timed } from "@/lib/perf";
 
 async function PlanNavRow() {
@@ -14,26 +13,11 @@ async function PlanNavRow() {
 
   let planLabel = "Free";
   let planHint = "Free";
-=======
-
-async function PlanNavRow() {
-  const supabase = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
->>>>>>> origin/main
-
-  let planLabel = "Free";
-  let planHint = "Free";
 
   if (user) {
-<<<<<<< HEAD
     const snap = await timed("vault.hub.planSnapshot", () =>
       getPlanUsageSnapshot(user.id)
     );
-=======
-    const snap = await getPlanUsageSnapshot(user.id);
->>>>>>> origin/main
     planLabel = getSubscriptionPlan(snap.planId ?? "free")?.label ?? "Free";
     planHint =
       snap.planId === "free" && snap.autoRemaining != null
@@ -77,7 +61,6 @@ function PlanNavRowFallback() {
 }
 
 export default async function VaultHubPage() {
-<<<<<<< HEAD
   const ctx = await getSessionContext();
   const { count: reviewCount } = await timed("vault.hub.reviewCount", async () => {
     if (!ctx) return { count: 0 };
@@ -86,13 +69,6 @@ export default async function VaultHubPage() {
       .select("id", { count: "exact", head: true })
       .eq("status", "proposed");
   });
-=======
-  const supabase = createSupabaseServerClient();
-  const { count: reviewCount } = await supabase
-    .from("memories")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "proposed");
->>>>>>> origin/main
 
   const pending = reviewCount ?? 0;
 
