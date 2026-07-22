@@ -13,6 +13,8 @@ const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const DEMO_EMAIL = "demo@contextvault.local";
 const DEMO_PASSWORD = "demo-password-123";
+const ADMIN_EMAIL = "admin@contextvault.local";
+const ADMIN_PASSWORD = "admin-password-123";
 
 const embedder = new LocalEmbeddingProvider();
 const admin = createClient(url, serviceKey, {
@@ -24,13 +26,13 @@ async function embed(text: string): Promise<string> {
   return `[${e.join(",")}]`;
 }
 
-async function getOrCreateUser(): Promise<string> {
+async function getOrCreateUser(email: string, password: string): Promise<string> {
   const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  const existing = list?.users.find((u) => u.email === DEMO_EMAIL);
+  const existing = list?.users.find((u) => u.email === email);
   if (existing) return existing.id;
   const { data, error } = await admin.auth.admin.createUser({
-    email: DEMO_EMAIL,
-    password: DEMO_PASSWORD,
+    email,
+    password,
     email_confirm: true,
   });
   if (error) throw error;
@@ -59,7 +61,7 @@ const MEMORIES: {
 ];
 
 async function main() {
-  const userId = await getOrCreateUser();
+  const userId = await getOrCreateUser(DEMO_EMAIL, DEMO_PASSWORD);
   console.log(`Demo user: ${DEMO_EMAIL} (${userId})`);
 
   await admin
@@ -71,6 +73,28 @@ async function main() {
       default_model: "openai.gpt-4o-mini",
     })
     .eq("id", userId);
+
+  // Platform roles live in user_roles (not email allowlists). Demo stays a
+  // normal user; a separate local account is elevated to super_admin.
+  await admin.from("user_roles").upsert(
+    { user_id: userId, role: "user" },
+    { onConflict: "user_id" }
+  );
+
+  const adminId = await getOrCreateUser(ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin
+    .from("profiles")
+    .update({
+      display_name: "Local Admin",
+      onboarding_completed: true,
+      default_model: "openai.gpt-4o-mini",
+    })
+    .eq("id", adminId);
+  await admin.from("user_roles").upsert(
+    { user_id: adminId, role: "super_admin" },
+    { onConflict: "user_id" }
+  );
+  console.log(`Admin user: ${ADMIN_EMAIL} (${adminId}) [super_admin]`);
 
   // Ensure demo wallet has credits for platform inference.
   await admin.from("credit_accounts").upsert(
@@ -132,6 +156,9 @@ async function main() {
   console.log("\nSeed complete. Log in with:");
   console.log(`  Email:    ${DEMO_EMAIL}`);
   console.log(`  Password: ${DEMO_PASSWORD}`);
+  console.log("Admin console (/admin):");
+  console.log(`  Email:    ${ADMIN_EMAIL}`);
+  console.log(`  Password: ${ADMIN_PASSWORD}`);
 }
 
 main().catch((err) => {

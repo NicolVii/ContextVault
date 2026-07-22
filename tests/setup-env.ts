@@ -35,6 +35,7 @@ export function isIntegrationRun(): boolean {
   const argv = process.argv.join(" ");
   return (
     argv.includes("memory.test.ts") ||
+    argv.includes("admin-auth.integration.test.ts") ||
     process.env.CV_INTEGRATION === "1" ||
     // Full `pnpm test` includes integration — detect via env set by package scripts.
     process.env.CV_REQUIRE_SUPABASE === "1"
