@@ -274,13 +274,21 @@ export async function getPlanUsageSnapshot(userId: string): Promise<PlanUsageSna
   }
 }
 
-export async function getFoundingOfferState(userId: string): Promise<{
+export async function getFoundingOfferState(
+  userId: string,
+  /**
+   * Optional precomputed snapshot. Callers that already paid for
+   * {@link getPlanUsageSnapshot} should pass it so we do not run the
+   * expensive entitlement/usage path twice.
+   */
+  snap?: PlanUsageSnapshot
+): Promise<{
   showFoundingOffer: boolean;
   foundingOfferDismissed: boolean;
 }> {
   try {
     const admin = createSupabaseAdminClient();
-    const snap = await getPlanUsageSnapshot(userId);
+    const planSnap = snap ?? (await getPlanUsageSnapshot(userId));
     const { data } = await admin
       .from("billing_settings")
       .select("founding_offer_dismissed")
@@ -291,7 +299,7 @@ export async function getFoundingOfferState(userId: string): Promise<{
       foundingOfferDismissed: dismissed,
       // Never pitch Founding Pro while a demo grant/simulation is active.
       showFoundingOffer:
-        snap.planId === "free" && !dismissed && !snap.isDemo,
+        planSnap.planId === "free" && !dismissed && !planSnap.isDemo,
     };
   } catch {
     return { showFoundingOffer: false, foundingOfferDismissed: false };

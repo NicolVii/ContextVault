@@ -5,6 +5,12 @@ import { isSensitive } from "@/lib/memory/redaction";
 import { createMemorySchema } from "@/lib/validation";
 import { checkRateLimit } from "@/lib/ratelimit";
 import { recordAudit } from "@/lib/audit";
+import {
+  appendServerTiming,
+  isPerfTimingEnabled,
+  serverTimingMetric,
+  timed,
+} from "@/lib/perf";
 
 export async function GET(request: Request) {
   const ctx = await getSessionContext();
@@ -15,20 +21,32 @@ export async function GET(request: Request) {
   const type = url.searchParams.get("type");
   const search = url.searchParams.get("q");
 
-  let query = ctx.supabase
-    .from("memories")
-    .select("*")
-    .neq("status", "deleted")
-    .order("pinned_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
+  const started = performance.now();
+  const { data, error } = await timed("api.memories.list", async () => {
+    let query = ctx.supabase
+      .from("memories")
+      .select("*")
+      .neq("status", "deleted")
+      .order("pinned_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
 
-  if (status) query = query.eq("status", status);
-  if (type) query = query.eq("type", type);
-  if (search) query = query.ilike("content", `%${search}%`);
+    if (status) query = query.eq("status", status);
+    if (type) query = query.eq("type", type);
+    if (search) query = query.ilike("content", `%${search}%`);
 
-  const { data, error } = await query;
+    return query;
+  });
+  const listMs = performance.now() - started;
+
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ memories: data });
+  const res = NextResponse.json({ memories: data });
+  if (isPerfTimingEnabled()) {
+    res.headers.set(
+      "Server-Timing",
+      appendServerTiming(null, serverTimingMetric("memories-list", listMs))
+    );
+  }
+  return res;
 }
 
 export async function POST(request: Request) {

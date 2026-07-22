@@ -3,6 +3,7 @@ import { getSessionContext } from "@/lib/auth";
 import { profileSchema } from "@/lib/validation";
 import { recordAudit } from "@/lib/audit";
 import { ensureUserProfile } from "@/lib/profile";
+import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 import {
   isValidSelection,
   parseSelection,
@@ -52,6 +53,11 @@ export async function PATCH(request: Request) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Email signup completes onboarding here — provision Free plan once.
+  if (updates.onboarding_completed === true) {
+    await ensureFreeSubscription(ctx.user.id).catch(() => undefined);
+  }
 
   await recordAudit({
     userId: ctx.user.id,

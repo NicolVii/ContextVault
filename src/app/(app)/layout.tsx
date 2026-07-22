@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getCachedUser, getSessionContext } from "@/lib/auth";
 import { ensureUserProfile, needsOnboarding } from "@/lib/profile";
+import { timed } from "@/lib/perf";
 
 /**
  * Auth gate for Vault routes. Presentation chrome lives in vault/layout.
@@ -10,14 +11,15 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const user = await getCachedUser();
   if (!user) redirect("/login");
 
-  const profile = await ensureUserProfile(supabase, user);
+  const ctx = await getSessionContext();
+  if (!ctx) redirect("/login");
+
+  const profile = await timed("layout.ensureUserProfile", () =>
+    ensureUserProfile(ctx.supabase, user)
+  );
   if (needsOnboarding(profile)) {
     redirect("/onboarding");
   }

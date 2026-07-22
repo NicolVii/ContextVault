@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { requestCache } from "@/lib/request-cache";
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -7,8 +8,11 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  * Server-side Supabase client scoped to the signed-in user. All queries made
  * with this client are subject to Row Level Security, so it is safe to use for
  * user-facing reads and writes.
+ *
+ * Wrapped in React `cache()` (when available) so layouts and pages in the same
+ * request share one client instead of rebuilding cookie adapters repeatedly.
  */
-export function createSupabaseServerClient() {
+export const createSupabaseServerClient = requestCache(function createSupabaseServerClient() {
   const cookieStore = cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,4 +35,4 @@ export function createSupabaseServerClient() {
       },
     }
   );
-}
+});
