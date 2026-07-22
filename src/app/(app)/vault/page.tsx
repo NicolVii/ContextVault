@@ -1,39 +1,73 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ChevronRight, Search } from "lucide-react";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { BRAND } from "@/lib/brand";
 import { SignOutButton } from "@/components/SignOutButton";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
 import { getSubscriptionPlan } from "@/lib/billing/products";
-import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 
-export default async function VaultHubPage() {
+async function PlanNavRow() {
   const supabase = createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  let planLabel = "Free";
+  let planHint = "Free";
+
   if (user) {
-    await ensureFreeSubscription(user.id);
+    const snap = await getPlanUsageSnapshot(user.id);
+    planLabel = getSubscriptionPlan(snap.planId ?? "free")?.label ?? "Free";
+    planHint =
+      snap.planId === "free" && snap.autoRemaining != null
+        ? `${planLabel} · about ${snap.autoRemaining} Auto left`
+        : planLabel;
   }
 
-  const [{ count: reviewCount }, snap] = await Promise.all([
-    supabase
-      .from("memories")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "proposed"),
-    user
-      ? getPlanUsageSnapshot(user.id)
-      : Promise.resolve(null),
-  ]);
+  return (
+    <Link
+      href="/vault/plan"
+      className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-mist-50"
+    >
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-ink">Plan &amp; Usage</span>
+          <span className="badge bg-mist-100 text-ink-muted">{planLabel}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-ink-faint">{planHint}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 text-ink-faint" />
+    </Link>
+  );
+}
+
+function PlanNavRowFallback() {
+  return (
+    <Link
+      href="/vault/plan"
+      className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-mist-50"
+    >
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-ink">Plan &amp; Usage</span>
+          <span className="badge bg-mist-100 text-ink-muted">Plan</span>
+        </div>
+        <p className="mt-0.5 text-xs text-ink-faint">Usage and billing</p>
+      </div>
+      <ChevronRight className="h-4 w-4 text-ink-faint" />
+    </Link>
+  );
+}
+
+export default async function VaultHubPage() {
+  const supabase = createSupabaseServerClient();
+  const { count: reviewCount } = await supabase
+    .from("memories")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "proposed");
 
   const pending = reviewCount ?? 0;
-  const planLabel =
-    getSubscriptionPlan(snap?.planId ?? "free")?.label ?? "Free";
-  const planHint =
-    snap?.planId === "free" && snap.autoRemaining != null
-      ? `${planLabel} · about ${snap.autoRemaining} Auto left`
-      : planLabel;
 
   const links: { href: string; label: string; hint?: string; badge?: number }[] = [
     { href: "/vault/search", label: "Search", hint: "Find memories and files" },
@@ -86,19 +120,9 @@ export default async function VaultHubPage() {
       </nav>
 
       <nav className="mt-6 divide-y divide-mist-100 overflow-hidden rounded-2xl border border-mist-200 bg-white">
-        <Link
-          href="/vault/plan"
-          className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-mist-50"
-        >
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-ink">Plan &amp; Usage</span>
-              <span className="badge bg-mist-100 text-ink-muted">{planLabel}</span>
-            </div>
-            <p className="mt-0.5 text-xs text-ink-faint">{planHint}</p>
-          </div>
-          <ChevronRight className="h-4 w-4 text-ink-faint" />
-        </Link>
+        <Suspense fallback={<PlanNavRowFallback />}>
+          <PlanNavRow />
+        </Suspense>
         <Link
           href="/vault/settings"
           className="flex items-center gap-3 px-4 py-4 transition-colors hover:bg-mist-50"

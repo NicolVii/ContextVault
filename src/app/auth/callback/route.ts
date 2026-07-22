@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ensureUserProfile, needsOnboarding } from "@/lib/profile";
+import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 
 /**
  * OAuth (PKCE) callback. Supabase redirects here with a `code` after the user
@@ -32,6 +33,8 @@ export async function GET(request: Request) {
 
   if (user) {
     const profile = await ensureUserProfile(supabase, user);
+    // Provision free plan once at signup/OAuth — not on every navigation.
+    await ensureFreeSubscription(user.id).catch(() => undefined);
     if (needsOnboarding(profile)) {
       return NextResponse.redirect(`${origin}/onboarding`);
     }
