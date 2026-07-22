@@ -6,7 +6,10 @@ import { ensureUserProfile } from "@/lib/profile";
 import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
 import { getCommercialCapabilities } from "@/lib/billing/commercial";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
+<<<<<<< HEAD
 import { timed } from "@/lib/perf";
+=======
+>>>>>>> origin/main
 
 export default async function VaultPlanPage() {
   const user = await getCachedUser();
