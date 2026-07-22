@@ -39,6 +39,17 @@ export {
 } from "@/lib/admin/console";
 
 export {
+  getAdminUsageEconomics,
+  resolveUsageFilters,
+  usageFilterOptions,
+  formatUsdMicros,
+  formatBytes,
+  type AdminUsageEconomics,
+  type AdminUsageFilterInput,
+  type AdminUsageFiltersApplied,
+} from "@/lib/admin/usage-economics";
+
+export {
   resetUserPlanUsage,
   grantAutoBonus,
   grantFrontierBonus,
