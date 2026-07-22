@@ -4,8 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { ensureUserProfile } from "@/lib/profile";
 import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
-import { isStripeConfigured } from "@/lib/billing/products";
-import { isDevTopupAllowed } from "@/lib/billing/dev-topup";
+import { getCommercialCapabilities } from "@/lib/billing/commercial";
 import { getPlanUsageSnapshot } from "@/lib/billing/plan-usage";
 import { ensureFreeSubscription } from "@/lib/billing/ensure-free";
 
@@ -32,6 +31,8 @@ export default async function VaultPlanPage() {
       .limit(12),
   ]);
 
+  const commercial = getCommercialCapabilities();
+
   return (
     <div className="mx-auto max-w-lg">
       <p className="mb-6 text-sm text-ink-muted">
@@ -40,8 +41,10 @@ export default async function VaultPlanPage() {
       <PlanUsagePanel
         snap={snap}
         creditBalance={balance}
-        stripeConfigured={isStripeConfigured()}
-        allowDevTopup={isDevTopupAllowed()}
+        commercialMode={commercial.mode}
+        checkoutEnabled={commercial.checkoutEnabled}
+        portalEnabled={commercial.portalEnabled}
+        allowDevTopup={commercial.devTopupAllowed}
         recent={recentRes.data ?? []}
       />
     </div>

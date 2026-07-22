@@ -21,6 +21,7 @@ type UsageHints = ComposerPlanHints & {
   inferenceRestricted: boolean;
   unlimitedAuto: boolean;
   showFoundingOffer: boolean;
+  checkoutEnabled: boolean;
 };
 
 type ThreadItem =
@@ -121,6 +122,7 @@ export function ThinkingView({
           inferenceRestricted: Boolean(json.inferenceRestricted),
           unlimitedAuto: Boolean(json.entitlements?.unlimitedAuto),
           showFoundingOffer: Boolean(json.showFoundingOffer),
+          checkoutEnabled: Boolean(json.checkoutEnabled),
         });
       } catch {
         /* ignore */
@@ -372,6 +374,7 @@ export function ThinkingView({
 
       <FoundingOfferBanner
         visible={Boolean(usage?.showFoundingOffer)}
+        checkoutEnabled={Boolean(usage?.checkoutEnabled)}
         onDismissed={() =>
           setUsage((u) => (u ? { ...u, showFoundingOffer: false } : u))
         }

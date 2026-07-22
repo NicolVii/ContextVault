@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { grantCredits } from "@/lib/inference/credits";
-import { isStripeConfigured } from "@/lib/billing/products";
 import { isDevTopupAllowed } from "@/lib/billing/dev-topup";
+import { resolveCommercialMode } from "@/lib/billing/commercial";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -12,18 +12,17 @@ const bodySchema = z.object({
 });
 
 /**
- * Local/dev credit top-up when Stripe is not configured.
- * Unconditionally disabled in production (no env override).
+ * Local/dev credit top-up in commercial demo mode.
+ * Unconditionally disabled in production and when COMMERCIAL_MODE=live.
  */
 export async function POST(request: Request) {
   if (!isDevTopupAllowed()) {
-    return NextResponse.json({ error: "Dev top-up disabled" }, { status: 403 });
-  }
-  if (isStripeConfigured()) {
-    return NextResponse.json(
-      { error: "Use Stripe Checkout in this environment" },
-      { status: 403 }
-    );
+    const mode = resolveCommercialMode();
+    const error =
+      mode === "live"
+        ? "Use Stripe Checkout in this environment"
+        : "Dev top-up disabled";
+    return NextResponse.json({ error }, { status: 403 });
   }
 
   const ctx = await getSessionContext();

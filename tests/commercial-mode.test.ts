@@ -1,0 +1,204 @@
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  assertCheckoutAllowed,
+  assertPortalAllowed,
+  getCommercialCapabilities,
+  getFeatureFlags,
+  isStripePaymentsEnabled,
+  resolveCommercialMode,
+} from "../src/lib/billing/commercial";
+import { isDevTopupAllowed } from "../src/lib/billing/dev-topup";
+
+const stripeKey = "sk_test_commercial_mode_unit";
+
+function env( partial: Record<string, string | undefined>): NodeJS.ProcessEnv {
+  return partial as NodeJS.ProcessEnv;
+}
+
+describe("resolveCommercialMode", () => {
+  it("defaults to demo outside production when unset", () => {
+    expect(resolveCommercialMode(env({ NODE_ENV: "development" }))).toBe("demo");
+    expect(resolveCommercialMode(env({ NODE_ENV: "test" }))).toBe("demo");
+  });
+
+  it("defaults to disabled in production when unset", () => {
+    expect(resolveCommercialMode(env({ NODE_ENV: "production" }))).toBe(
+      "disabled"
+    );
+  });
+
+  it("honors explicit COMMERCIAL_MODE", () => {
+    expect(
+      resolveCommercialMode(
+        env({ NODE_ENV: "production", COMMERCIAL_MODE: "live" })
+      )
+    ).toBe("live");
+    expect(
+      resolveCommercialMode(
+        env({ NODE_ENV: "development", COMMERCIAL_MODE: "disabled" })
+      )
+    ).toBe("disabled");
+    expect(
+      resolveCommercialMode(
+        env({ NODE_ENV: "production", COMMERCIAL_MODE: "demo" })
+      )
+    ).toBe("demo");
+  });
+});
+
+describe("Stripe payments require live mode", () => {
+  it("never enables payments in disabled mode even with Stripe keys", () => {
+    const e = env({
+      NODE_ENV: "production",
+      COMMERCIAL_MODE: "disabled",
+      STRIPE_SECRET_KEY: stripeKey,
+    });
+    expect(isStripePaymentsEnabled(e)).toBe(false);
+    expect(assertCheckoutAllowed(e)).toMatchObject({
+      ok: false,
+      code: "commercial_disabled",
+      status: 403,
+    });
+    expect(assertPortalAllowed(e)).toMatchObject({
+      ok: false,
+      code: "commercial_disabled",
+      status: 403,
+    });
+  });
+
+  it("never enables payments in demo mode even with Stripe keys", () => {
+    const e = env({
+      NODE_ENV: "development",
+      COMMERCIAL_MODE: "demo",
+      STRIPE_SECRET_KEY: stripeKey,
+    });
+    expect(isStripePaymentsEnabled(e)).toBe(false);
+    const checkout = assertCheckoutAllowed(e);
+    expect(checkout.ok).toBe(false);
+    if (!checkout.ok) {
+      expect(checkout.code).toBe("commercial_demo");
+      expect(checkout.status).toBe(403);
+      expect(checkout.error).toMatch(/Demo mode cannot create Stripe Checkout/i);
+    }
+    expect(assertPortalAllowed(e)).toMatchObject({
+      ok: false,
+      code: "commercial_demo",
+      status: 403,
+    });
+  });
+
+  it("enables payments only when live and Stripe is configured", () => {
+    const liveNoKey = env({
+      NODE_ENV: "production",
+      COMMERCIAL_MODE: "live",
+    });
+    expect(isStripePaymentsEnabled(liveNoKey)).toBe(false);
+    expect(assertCheckoutAllowed(liveNoKey)).toMatchObject({
+      ok: false,
+      code: "stripe_not_configured",
+      status: 503,
+    });
+
+    const liveReady = env({
+      NODE_ENV: "production",
+      COMMERCIAL_MODE: "live",
+      STRIPE_SECRET_KEY: stripeKey,
+    });
+    expect(isStripePaymentsEnabled(liveReady)).toBe(true);
+    expect(assertCheckoutAllowed(liveReady)).toEqual({ ok: true });
+    expect(assertPortalAllowed(liveReady)).toEqual({ ok: true });
+  });
+});
+
+describe("commercial capabilities", () => {
+  it("exposes checkout/portal off and optional dev top-up in demo", () => {
+    const caps = getCommercialCapabilities(
+      env({ NODE_ENV: "development", COMMERCIAL_MODE: "demo" })
+    );
+    expect(caps.mode).toBe("demo");
+    expect(caps.checkoutEnabled).toBe(false);
+    expect(caps.portalEnabled).toBe(false);
+    expect(caps.foundingOfferCheckoutEnabled).toBe(false);
+    expect(caps.devTopupAllowed).toBe(true);
+  });
+
+  it("hides commercial actions in disabled mode", () => {
+    const caps = getCommercialCapabilities(
+      env({ NODE_ENV: "development", COMMERCIAL_MODE: "disabled" })
+    );
+    expect(caps.checkoutEnabled).toBe(false);
+    expect(caps.portalEnabled).toBe(false);
+    expect(caps.devTopupAllowed).toBe(false);
+  });
+
+  it("allows checkout in live with Stripe and blocks dev top-up", () => {
+    const caps = getCommercialCapabilities(
+      env({
+        NODE_ENV: "development",
+        COMMERCIAL_MODE: "live",
+        STRIPE_SECRET_KEY: stripeKey,
+      })
+    );
+    expect(caps.checkoutEnabled).toBe(true);
+    expect(caps.portalEnabled).toBe(true);
+    expect(caps.devTopupAllowed).toBe(false);
+    expect(
+      isDevTopupAllowed(
+        env({
+          NODE_ENV: "development",
+          COMMERCIAL_MODE: "live",
+          STRIPE_SECRET_KEY: stripeKey,
+        })
+      )
+    ).toBe(false);
+  });
+});
+
+describe("feature flags for unfinished features", () => {
+  it("defaults unfinished flags to off", () => {
+    expect(getFeatureFlags(env({}))).toEqual({
+      voice: false,
+      autoTopup: false,
+      spendCapEnforcement: false,
+      workspaceBudgets: false,
+      dailyFairUseCredits: false,
+      creditPackStorefront: false,
+    });
+  });
+
+  it("allows FEATURE_* overrides", () => {
+    const flags = getFeatureFlags(
+      env({
+        FEATURE_VOICE: "1",
+        FEATURE_AUTO_TOPUP: "true",
+        FEATURE_CREDIT_PACK_STOREFRONT: "off",
+      })
+    );
+    expect(flags.voice).toBe(true);
+    expect(flags.autoTopup).toBe(true);
+    expect(flags.creditPackStorefront).toBe(false);
+  });
+});
+
+describe("checkout gate never creates sessions outside live", () => {
+  afterEach(() => {
+    /* pure functions — no globals */
+  });
+
+  it("blocks demo and disabled before any Stripe client call would run", () => {
+    for (const mode of ["demo", "disabled"] as const) {
+      const result = assertCheckoutAllowed(
+        env({
+          NODE_ENV: "development",
+          COMMERCIAL_MODE: mode,
+          STRIPE_SECRET_KEY: stripeKey,
+          STRIPE_PRICE_LITE_MONTHLY: "price_lite",
+        })
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(["commercial_demo", "commercial_disabled"]).toContain(result.code);
+      }
+    }
+  });
+});

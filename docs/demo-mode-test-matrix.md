@@ -10,10 +10,10 @@ Demo login (seeded): `demo@contextvault.local` / `demo-password-123`.
 
 | Mode | Typical env | AI chat / think | Embeddings | Memory extract | Stripe checkout | Credits UI |
 | --- | --- | --- | --- | --- | --- | --- |
-| **A. Offline demo (default local)** | No `OPENROUTER_API_KEY`; `EMBEDDING_PROVIDER=local`; no Stripe | Mock adapter / mock chat | Local deterministic | Heuristic fallback | 503 / “not configured” | Dev top-up available |
-| **B. Platform keys, no Stripe** | OpenRouter (or other) key set; Stripe unset | Live adapters | Local or OpenAI | LLM extract if key present | Same as A | Dev top-up + real COGS debit |
-| **C. Stripe test + keys** | Stripe secret + prices + webhook; provider keys | Live | As configured | As configured | Checkout / Portal / webhooks | Dev top-up **blocked** (Stripe set) |
-| **D. Production** | `NODE_ENV=production` + hosted secrets | Live (must not ship mock as sole path) | Usually OpenAI or equiv. | LLM | Live Stripe | Dev top-up **impossible** |
+| **A. Offline demo (default local)** | `COMMERCIAL_MODE=demo` (default); no `OPENROUTER_API_KEY`; `EMBEDDING_PROVIDER=local` | Mock adapter / mock chat | Local deterministic | Heuristic fallback | **Blocked** (`commercial_demo`) even if Stripe keys exist | Dev top-up available |
+| **B. Platform keys, demo commercial** | OpenRouter (or other) key set; `COMMERCIAL_MODE=demo` | Live adapters | Local or OpenAI | LLM extract if key present | Same as A | Dev top-up + real COGS debit |
+| **C. Stripe live commercial** | `COMMERCIAL_MODE=live` + Stripe secret + prices + webhook; provider keys | Live | As configured | As configured | Checkout / Portal / webhooks | Dev top-up **blocked** |
+| **D. Production** | `NODE_ENV=production`; unset mode → **disabled**; set `COMMERCIAL_MODE=live` for payments | Live (must not ship mock as sole path) | Usually OpenAI or equiv. | LLM | Only when mode=`live` + Stripe | Dev top-up **impossible** |
 
 Mode A is the AGENTS.md / README “offline by default” path. Modes C–D are **Unsafe for public use** until legal/tax/ops checklist items are complete.
 
@@ -37,8 +37,8 @@ Statuses: **OK** expected to work · **MOCK** demo substitute · **BLOCKED** int
 | Credit debit (platform) | N/A (mock = 0) | OK | OK | OK | `production-safety` computeCredits |
 | Plan turn recording | Skipped on mock | OK | OK | OK | Logic in `plan-usage`; RPC needs DB |
 | Dev top-up +100k | OK | OK | BLOCKED | BLOCKED | `production-safety` |
-| Checkout Lite/Pro | BLOCKED (503) | BLOCKED (503) | UNVERIFIED | UNVERIFIED | No E2E; checkout Zod/path untested |
-| Customer Portal | BLOCKED | BLOCKED | UNVERIFIED | UNVERIFIED | — |
+| Checkout Lite/Pro | BLOCKED (403 demo) | BLOCKED (403 demo) | UNVERIFIED (live+Stripe) | UNVERIFIED | `commercial-mode` unit gates |
+| Customer Portal | BLOCKED | BLOCKED | UNVERIFIED | UNVERIFIED | `commercial-mode` unit gates |
 | Webhook signature | N/A | N/A | UNVERIFIED live | Required | Unit constructEvent; claim integration |
 | Period credit grant | N/A | N/A | UNVERIFIED | Required | Mocked claim pattern only |
 | Payment grace / restrict | Manual DB possible | Same | UNVERIFIED | Required | Code path; no dedicated test |
@@ -81,7 +81,7 @@ Do not treat as passed until executed against Stripe test mode.
 
 | # | Step | Expected |
 | --- | --- | --- |
-| 1 | Set Stripe secret, webhook secret, four price IDs; restart app | `isStripeConfigured()` true; Dev top-up hidden |
+| 1 | Set `COMMERCIAL_MODE=live`, Stripe secret, webhook secret, four price IDs; restart app | `isStripePaymentsEnabled()` true; Dev top-up hidden |
 | 2 | Forward webhooks to `/api/billing/webhook` | Signature accepts |
 | 3 | Upgrade Lite monthly | Checkout → success URL; `subscriptions.plan_id=lite`; period grants |
 | 4 | Run Frontier turns | Counter decrements toward 10 |
@@ -104,6 +104,7 @@ Do not treat as passed until executed against Stripe test mode.
 ### Unit suites relevant to commercial / demo
 
 - `tests/billing-providers.test.ts` — products, entitlements, intensity, adapters
+- `tests/commercial-mode.test.ts` — COMMERCIAL_MODE gates + feature flags (payments impossible in demo/disabled)
 - `tests/commercial-ux.test.ts` — pricing / Free gates / founding eligibility
 - `tests/production-safety.test.ts` — prod top-up deny, BYOK crypto, credit skip, Stripe signature, mocked webhook idempotency
 - `tests/inference.test.ts` — router + credit estimates
@@ -138,7 +139,9 @@ Do not treat as passed until executed against Stripe test mode.
 | Symptom | Likely cause |
 | --- | --- |
 | Plan page shows Free with zeros after DB error | `getPlanUsageSnapshot` free fallback (migrations missing?) |
-| Upgrade always 503 | `STRIPE_SECRET_KEY` unset |
+| Upgrade always 403 `commercial_demo` | `COMMERCIAL_MODE` is demo (default local) |
+| Upgrade 403 `commercial_disabled` | Mode disabled (default production if unset) |
+| Upgrade 503 | `COMMERCIAL_MODE=live` but `STRIPE_SECRET_KEY` unset |
 | Upgrade 500 “Missing env STRIPE_PRICE_…” | Price ID not set |
 | Dev top-up 403 with Stripe unset | Running with `NODE_ENV=production` |
 | Dev top-up 403 “Use Stripe Checkout” | Stripe secret present |

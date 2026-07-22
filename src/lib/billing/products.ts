@@ -5,6 +5,8 @@
  * Catalog is extensible for future qualitative tiers (not Max-as-more-usage).
  */
 
+import { getFeatureFlags } from "./commercial";
+
 export type LaunchPlanId = "free" | "lite" | "pro";
 
 /** Reserved for future qualitative products — never shown at launch. */
@@ -105,7 +107,10 @@ export function getPublicPlans(): SubscriptionPlan[] {
   return SUBSCRIPTION_PLANS.filter((p) => p.public);
 }
 
-export function getPublicPacks(): CreditPack[] {
+export function getPublicPacks(
+  env: NodeJS.ProcessEnv = process.env
+): CreditPack[] {
+  if (!getFeatureFlags(env).creditPackStorefront) return [];
   return CREDIT_PACKS.filter((p) => p.public);
 }
 
@@ -136,8 +141,15 @@ export function planForStripePrice(priceId: string): SubscriptionPlan | null {
   return null;
 }
 
-export function isStripeConfigured(): boolean {
-  return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
+/**
+ * Whether a Stripe secret key is present.
+ * Prefer {@link isStripePaymentsEnabled} / {@link assertCheckoutAllowed} for
+ * authorizing Checkout or Portal — key presence alone is not enough.
+ */
+export function isStripeConfigured(
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  return Boolean(env.STRIPE_SECRET_KEY?.trim());
 }
 
 export function formatEurCents(cents: number): string {

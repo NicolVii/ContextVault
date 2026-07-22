@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/stripe";
-import {
-  getCreditPack,
-  getSubscriptionPlan,
-  isStripeConfigured,
-} from "@/lib/billing/products";
+import { getCreditPack, getSubscriptionPlan } from "@/lib/billing/products";
+import { assertCheckoutAllowed } from "@/lib/billing/commercial";
 import { recordBillingTelemetry } from "@/lib/billing/telemetry";
 import { z } from "zod";
 
@@ -24,13 +21,11 @@ export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!isStripeConfigured()) {
+  const gate = assertCheckoutAllowed();
+  if (!gate.ok) {
     return NextResponse.json(
-      {
-        error: "Stripe is not configured. Use local top-up in development.",
-        code: "stripe_not_configured",
-      },
-      { status: 503 }
+      { error: gate.error, code: gate.code },
+      { status: gate.status }
     );
   }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionContext } from "@/lib/auth";
 import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/stripe";
-import { isStripeConfigured } from "@/lib/billing/products";
+import { assertPortalAllowed } from "@/lib/billing/commercial";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +9,13 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const ctx = await getSessionContext();
   if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!isStripeConfigured()) {
-    return NextResponse.json({ error: "Stripe is not configured" }, { status: 503 });
+
+  const gate = assertPortalAllowed();
+  if (!gate.ok) {
+    return NextResponse.json(
+      { error: gate.error, code: gate.code },
+      { status: gate.status }
+    );
   }
 
   const stripe = getStripe()!;
