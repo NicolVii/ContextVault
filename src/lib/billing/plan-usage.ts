@@ -3,6 +3,17 @@ import { entitlementsForPlan, type PlanEntitlements } from "./entitlements";
 import type { UsageIntensity } from "./usage-intensity";
 import { recordBillingTelemetry } from "./telemetry";
 import { applyGraceExpiryIfNeeded } from "./grace";
+import {
+  listEntitlementGrantsForUser,
+  listPlanSimulationsForUser,
+} from "./admin-entitlements";
+import {
+  countsAsPaidRevenue,
+  resolveEffectiveEntitlement,
+  shouldShowDemoSubscriptionBanner,
+  type EntitlementSource,
+  type ResolvedEntitlement,
+} from "./entitlement-resolution";
 
 export class PlanUsageBlockedError extends Error {
   readonly code:
@@ -40,6 +51,16 @@ export interface PlanUsageSnapshot {
   currentPeriodEnd: string | null;
   planStatus: string | null;
   cancelAtPeriodEnd: boolean;
+  /** Where the effective plan came from. */
+  entitlementSource: EntitlementSource;
+  /** True for plan simulations and admin entitlement grants. */
+  isDemo: boolean;
+  /** Demo / grant rows never contribute to paid revenue. */
+  excludeFromRevenue: boolean;
+  showDemoSubscriptionBanner: boolean;
+  entitlementReason: string | null;
+  entitlementEndsAt: string | null;
+  entitlementSourceId: string | null;
 }
 
 function startOfUtcMonth(d = new Date()): Date {
@@ -50,7 +71,40 @@ function endOfUtcMonth(d = new Date()): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1, 0, 0, 0, 0));
 }
 
-/** Free uses calendar months; paid plans prefer Stripe period when available. */
+async function loadResolvedEntitlement(
+  userId: string
+): Promise<ResolvedEntitlement> {
+  const admin = createSupabaseAdminClient();
+  const [simulations, grants, subRes] = await Promise.all([
+    listPlanSimulationsForUser(userId),
+    listEntitlementGrantsForUser(userId),
+    admin
+      .from("subscriptions")
+      .select("plan_id, status, current_period_end, cancel_at_period_end")
+      .eq("user_id", userId)
+      .maybeSingle(),
+  ]);
+
+  const sub = subRes.data;
+  return resolveEffectiveEntitlement({
+    simulations,
+    grants,
+    subscription: sub
+      ? {
+          planId: (sub.plan_id as string) ?? "free",
+          status: (sub.status as string | null) ?? null,
+          currentPeriodEnd: (sub.current_period_end as string | null) ?? null,
+          cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+        }
+      : null,
+  });
+}
+
+/**
+ * Resolve usage period using effective entitlement priority.
+ * Stripe period is used only for real paid subscriptions; Free and
+ * demo/grant overrides use calendar months.
+ */
 export async function resolveUsagePeriod(userId: string): Promise<{
   planId: string;
   periodStart: Date;
@@ -58,42 +112,37 @@ export async function resolveUsagePeriod(userId: string): Promise<{
   currentPeriodEnd: string | null;
   planStatus: string | null;
   cancelAtPeriodEnd: boolean;
+  resolved: ResolvedEntitlement;
 }> {
-  const admin = createSupabaseAdminClient();
-  const { data: sub } = await admin
-    .from("subscriptions")
-    .select("plan_id, status, current_period_end, cancel_at_period_end")
-    .eq("user_id", userId)
-    .maybeSingle();
+  const resolved = await loadResolvedEntitlement(userId);
 
-  const status = (sub?.status as string | null) ?? null;
-  const activePaid =
-    sub &&
-    (status === "active" || status === "trialing" || status === "past_due") &&
-    (sub.plan_id === "lite" || sub.plan_id === "pro");
-
-  if (activePaid && sub.current_period_end) {
-    const periodEnd = new Date(sub.current_period_end as string);
-    // Approximate period start as one month before end when Stripe start unavailable.
+  if (
+    resolved.source === "subscription" &&
+    countsAsPaidRevenue(resolved) &&
+    resolved.currentPeriodEnd
+  ) {
+    const periodEnd = new Date(resolved.currentPeriodEnd);
     const periodStart = new Date(periodEnd);
     periodStart.setUTCMonth(periodStart.getUTCMonth() - 1);
     return {
-      planId: sub.plan_id as string,
+      planId: resolved.planId,
       periodStart,
       periodEnd,
-      currentPeriodEnd: sub.current_period_end as string,
-      planStatus: status,
-      cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+      currentPeriodEnd: resolved.currentPeriodEnd,
+      planStatus: resolved.planStatus,
+      cancelAtPeriodEnd: resolved.cancelAtPeriodEnd,
+      resolved,
     };
   }
 
   return {
-    planId: "free",
+    planId: resolved.planId,
     periodStart: startOfUtcMonth(),
     periodEnd: endOfUtcMonth(),
-    currentPeriodEnd: null,
-    planStatus: status,
-    cancelAtPeriodEnd: false,
+    currentPeriodEnd: resolved.currentPeriodEnd,
+    planStatus: resolved.planStatus,
+    cancelAtPeriodEnd: resolved.cancelAtPeriodEnd,
+    resolved,
   };
 }
 
@@ -139,6 +188,25 @@ function freeSnapshotFallback(userIdIgnored?: string): PlanUsageSnapshot {
     currentPeriodEnd: null,
     planStatus: "active",
     cancelAtPeriodEnd: false,
+    entitlementSource: "free",
+    isDemo: false,
+    excludeFromRevenue: false,
+    showDemoSubscriptionBanner: false,
+    entitlementReason: null,
+    entitlementEndsAt: null,
+    entitlementSourceId: null,
+  };
+}
+
+function snapshotMetaFromResolved(resolved: ResolvedEntitlement) {
+  return {
+    entitlementSource: resolved.source,
+    isDemo: resolved.isDemo,
+    excludeFromRevenue: resolved.excludeFromRevenue,
+    showDemoSubscriptionBanner: shouldShowDemoSubscriptionBanner(resolved),
+    entitlementReason: resolved.reason,
+    entitlementEndsAt: resolved.endsAt,
+    entitlementSourceId: resolved.sourceId,
   };
 }
 
@@ -146,7 +214,7 @@ export async function getPlanUsageSnapshot(userId: string): Promise<PlanUsageSna
   try {
     const admin = createSupabaseAdminClient();
     const period = await resolveUsagePeriod(userId);
-    const ents = entitlementsForPlan(period.planId);
+    const ents = period.resolved.entitlements;
     await applyGraceExpiryIfNeeded(userId);
     const restriction = await getBillingRestriction(userId);
 
@@ -192,6 +260,7 @@ export async function getPlanUsageSnapshot(userId: string): Promise<PlanUsageSna
       currentPeriodEnd: period.currentPeriodEnd,
       planStatus: period.planStatus ?? "active",
       cancelAtPeriodEnd: period.cancelAtPeriodEnd,
+      ...snapshotMetaFromResolved(period.resolved),
     };
   } catch {
     // Missing migration / transient DB errors must not blank Vault Plan & Usage.
@@ -214,7 +283,9 @@ export async function getFoundingOfferState(userId: string): Promise<{
     const dismissed = Boolean(data?.founding_offer_dismissed);
     return {
       foundingOfferDismissed: dismissed,
-      showFoundingOffer: snap.planId === "free" && !dismissed,
+      // Never pitch Founding Pro while a demo grant/simulation is active.
+      showFoundingOffer:
+        snap.planId === "free" && !dismissed && !snap.isDemo,
     };
   } catch {
     return { showFoundingOffer: false, foundingOfferDismissed: false };
@@ -306,7 +377,7 @@ export async function recordPlanTurn(input: {
 }): Promise<void> {
   const admin = createSupabaseAdminClient();
   const period = await resolveUsagePeriod(input.userId);
-  const ents = entitlementsForPlan(input.planId || period.planId);
+  const ents = period.resolved.entitlements;
 
   const { data, error } = await admin.rpc("record_plan_usage_turn", {
     p_user_id: input.userId,
@@ -338,5 +409,11 @@ export async function recordPlanTurn(input: {
     intensity: input.intensity,
     modelId: input.modelId,
     credits: input.credits,
+    meta: {
+      entitlementSource: period.resolved.source,
+      excludeFromRevenue: period.resolved.excludeFromRevenue,
+      isDemo: period.resolved.isDemo,
+      countsAsPaidRevenue: countsAsPaidRevenue(period.resolved),
+    },
   });
 }

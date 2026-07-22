@@ -47,6 +47,12 @@ export async function GET() {
     checkoutEnabled: commercial.checkoutEnabled,
     showFoundingOffer:
       offer.showFoundingOffer && commercial.foundingOfferCheckoutEnabled,
+    entitlementSource: snap.entitlementSource,
+    isDemo: snap.isDemo,
+    excludeFromRevenue: snap.excludeFromRevenue,
+    showDemoSubscriptionBanner: snap.showDemoSubscriptionBanner,
+    entitlementReason: snap.entitlementReason,
+    entitlementEndsAt: snap.entitlementEndsAt,
     entitlements: {
       attachments: snap.entitlements.attachments,
       storageBytes: snap.entitlements.storageBytes,

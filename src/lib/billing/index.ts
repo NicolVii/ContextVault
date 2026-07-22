@@ -31,6 +31,28 @@ export {
   PlanUsageBlockedError,
   type PlanUsageSnapshot,
 } from "./plan-usage";
+export {
+  resolveEffectiveEntitlement,
+  countsAsPaidRevenue,
+  shouldShowDemoSubscriptionBanner,
+  demoBannerLabel,
+  isOverrideActive,
+  pickActiveOverride,
+  applyOverrideBonuses,
+  parseFeatureOverrides,
+  type EntitlementSource,
+  type EntitlementOverrideInput,
+  type ResolvedEntitlement,
+  type FeatureOverrides,
+} from "./entitlement-resolution";
+export {
+  createEntitlementGrant,
+  createPlanSimulation,
+  revokeEntitlementGrant,
+  endPlanSimulation,
+  listEntitlementGrantsForUser,
+  listPlanSimulationsForUser,
+} from "./admin-entitlements";
 export { recordBillingTelemetry } from "./telemetry";
 export { FUTURE_TIER_SPECS, type FutureTierSpec } from "./future-tiers";
 export { ensureFreeSubscription } from "./ensure-free";

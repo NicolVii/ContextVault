@@ -9,6 +9,7 @@ import {
 } from "@/lib/billing/products";
 import type { CommercialMode } from "@/lib/billing/commercial";
 import type { PlanUsageSnapshot } from "@/lib/billing/plan-usage";
+import { DemoSubscriptionBanner } from "@/components/DemoSubscriptionBanner";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -239,6 +240,13 @@ export function PlanUsagePanel({
     plans.find((p) => p.id === snap.planId)?.label ??
     snap.planId.charAt(0).toUpperCase() + snap.planId.slice(1);
 
+  const sourceHint =
+    snap.entitlementSource === "plan_simulation"
+      ? " · simulated"
+      : snap.entitlementSource === "admin_grant"
+        ? " · demo grant"
+        : "";
+
   const renewLabel = snap.cancelAtPeriodEnd
     ? `Cancels ${formatDate(snap.currentPeriodEnd ?? snap.periodEnd)}`
     : snap.currentPeriodEnd
@@ -247,6 +255,14 @@ export function PlanUsagePanel({
 
   return (
     <div className="space-y-8">
+      <DemoSubscriptionBanner
+        visible={snap.showDemoSubscriptionBanner}
+        source={snap.entitlementSource}
+        planId={snap.planId}
+        endsAt={snap.entitlementEndsAt}
+        reason={snap.entitlementReason}
+        className=""
+      />
       {snap.inferenceRestricted && (
         <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-950">
           AI usage is paused due to a billing problem. Your memories and files are safe.{" "}
@@ -275,6 +291,7 @@ export function PlanUsagePanel({
         <p className="text-sm text-ink-muted">
           {renewLabel}
           {snap.planStatus ? ` · ${snap.planStatus}` : ""}
+          {sourceHint}
         </p>
       </section>
 

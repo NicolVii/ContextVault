@@ -8,6 +8,7 @@ import { AUTO_MODEL_ID, modelLabel } from "@/lib/ai/models";
 import { cn } from "@/lib/utils";
 import { ComposerPlusMenu, type ComposerPlanHints } from "@/components/ComposerPlusMenu";
 import { FoundingOfferBanner } from "@/components/FoundingOfferBanner";
+import { DemoSubscriptionBanner } from "@/components/DemoSubscriptionBanner";
 import {
   ResponseInfoButton,
   type ResponseInfoMeta,
@@ -22,6 +23,11 @@ type UsageHints = ComposerPlanHints & {
   unlimitedAuto: boolean;
   showFoundingOffer: boolean;
   checkoutEnabled: boolean;
+  showDemoSubscriptionBanner: boolean;
+  entitlementSource: "plan_simulation" | "admin_grant" | "subscription" | "free" | null;
+  planId: string;
+  entitlementEndsAt: string | null;
+  entitlementReason: string | null;
 };
 
 type ThreadItem =
@@ -123,6 +129,11 @@ export function ThinkingView({
           unlimitedAuto: Boolean(json.entitlements?.unlimitedAuto),
           showFoundingOffer: Boolean(json.showFoundingOffer),
           checkoutEnabled: Boolean(json.checkoutEnabled),
+          showDemoSubscriptionBanner: Boolean(json.showDemoSubscriptionBanner),
+          entitlementSource: json.entitlementSource ?? null,
+          planId: String(json.planId ?? "free"),
+          entitlementEndsAt: json.entitlementEndsAt ?? null,
+          entitlementReason: json.entitlementReason ?? null,
         });
       } catch {
         /* ignore */
@@ -372,6 +383,13 @@ export function ThinkingView({
         <div ref={scrollRef} />
       </div>
 
+      <DemoSubscriptionBanner
+        visible={Boolean(usage?.showDemoSubscriptionBanner)}
+        source={usage?.entitlementSource}
+        planId={usage?.planId ?? "free"}
+        endsAt={usage?.entitlementEndsAt}
+        reason={usage?.entitlementReason}
+      />
       <FoundingOfferBanner
         visible={Boolean(usage?.showFoundingOffer)}
         checkoutEnabled={Boolean(usage?.checkoutEnabled)}
