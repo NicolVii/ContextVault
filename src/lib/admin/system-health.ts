@@ -9,7 +9,7 @@ import { getChatProvider, readOpenRouterApiKey } from "@/lib/ai";
 import { getEmbeddingProvider } from "@/lib/embeddings";
 import { getMemoryProvider } from "@/lib/memory";
 import { getExtractionProvider } from "@/lib/memory/extraction";
-import { getCommercialCapabilities } from "@/lib/billing/commercial";
+import { getCommercialCapabilities, evaluateLiveConfigReadiness } from "@/lib/billing/commercial";
 import {
   BYOK_KEY_DERIVATION_VERSION,
   resolveByokEncryptionSecret,
@@ -99,6 +99,7 @@ async function countSince(
 
 export async function getSystemHealthReport(): Promise<SystemHealthReport> {
   const commercial = getCommercialCapabilities();
+  const liveConfig = evaluateLiveConfigReadiness();
   const chat = getChatProvider();
   const embeddings = getEmbeddingProvider();
   const memory = getMemoryProvider();
@@ -171,6 +172,31 @@ export async function getSystemHealthReport(): Promise<SystemHealthReport> {
       checkoutEnabled: commercial.checkoutEnabled,
       portalEnabled: commercial.portalEnabled,
       stripeConfigured: commercial.stripeConfigured,
+      liveConfigReady: commercial.liveConfigReady,
+    },
+  });
+
+  checks.push({
+    id: "live_readiness",
+    label: "Live commerce readiness",
+    status:
+      commercial.mode !== "live"
+        ? "ok"
+        : liveConfig.ready
+          ? "ok"
+          : "error",
+    detail:
+      commercial.mode !== "live"
+        ? `Not required (mode=${commercial.mode})`
+        : liveConfig.ready
+          ? "Live config ready (webhook health checked at Checkout/Portal)"
+          : liveConfig.blockingReasons.join("; ") || "Not ready",
+    meta: {
+      ready: liveConfig.ready,
+      stripeTestMode: liveConfig.stripeTestMode,
+      stripeLiveMode: liveConfig.stripeLiveMode,
+      blockingReasons: liveConfig.blockingReasons,
+      checks: liveConfig.checks,
     },
   });
 

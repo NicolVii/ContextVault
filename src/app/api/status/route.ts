@@ -54,6 +54,7 @@ export async function GET() {
       stripeConfigured: commercial.stripeConfigured,
       checkoutEnabled: commercial.checkoutEnabled,
       portalEnabled: commercial.portalEnabled,
+      liveConfigReady: commercial.liveConfigReady,
       featureFlags: commercial.featureFlags,
     },
     operational: {

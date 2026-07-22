@@ -4,7 +4,20 @@
  * Payments (Checkout / Customer Portal) require COMMERCIAL_MODE=live **and**
  * a configured Stripe secret. Demo and disabled modes must never create real
  * Stripe Checkout sessions — even if STRIPE_* env vars are present.
+ *
+ * Live mode additionally requires the live-readiness validator (prices,
+ * webhook secret, app URL, live-key acknowledgement). Prefer
+ * {@link assertLiveCommerceAllowed} on Checkout / Portal routes so webhook
+ * health is checked before accepting money.
  */
+
+import {
+  assertLiveCommerceAllowed,
+  assertLiveConfigAllowed,
+  evaluateLiveConfigReadiness,
+  type LiveCommerceGateResult,
+  type LiveReadinessDenialCode,
+} from "./live-readiness";
 
 export type CommercialMode = "disabled" | "demo" | "live";
 
@@ -27,21 +40,23 @@ export type CommercialCapabilities = {
   mode: CommercialMode;
   /** Stripe secret key is present (does not imply payments are allowed). */
   stripeConfigured: boolean;
-  /** Checkout sessions may be created. */
+  /** Checkout sessions may be created (live + config ready). */
   checkoutEnabled: boolean;
-  /** Customer Portal sessions may be created. */
+  /** Customer Portal sessions may be created (live + config ready). */
   portalEnabled: boolean;
   /** Local/dev credit grant path. */
   devTopupAllowed: boolean;
   /** Founding Pro CTA may start Checkout. */
   foundingOfferCheckoutEnabled: boolean;
+  /** Sync live-config readiness (webhook health checked at request time). */
+  liveConfigReady: boolean;
   featureFlags: FeatureFlags;
 };
 
 export type CommercialGateDenial = {
   ok: false;
   status: 403 | 503;
-  code: "commercial_disabled" | "commercial_demo" | "stripe_not_configured";
+  code: LiveReadinessDenialCode;
   error: string;
 };
 
@@ -102,15 +117,15 @@ export function isStripeSecretConfigured(
 }
 
 /**
- * Real Stripe Checkout / Portal are allowed only in live mode with keys.
+ * Real Stripe Checkout / Portal are allowed only in live mode with a complete
+ * live-config readiness report (secret, webhook secret, prices, app URL).
  * Demo mode never returns true, even when Stripe env vars exist.
+ * Webhook health is enforced at request time via {@link assertLiveCommerceAllowed}.
  */
 export function isStripePaymentsEnabled(
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
-  return (
-    resolveCommercialMode(env) === "live" && isStripeSecretConfigured(env)
-  );
+  return evaluateLiveConfigReadiness(env).ready;
 }
 
 export function getFeatureFlags(
@@ -133,7 +148,6 @@ export function isCommercialDevTopupAllowed(
 ): boolean {
   if (env.NODE_ENV === "production") return false;
   if (resolveCommercialMode(env) !== "demo") return false;
-  if (isStripePaymentsEnabled(env)) return false;
   return true;
 }
 
@@ -142,7 +156,8 @@ export function getCommercialCapabilities(
 ): CommercialCapabilities {
   const mode = resolveCommercialMode(env);
   const stripeConfigured = isStripeSecretConfigured(env);
-  const paymentsEnabled = isStripePaymentsEnabled(env);
+  const liveConfig = evaluateLiveConfigReadiness(env);
+  const paymentsEnabled = liveConfig.ready;
   return {
     mode,
     stripeConfigured,
@@ -150,70 +165,61 @@ export function getCommercialCapabilities(
     portalEnabled: paymentsEnabled,
     devTopupAllowed: isCommercialDevTopupAllowed(env),
     foundingOfferCheckoutEnabled: paymentsEnabled,
+    liveConfigReady: liveConfig.ready,
     featureFlags: getFeatureFlags(env),
   };
 }
 
-/** Shared gate for Checkout session creation. */
+function gateFromLiveResult(
+  result: LiveCommerceGateResult
+): CommercialGateResult {
+  if (result.ok) return { ok: true };
+  return {
+    ok: false,
+    status: result.status,
+    code: result.code,
+    error: result.error,
+  };
+}
+
+/**
+ * Sync config gate for Checkout. Prefer {@link assertCheckoutAllowedAsync}
+ * on HTTP routes so webhook health is included.
+ */
 export function assertCheckoutAllowed(
   env: NodeJS.ProcessEnv = process.env
 ): CommercialGateResult {
-  const mode = resolveCommercialMode(env);
-  if (mode === "disabled") {
-    return {
-      ok: false,
-      status: 403,
-      code: "commercial_disabled",
-      error: "Billing is disabled in this environment.",
-    };
-  }
-  if (mode === "demo") {
-    return {
-      ok: false,
-      status: 403,
-      code: "commercial_demo",
-      error: "Demo mode cannot create Stripe Checkout sessions.",
-    };
-  }
-  if (!isStripeSecretConfigured(env)) {
-    return {
-      ok: false,
-      status: 503,
-      code: "stripe_not_configured",
-      error: "Stripe is not configured. Set STRIPE_SECRET_KEY for live billing.",
-    };
-  }
-  return { ok: true };
+  return gateFromLiveResult(assertLiveConfigAllowed(env));
 }
 
-/** Shared gate for Customer Portal sessions. */
+/** Sync config gate for Customer Portal. Prefer the async variant on routes. */
 export function assertPortalAllowed(
   env: NodeJS.ProcessEnv = process.env
 ): CommercialGateResult {
-  const mode = resolveCommercialMode(env);
-  if (mode === "disabled") {
-    return {
-      ok: false,
-      status: 403,
-      code: "commercial_disabled",
-      error: "Billing is disabled in this environment.",
-    };
-  }
-  if (mode === "demo") {
-    return {
-      ok: false,
-      status: 403,
-      code: "commercial_demo",
-      error: "Demo mode cannot open the Stripe billing portal.",
-    };
-  }
-  if (!isStripeSecretConfigured(env)) {
-    return {
-      ok: false,
-      status: 503,
-      code: "stripe_not_configured",
-      error: "Stripe is not configured.",
-    };
-  }
-  return { ok: true };
+  return gateFromLiveResult(assertLiveConfigAllowed(env));
 }
+
+/** Full live-commerce gate including webhook health. */
+export async function assertCheckoutAllowedAsync(
+  env: NodeJS.ProcessEnv = process.env
+): Promise<CommercialGateResult> {
+  return gateFromLiveResult(await assertLiveCommerceAllowed(env));
+}
+
+/** Full portal gate including webhook health. */
+export async function assertPortalAllowedAsync(
+  env: NodeJS.ProcessEnv = process.env
+): Promise<CommercialGateResult> {
+  return gateFromLiveResult(await assertLiveCommerceAllowed(env));
+}
+
+export {
+  evaluateLiveConfigReadiness,
+  evaluateLiveReadiness,
+  assertLiveCommerceAllowed,
+  assertLiveConfigAllowed,
+  isStripeTestSecret,
+  isStripeLiveSecret,
+  type LiveReadinessReport,
+  type LiveReadinessCheck,
+} from "./live-readiness";

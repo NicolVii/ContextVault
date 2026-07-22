@@ -1,5 +1,5 @@
 import {
-  isStripePaymentsEnabled,
+  isStripeSecretConfigured,
   resolveCommercialMode,
   type CommercialMode,
 } from "./commercial";
@@ -14,7 +14,8 @@ import type {
  * Map Cortaix price-discount promotions to Stripe coupons / promotion codes.
  *
  * Demo mode: never call Stripe — return a simulated mapping snapshot.
- * Live mode: create (or reuse) Stripe Coupon + optional PromotionCode.
+ * Live mode: create (or reuse) Stripe Coupon + optional PromotionCode when a
+ * Stripe secret is present. Checkout/Portal still require full live readiness.
  * Usage bonuses are intentionally excluded — they stay inside Cortaix.
  */
 
@@ -88,8 +89,8 @@ export async function syncPromotionPriceToStripe(input: {
     };
   }
 
-  // Demo / disabled: never create Stripe objects.
-  if (mode !== "live" || !isStripePaymentsEnabled(env)) {
+  // Demo / disabled / no Stripe secret: never create Stripe objects.
+  if (mode !== "live" || !isStripeSecretConfigured(env)) {
     const sim = buildDemoSimulation(
       input.promotion.id,
       effect,
@@ -213,7 +214,7 @@ export function resolveCheckoutDiscountFromPromotion(input: {
     };
   }
 
-  if (mode === "live" && isStripePaymentsEnabled(env)) {
+  if (mode === "live" && isStripeSecretConfigured(env)) {
     if (input.promotion.stripeCouponId) {
       return {
         liveDiscounts: [{ coupon: input.promotion.stripeCouponId }],

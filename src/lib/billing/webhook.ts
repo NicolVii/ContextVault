@@ -8,6 +8,11 @@ import {
 import { entitlementsForPlan } from "./entitlements";
 import { recordBillingTelemetry } from "./telemetry";
 import { ensurePlanConfigLoaded } from "./plan-config-loader";
+import { getStripe } from "./stripe";
+import {
+  markSubscriptionCanceledLocally,
+  upsertSubscriptionFromStripe,
+} from "./subscription-sync";
 
 const GRACE_DAYS = 7;
 
@@ -29,6 +34,7 @@ async function resolveUserId(opts: {
 /**
  * Persist Stripe event id with a unique constraint.
  * Returns "claimed" on first sight, "duplicate" if already processed.
+ * This is the replay-protection / idempotency gate for all webhook handlers.
  */
 export async function claimStripeEvent(
   eventId: string,
@@ -56,20 +62,57 @@ export type HandleStripeEventResult = {
   processed: boolean;
 };
 
+/**
+ * Verify callers have already authenticated the Stripe signature.
+ * This entry point enforces replay protection then dispatches.
+ */
 export async function handleStripeEvent(
   event: Stripe.Event
 ): Promise<HandleStripeEventResult> {
   const claim = await claimStripeEvent(event.id, event.type);
   if (claim === "duplicate") {
+    await recordBillingTelemetry({
+      eventName: "webhook_replay_ignored",
+      meta: { eventId: event.id, eventType: event.type },
+    });
     return { duplicate: true, processed: false };
   }
 
   try {
+    assertEventLivemodeConsistent(event);
     await dispatchStripeEvent(event);
+    await recordBillingTelemetry({
+      eventName: "webhook_processed",
+      meta: {
+        eventId: event.id,
+        eventType: event.type,
+        livemode: event.livemode,
+      },
+    });
     return { duplicate: false, processed: true };
   } catch (err) {
     await releaseStripeEventClaim(event.id);
     throw err;
+  }
+}
+
+/**
+ * Reject mixed-mode deliveries (e.g. livemode event against sk_test_*).
+ * Signature verification already binds the payload to the webhook secret;
+ * this is an extra guard against misconfigured forwarding.
+ */
+function assertEventLivemodeConsistent(event: Stripe.Event): void {
+  const key = process.env.STRIPE_SECRET_KEY?.trim() ?? "";
+  if (!key) return;
+  if (event.livemode && key.startsWith("sk_test_")) {
+    throw new Error(
+      `Stripe livemode event ${event.id} rejected against sk_test_* secret`
+    );
+  }
+  if (!event.livemode && key.startsWith("sk_live_")) {
+    throw new Error(
+      `Stripe test-mode event ${event.id} rejected against sk_live_* secret`
+    );
   }
 }
 
@@ -90,7 +133,7 @@ async function dispatchStripeEvent(event: Stripe.Event): Promise<void> {
       break;
     case "customer.subscription.updated":
     case "customer.subscription.created":
-      await upsertSubscription(event.data.object as Stripe.Subscription);
+      await onSubscriptionUpserted(event.data.object as Stripe.Subscription);
       break;
     case "customer.subscription.deleted":
       await onSubscriptionDeleted(event.data.object as Stripe.Subscription);
@@ -101,7 +144,9 @@ async function dispatchStripeEvent(event: Stripe.Event): Promise<void> {
 }
 
 /** Test/helper export for unit coverage of grant paths without claim wrapping. */
-export async function dispatchStripeEventForTests(event: Stripe.Event): Promise<void> {
+export async function dispatchStripeEventForTests(
+  event: Stripe.Event
+): Promise<void> {
   await dispatchStripeEvent(event);
 }
 
@@ -183,10 +228,33 @@ function periodCreditsForPlan(planId: string): number {
   );
 }
 
+async function retrieveCheckoutSubscription(
+  session: Stripe.Checkout.Session
+): Promise<Stripe.Subscription | null> {
+  const subRef = session.subscription;
+  const subId =
+    typeof subRef === "string"
+      ? subRef
+      : subRef && typeof subRef === "object"
+        ? subRef.id
+        : null;
+  if (!subId) return null;
+
+  if (typeof subRef === "object" && subRef && "items" in subRef) {
+    return subRef as Stripe.Subscription;
+  }
+
+  const stripe = getStripe();
+  if (!stripe) return null;
+  return stripe.subscriptions.retrieve(subId);
+}
+
 async function onCheckoutCompleted(session: Stripe.Checkout.Session) {
   const userId = await resolveUserId({
     stripeCustomerId:
-      typeof session.customer === "string" ? session.customer : session.customer?.id,
+      typeof session.customer === "string"
+        ? session.customer
+        : session.customer?.id,
     metadataUserId: session.metadata?.cortaix_user_id ?? null,
   });
   if (!userId) return;
@@ -196,13 +264,61 @@ async function onCheckoutCompleted(session: Stripe.Checkout.Session) {
     if (credits > 0) {
       await grantCredits(userId, credits, "stripe_topup");
     }
+    await recordBillingTelemetry({
+      userId,
+      eventName: "checkout_completed",
+      meta: {
+        mode: "payment",
+        sessionId: session.id,
+        credits,
+        productId: session.metadata?.product_id ?? null,
+      },
+    });
+    return;
+  }
+
+  if (session.mode === "subscription") {
+    const sub = await retrieveCheckoutSubscription(session);
+    if (sub) {
+      const snap = await upsertSubscriptionFromStripe(userId, sub);
+      if (sub.status === "active" || sub.status === "trialing") {
+        await clearInferenceRestriction(userId);
+      }
+      await recordBillingTelemetry({
+        userId,
+        eventName: "checkout_completed",
+        planId: snap.planId,
+        meta: {
+          mode: "subscription",
+          sessionId: session.id,
+          stripeSubscriptionId: snap.stripeSubscriptionId,
+          status: snap.status,
+          interval: session.metadata?.interval ?? null,
+          promotionId: session.metadata?.cortaix_promotion_id ?? null,
+        },
+      });
+      return;
+    }
+
+    await recordBillingTelemetry({
+      userId,
+      eventName: "checkout_completed",
+      planId: session.metadata?.plan_id ?? null,
+      meta: {
+        mode: "subscription",
+        sessionId: session.id,
+        pendingSubscription: true,
+      },
+    });
   }
 }
 
 async function onInvoicePaid(invoice: Stripe.Invoice) {
   const userId = await resolveUserId({
     stripeCustomerId:
-      typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id,
+      typeof invoice.customer === "string"
+        ? invoice.customer
+        : invoice.customer?.id,
     metadataUserId: invoice.metadata?.cortaix_user_id ?? null,
   });
   if (!userId) return;
@@ -225,6 +341,12 @@ async function onInvoicePaid(invoice: Stripe.Invoice) {
   const packCredits = packCreditsForStripePrice(priceId);
   if (packCredits) {
     await grantCredits(userId, packCredits, "stripe_topup");
+    await recordBillingTelemetry({
+      userId,
+      eventName: "invoice_paid_pack",
+      credits: packCredits,
+      meta: { invoiceId: invoice.id, priceId },
+    });
     return;
   }
 
@@ -232,9 +354,11 @@ async function onInvoicePaid(invoice: Stripe.Invoice) {
   if (!plan || plan.id === "free") return;
 
   const subRef = line?.subscription;
-  const invoiceSub = (invoice as Stripe.Invoice & {
-    subscription?: string | { id?: string } | null;
-  }).subscription;
+  const invoiceSub = (
+    invoice as Stripe.Invoice & {
+      subscription?: string | { id?: string } | null;
+    }
+  ).subscription;
   const stripeSubscriptionId =
     typeof subRef === "string"
       ? subRef
@@ -258,7 +382,19 @@ async function onInvoicePaid(invoice: Stripe.Invoice) {
       periodStart,
       planId: plan.id,
     });
-    if (!claimed) return;
+    if (!claimed) {
+      await recordBillingTelemetry({
+        userId,
+        eventName: "subscription_period_grant_duplicate",
+        planId: plan.id,
+        meta: {
+          invoiceId: invoice.id,
+          stripeSubscriptionId,
+          periodStart: periodStart.toISOString(),
+        },
+      });
+      return;
+    }
   }
 
   const credits = periodCreditsForPlan(plan.id);
@@ -268,13 +404,20 @@ async function onInvoicePaid(invoice: Stripe.Invoice) {
     eventName: "subscription_period_granted",
     planId: plan.id,
     credits,
+    meta: {
+      invoiceId: invoice.id,
+      stripeSubscriptionId,
+      periodStart: periodStart.toISOString(),
+    },
   });
 }
 
 async function onInvoicePaymentFailed(invoice: Stripe.Invoice) {
   const userId = await resolveUserId({
     stripeCustomerId:
-      typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id,
+      typeof invoice.customer === "string"
+        ? invoice.customer
+        : invoice.customer?.id,
     metadataUserId: invoice.metadata?.cortaix_user_id ?? null,
   });
   if (!userId) return;
@@ -282,18 +425,25 @@ async function onInvoicePaymentFailed(invoice: Stripe.Invoice) {
   await recordBillingTelemetry({
     userId,
     eventName: "payment_failed",
-    meta: { invoiceId: invoice.id },
+    meta: {
+      invoiceId: invoice.id,
+      attemptCount: invoice.attempt_count ?? null,
+      graceDays: GRACE_DAYS,
+    },
   });
 }
 
 async function onChargeRefunded(charge: Stripe.Charge) {
   const userId = await resolveUserId({
     stripeCustomerId:
-      typeof charge.customer === "string" ? charge.customer : charge.customer?.id,
+      typeof charge.customer === "string"
+        ? charge.customer
+        : charge.customer?.id,
     metadataUserId: charge.metadata?.cortaix_user_id ?? null,
   });
   if (!userId) return;
   // Soft clawback signal — ops/support confirm unused purchased lots.
+  // Does not rewrite Stripe financial history or admin grant rows.
   await recordBillingTelemetry({
     userId,
     eventName: "charge_refunded",
@@ -305,63 +455,41 @@ async function onChargeRefunded(charge: Stripe.Charge) {
   });
 }
 
-async function upsertSubscription(sub: Stripe.Subscription) {
+async function onSubscriptionUpserted(sub: Stripe.Subscription) {
   const userId = await resolveUserId({
-    stripeCustomerId: typeof sub.customer === "string" ? sub.customer : sub.customer?.id,
+    stripeCustomerId:
+      typeof sub.customer === "string" ? sub.customer : sub.customer?.id,
     metadataUserId: sub.metadata?.cortaix_user_id ?? null,
   });
   if (!userId) return;
 
-  const priceId = sub.items.data[0]?.price?.id ?? null;
-  const plan = priceId ? planForStripePrice(priceId) : null;
-  const admin = createSupabaseAdminClient();
-  const periodEnd =
-    (sub as Stripe.Subscription & { current_period_end?: number }).current_period_end ??
-    sub.items.data[0]?.current_period_end;
-
-  const planId = plan?.id ?? (sub.metadata?.plan_id as string | undefined) ?? "free";
-
-  await admin.from("subscriptions").upsert(
-    {
-      user_id: userId,
-      stripe_subscription_id: sub.id,
-      stripe_price_id: priceId,
-      plan_id: planId === "team" ? "free" : planId,
-      status: sub.status,
-      current_period_end: periodEnd
-        ? new Date(periodEnd * 1000).toISOString()
-        : null,
-      cancel_at_period_end: sub.cancel_at_period_end,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" }
-  );
+  const snap = await upsertSubscriptionFromStripe(userId, sub);
 
   if (sub.status === "active" || sub.status === "trialing") {
     await clearInferenceRestriction(userId);
   }
+
+  await recordBillingTelemetry({
+    userId,
+    eventName: "subscription_updated",
+    planId: snap.planId,
+    meta: {
+      stripeSubscriptionId: snap.stripeSubscriptionId,
+      status: snap.status,
+      cancelAtPeriodEnd: snap.cancelAtPeriodEnd,
+      stripePriceId: snap.stripePriceId,
+    },
+  });
 }
 
 async function onSubscriptionDeleted(sub: Stripe.Subscription) {
   const userId = await resolveUserId({
-    stripeCustomerId: typeof sub.customer === "string" ? sub.customer : sub.customer?.id,
+    stripeCustomerId:
+      typeof sub.customer === "string" ? sub.customer : sub.customer?.id,
     metadataUserId: sub.metadata?.cortaix_user_id ?? null,
   });
   if (!userId) return;
-  const admin = createSupabaseAdminClient();
-  await admin
-    .from("subscriptions")
-    .update({
-      status: "canceled",
-      plan_id: "free",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("user_id", userId);
-  await recordBillingTelemetry({
-    userId,
-    eventName: "subscription_canceled",
-    planId: "free",
-  });
+  await markSubscriptionCanceledLocally(userId);
 }
 
 export type { Stripe };
