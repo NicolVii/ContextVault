@@ -175,6 +175,7 @@ export function applyOverrideBonuses(
     byok: features.byok ?? base.byok,
     voice: features.voice ?? base.voice,
     elevatedLimits: features.elevatedLimits ?? base.elevatedLimits,
+    modelFamilies: [...base.modelFamilies],
   };
 }
 

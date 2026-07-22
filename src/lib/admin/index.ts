@@ -44,3 +44,12 @@ export {
   grantFrontierBonus,
   grantCreditBonus,
 } from "@/lib/admin/mutations";
+
+export {
+  listAdminPlans,
+  getAdminPlanDetail,
+  publishPlanVersion,
+  rollbackPlanVersion,
+  createPlanCampaignOverride,
+  revokePlanCampaignOverride,
+} from "@/lib/billing/plan-editor";

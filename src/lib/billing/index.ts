@@ -7,16 +7,38 @@ export {
   buildPlanCatalogFromRows,
   parsePlanEntitlements,
   parseSubscriptionPlan,
+  applyCampaignOverrides,
   clearPlanConfigCache,
   setCachedPlanCatalog,
   PLAN_CONFIG_CACHE_TTL_MS,
   type PlanCatalog,
   type PlanConfigSource,
+  type ActiveCampaignOverlay,
+  type CampaignEntitlementOverrides,
 } from "./plan-config";
 export {
   ensurePlanConfigLoaded,
   loadPlanCatalogFromDatabase,
 } from "./plan-config-loader";
+export {
+  listAdminPlans,
+  getAdminPlanDetail,
+  publishPlanVersion,
+  rollbackPlanVersion,
+  createPlanCampaignOverride,
+  revokePlanCampaignOverride,
+  type AdminPlanDetail,
+  type PlanVersionSummary,
+  type PlanCampaignSummary,
+  type PlanProductInput,
+  type PlanEntitlementInput,
+} from "./plan-editor";
+export {
+  MODEL_FAMILIES,
+  ALL_MODEL_FAMILIES,
+  isModelFamilyId,
+  type ModelFamilyId,
+} from "./plan-defaults";
 export {
   resolveCommercialMode,
   isStripeSecretConfigured,

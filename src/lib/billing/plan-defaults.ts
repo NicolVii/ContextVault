@@ -11,6 +11,25 @@ export type FuturePlanId = "private" | "executive" | "concierge" | "team";
 
 export type PlanId = LaunchPlanId | FuturePlanId;
 
+/**
+ * Frontier model-family ids (vendor keys from the inference catalog).
+ * Empty list = no frontier family access (Free default).
+ */
+export const MODEL_FAMILIES = [
+  "openai",
+  "anthropic",
+  "google",
+  "meta",
+] as const;
+
+export type ModelFamilyId = (typeof MODEL_FAMILIES)[number];
+
+export const ALL_MODEL_FAMILIES: ModelFamilyId[] = [...MODEL_FAMILIES];
+
+export function isModelFamilyId(value: string): value is ModelFamilyId {
+  return (MODEL_FAMILIES as readonly string[]).includes(value);
+}
+
 export interface PlanEntitlements {
   planId: LaunchPlanId;
   /** Free: hard monthly Auto turn cap. Null = unlimited under fair use. */
@@ -34,6 +53,8 @@ export interface PlanEntitlements {
   voice: boolean;
   /** Higher context / document limits for Pro. */
   elevatedLimits: boolean;
+  /** Allowed frontier model families for this plan. */
+  modelFamilies: ModelFamilyId[];
 }
 
 export interface CreditPack {
@@ -84,6 +105,7 @@ export const PLAN_ENTITLEMENTS: Record<LaunchPlanId, PlanEntitlements> = {
     byok: false,
     voice: false,
     elevatedLimits: false,
+    modelFamilies: [],
   },
   lite: {
     planId: "lite",
@@ -100,6 +122,7 @@ export const PLAN_ENTITLEMENTS: Record<LaunchPlanId, PlanEntitlements> = {
     byok: false,
     voice: false,
     elevatedLimits: false,
+    modelFamilies: [...ALL_MODEL_FAMILIES],
   },
   pro: {
     planId: "pro",
@@ -116,6 +139,7 @@ export const PLAN_ENTITLEMENTS: Record<LaunchPlanId, PlanEntitlements> = {
     byok: true,
     voice: true,
     elevatedLimits: true,
+    modelFamilies: [...ALL_MODEL_FAMILIES],
   },
 };
 

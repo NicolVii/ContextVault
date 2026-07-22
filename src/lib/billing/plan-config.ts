@@ -8,9 +8,11 @@
 
 import { z } from "zod";
 import {
+  MODEL_FAMILIES,
   PLAN_ENTITLEMENTS,
   SUBSCRIPTION_PLANS,
   type LaunchPlanId,
+  type ModelFamilyId,
   type PlanEntitlements,
   type SubscriptionPlan,
 } from "./plan-defaults";
@@ -25,12 +27,26 @@ export interface PlanVersionMeta {
   effectiveFrom: string;
 }
 
+/** Active campaign overlay applied on top of base entitlements. */
+export interface ActiveCampaignOverlay {
+  id: string;
+  planId: LaunchPlanId;
+  name: string;
+  startsAt: string;
+  endsAt: string;
+  entitlementOverrides: Partial<
+    Omit<PlanEntitlements, "planId" | "unlimitedAuto">
+  >;
+}
+
 export interface PlanCatalog {
   source: PlanConfigSource;
   loadedAt: number;
   plans: Record<LaunchPlanId, SubscriptionPlan>;
   entitlements: Record<LaunchPlanId, PlanEntitlements>;
   versions: Partial<Record<LaunchPlanId, PlanVersionMeta>>;
+  /** Active campaign overlays keyed by plan (may be empty). */
+  campaigns: Partial<Record<LaunchPlanId, ActiveCampaignOverlay[]>>;
   /** Plans that fell back to TypeScript defaults due to missing/invalid rows. */
   fallbackPlanIds: LaunchPlanId[];
 }
@@ -39,7 +55,11 @@ const LAUNCH_PLAN_IDS: LaunchPlanId[] = ["free", "lite", "pro"];
 
 const featuresSchema = z.array(z.string().min(1)).min(1);
 
-const subscriptionPlanSchema = z.object({
+const modelFamilySchema = z.enum(
+  MODEL_FAMILIES as unknown as [ModelFamilyId, ...ModelFamilyId[]]
+);
+
+export const subscriptionPlanSchema = z.object({
   id: z.enum(["free", "lite", "pro"]),
   label: z.string().min(1),
   purpose: z.string().min(1),
@@ -57,7 +77,7 @@ const subscriptionPlanSchema = z.object({
  * null (and consistent with unlimitedAuto). Malformed values fail the parse —
  * callers then use TypeScript defaults instead of inventing permissive gates.
  */
-const planEntitlementsSchema = z
+export const planEntitlementsSchema = z
   .object({
     planId: z.enum(["free", "lite", "pro"]),
     autoMonthlyTurns: z.number().int().nonnegative().nullable(),
@@ -73,6 +93,7 @@ const planEntitlementsSchema = z
     byok: z.boolean(),
     voice: z.boolean(),
     elevatedLimits: z.boolean(),
+    modelFamilies: z.array(modelFamilySchema),
   })
   .superRefine((val, ctx) => {
     const unlimited = val.autoMonthlyTurns == null;
@@ -85,6 +106,29 @@ const planEntitlementsSchema = z
       });
     }
   });
+
+/** Partial entitlement overrides used by campaigns (no planId / unlimitedAuto). */
+export const campaignEntitlementOverridesSchema = z
+  .object({
+    autoMonthlyTurns: z.number().int().nonnegative().nullable().optional(),
+    autoFairUseDailyCredits: z.number().int().nonnegative().optional(),
+    autoFairUsePeriodCredits: z.number().int().nonnegative().optional(),
+    frontierMonthlyTurns: z.number().int().nonnegative().nullable().optional(),
+    maxFrontierCreditsPerTurn: z.number().int().nonnegative().optional(),
+    frontierSoftCreditCap: z.number().int().nonnegative().nullable().optional(),
+    frontierHeavyRatio: z.number().min(0).max(1).optional(),
+    attachments: z.boolean().optional(),
+    storageBytes: z.number().int().nonnegative().optional(),
+    byok: z.boolean().optional(),
+    voice: z.boolean().optional(),
+    elevatedLimits: z.boolean().optional(),
+    modelFamilies: z.array(modelFamilySchema).optional(),
+  })
+  .strict();
+
+export type CampaignEntitlementOverrides = z.infer<
+  typeof campaignEntitlementOverridesSchema
+>;
 
 export type RawPlanRow = {
   id: string;
@@ -124,12 +168,38 @@ export type RawPlanEntitlementRow = {
   byok: boolean;
   voice: boolean;
   elevated_limits: boolean;
+  model_families?: unknown;
+};
+
+export type RawCampaignOverrideRow = {
+  id: string;
+  plan_id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  entitlement_overrides: unknown;
+  revoked_at: string | null;
 };
 
 let cache: PlanCatalog | null = null;
 
 export function isLaunchPlanId(value: string): value is LaunchPlanId {
   return value === "free" || value === "lite" || value === "pro";
+}
+
+function parseModelFamilies(raw: unknown): ModelFamilyId[] | null {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) return null;
+  const out: ModelFamilyId[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") return null;
+    if (!(MODEL_FAMILIES as readonly string[]).includes(item)) return null;
+    if (seen.has(item)) continue;
+    seen.add(item);
+    out.push(item as ModelFamilyId);
+  }
+  return out;
 }
 
 export function getDefaultPlanCatalog(): PlanCatalog {
@@ -139,7 +209,10 @@ export function getDefaultPlanCatalog(): PlanCatalog {
   }
   const entitlements = {} as Record<LaunchPlanId, PlanEntitlements>;
   for (const id of LAUNCH_PLAN_IDS) {
-    entitlements[id] = { ...PLAN_ENTITLEMENTS[id] };
+    entitlements[id] = {
+      ...PLAN_ENTITLEMENTS[id],
+      modelFamilies: [...PLAN_ENTITLEMENTS[id].modelFamilies],
+    };
   }
   return {
     source: "defaults",
@@ -147,6 +220,7 @@ export function getDefaultPlanCatalog(): PlanCatalog {
     plans,
     entitlements,
     versions: {},
+    campaigns: {},
     fallbackPlanIds: [...LAUNCH_PLAN_IDS],
   };
 }
@@ -186,6 +260,9 @@ export function parsePlanEntitlements(
   planId: LaunchPlanId,
   raw: RawPlanEntitlementRow
 ): PlanEntitlements | null {
+  const modelFamilies = parseModelFamilies(raw.model_families ?? []);
+  if (modelFamilies == null) return null;
+
   const candidate = {
     planId,
     autoMonthlyTurns: raw.auto_monthly_turns,
@@ -201,10 +278,64 @@ export function parsePlanEntitlements(
     byok: raw.byok,
     voice: raw.voice,
     elevatedLimits: raw.elevated_limits,
+    modelFamilies,
   };
 
   const parsed = planEntitlementsSchema.safeParse(candidate);
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Apply campaign entitlement overrides onto a base plan entitlement.
+ * Only validated keys are applied; unlimitedAuto is derived from turns.
+ */
+export function applyCampaignOverrides(
+  base: PlanEntitlements,
+  overlays: Array<Pick<ActiveCampaignOverlay, "entitlementOverrides">>,
+): PlanEntitlements {
+  if (overlays.length === 0) return base;
+  let next: PlanEntitlements = { ...base, modelFamilies: [...base.modelFamilies] };
+  for (const overlay of overlays) {
+    const o = overlay.entitlementOverrides;
+    if (!o || Object.keys(o).length === 0) continue;
+    const merged = { ...next, ...o };
+    if ("modelFamilies" in o && o.modelFamilies) {
+      merged.modelFamilies = [...o.modelFamilies];
+    }
+    if ("autoMonthlyTurns" in o) {
+      merged.unlimitedAuto = o.autoMonthlyTurns == null;
+    }
+    next = merged;
+  }
+  return next;
+}
+
+export function parseCampaignOverlay(
+  raw: RawCampaignOverrideRow,
+  now: Date = new Date()
+): ActiveCampaignOverlay | null {
+  if (raw.revoked_at) return null;
+  if (!isLaunchPlanId(raw.plan_id)) return null;
+  const start = new Date(raw.starts_at);
+  const end = new Date(raw.ends_at);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  if (end.getTime() <= start.getTime()) return null;
+  if (start.getTime() > now.getTime()) return null;
+  if (end.getTime() <= now.getTime()) return null;
+
+  const parsed = campaignEntitlementOverridesSchema.safeParse(
+    raw.entitlement_overrides ?? {}
+  );
+  if (!parsed.success) return null;
+
+  return {
+    id: raw.id,
+    planId: raw.plan_id,
+    name: raw.name,
+    startsAt: raw.starts_at,
+    endsAt: raw.ends_at,
+    entitlementOverrides: parsed.data,
+  };
 }
 
 /**
@@ -215,13 +346,17 @@ export function buildPlanCatalogFromRows(input: {
   plans: RawPlanRow[];
   versions: RawPlanVersionRow[];
   entitlements: RawPlanEntitlementRow[];
+  campaigns?: RawCampaignOverrideRow[];
   now?: number;
 }): PlanCatalog {
   const defaults = getDefaultPlanCatalog();
   const plans = { ...defaults.plans };
   const entitlements = { ...defaults.entitlements };
   const versions: Partial<Record<LaunchPlanId, PlanVersionMeta>> = {};
+  const campaigns: Partial<Record<LaunchPlanId, ActiveCampaignOverlay[]>> = {};
   const fallbackPlanIds = new Set<LaunchPlanId>(LAUNCH_PLAN_IDS);
+  const nowMs = input.now ?? Date.now();
+  const nowDate = new Date(nowMs);
 
   const versionById = new Map<string, RawPlanVersionRow>();
   for (const version of input.versions) {
@@ -272,15 +407,34 @@ export function buildPlanCatalogFromRows(input: {
     fallbackPlanIds.delete(planId);
   }
 
+  for (const raw of input.campaigns ?? []) {
+    const overlay = parseCampaignOverlay(raw, nowDate);
+    if (!overlay) continue;
+    const list = campaigns[overlay.planId] ?? [];
+    list.push(overlay);
+    campaigns[overlay.planId] = list;
+  }
+
+  // Apply active campaigns onto resolved base entitlements (after validation).
+  for (const planId of LAUNCH_PLAN_IDS) {
+    const overlays = campaigns[planId];
+    if (!overlays?.length) continue;
+    entitlements[planId] = applyCampaignOverrides(
+      entitlements[planId],
+      overlays
+    );
+  }
+
   return {
     source:
       fallbackPlanIds.size === LAUNCH_PLAN_IDS.length
         ? "defaults"
         : "database",
-    loadedAt: input.now ?? Date.now(),
+    loadedAt: nowMs,
     plans,
     entitlements,
     versions,
+    campaigns,
     fallbackPlanIds: [...fallbackPlanIds],
   };
 }

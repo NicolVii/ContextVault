@@ -13,6 +13,7 @@ import {
   isPlanConfigCacheFresh,
   setCachedPlanCatalog,
   type PlanCatalog,
+  type RawCampaignOverrideRow,
   type RawPlanEntitlementRow,
   type RawPlanRow,
   type RawPlanVersionRow,
@@ -29,7 +30,7 @@ export async function loadPlanCatalogFromDatabase(): Promise<PlanCatalog> {
   try {
     const admin = createSupabaseAdminClient();
 
-    const [plansRes, versionsRes] = await Promise.all([
+    const [plansRes, versionsRes, campaignsRes] = await Promise.all([
       admin
         .from("plans")
         .select(
@@ -41,6 +42,12 @@ export async function loadPlanCatalogFromDatabase(): Promise<PlanCatalog> {
         .from("plan_versions")
         .select("id, plan_id, version, status, effective_from")
         .eq("status", "active"),
+      admin
+        .from("plan_campaign_overrides")
+        .select(
+          "id, plan_id, name, starts_at, ends_at, entitlement_overrides, revoked_at"
+        )
+        .is("revoked_at", null),
     ]);
 
     if (plansRes.error || versionsRes.error) {
@@ -50,13 +57,16 @@ export async function loadPlanCatalogFromDatabase(): Promise<PlanCatalog> {
     const plans = (plansRes.data ?? []) as RawPlanRow[];
     const versions = (versionsRes.data ?? []) as RawPlanVersionRow[];
     const versionIds = versions.map((v) => v.id);
+    const campaigns = campaignsRes.error
+      ? []
+      : ((campaignsRes.data ?? []) as RawCampaignOverrideRow[]);
 
     let entitlements: RawPlanEntitlementRow[] = [];
     if (versionIds.length > 0) {
       const entsRes = await admin
         .from("plan_entitlements")
         .select(
-          "plan_version_id, auto_monthly_turns, unlimited_auto, auto_fair_use_daily_credits, auto_fair_use_period_credits, frontier_monthly_turns, max_frontier_credits_per_turn, frontier_soft_credit_cap, frontier_heavy_ratio, attachments, storage_bytes, byok, voice, elevated_limits"
+          "plan_version_id, auto_monthly_turns, unlimited_auto, auto_fair_use_daily_credits, auto_fair_use_period_credits, frontier_monthly_turns, max_frontier_credits_per_turn, frontier_soft_credit_cap, frontier_heavy_ratio, attachments, storage_bytes, byok, voice, elevated_limits, model_families"
         )
         .in("plan_version_id", versionIds);
 
@@ -66,7 +76,12 @@ export async function loadPlanCatalogFromDatabase(): Promise<PlanCatalog> {
       entitlements = (entsRes.data ?? []) as RawPlanEntitlementRow[];
     }
 
-    return buildPlanCatalogFromRows({ plans, versions, entitlements });
+    return buildPlanCatalogFromRows({
+      plans,
+      versions,
+      entitlements,
+      campaigns,
+    });
   } catch {
     return getDefaultPlanCatalog();
   }
