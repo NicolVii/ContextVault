@@ -2,6 +2,22 @@ export * from "./products";
 export * from "./entitlements";
 export * from "./constants";
 export {
+  resolvePlanCatalogSync,
+  getDefaultPlanCatalog,
+  buildPlanCatalogFromRows,
+  parsePlanEntitlements,
+  parseSubscriptionPlan,
+  clearPlanConfigCache,
+  setCachedPlanCatalog,
+  PLAN_CONFIG_CACHE_TTL_MS,
+  type PlanCatalog,
+  type PlanConfigSource,
+} from "./plan-config";
+export {
+  ensurePlanConfigLoaded,
+  loadPlanCatalogFromDatabase,
+} from "./plan-config-loader";
+export {
   resolveCommercialMode,
   isStripeSecretConfigured,
   isStripePaymentsEnabled,

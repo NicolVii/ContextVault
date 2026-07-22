@@ -11,7 +11,7 @@
     "test": "CV_REQUIRE_SUPABASE=1 vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run --exclude 'tests/**/*.integration.test.ts' --exclude tests/memory.test.ts",
-    "test:integration": "CV_INTEGRATION=1 vitest run tests/memory.test.ts tests/stripe-webhook.integration.test.ts tests/admin-auth.integration.test.ts tests/admin-entitlements.integration.test.ts",
+    "test:integration": "CV_INTEGRATION=1 vitest run tests/memory.test.ts tests/stripe-webhook.integration.test.ts tests/admin-auth.integration.test.ts tests/admin-entitlements.integration.test.ts tests/plan-config.integration.test.ts",
     "check": "pnpm lint && pnpm typecheck && pnpm test:unit",
     "check:full": "pnpm check && pnpm test:integration",
     "env:sync": "node --import tsx scripts/env-sync.ts",
