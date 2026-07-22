@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { ArrowLeft, X } from "lucide-react";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
@@ -25,8 +25,9 @@ function titleFor(pathname: string): string {
 
 export function VaultShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const isHub = pathname === "/vault";
+  const backHref =
+    pathname.startsWith("/vault/") && pathname !== "/vault" ? "/vault" : "/";
 
   return (
     <div className="bg-atmosphere min-h-screen lg:flex lg:justify-end lg:bg-mist-100">
@@ -55,20 +56,13 @@ export function VaultShell({ children }: { children: React.ReactNode }) {
               <X className="h-5 w-5" />
             </Link>
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                if (pathname.startsWith("/vault/") && pathname !== "/vault") {
-                  router.push("/vault");
-                } else {
-                  router.push("/");
-                }
-              }}
+            <Link
+              href={backHref}
               className="rounded-lg p-2 text-ink-muted hover:bg-mist-50 hover:text-ink"
               aria-label="Back"
             >
               <ArrowLeft className="h-5 w-5" />
-            </button>
+            </Link>
           )}
           <h1 className="flex-1 text-base font-semibold text-ink">{titleFor(pathname)}</h1>
           {!isHub && (

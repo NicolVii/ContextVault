@@ -40,6 +40,8 @@ export async function ensureUserProfile(
     // Hosted Google signups often create a row with a null/blank display_name
     // (the auth trigger only reads metadata.display_name, not full_name/name).
     // Backfill once so Profile UI and chat identity stay in sync.
+    // Do not call ensureFreeSubscription here — that belongs on signup /
+    // insert paths and billing APIs, not every navigation.
     if (!existing.display_name?.trim()) {
       const fallback = displayNameFromUser(user);
       if (fallback) {
@@ -50,12 +52,10 @@ export async function ensureUserProfile(
           .select("*")
           .maybeSingle();
         if (updated) {
-          await ensureFreeSubscription(user.id).catch(() => undefined);
           return updated as Profile;
         }
       }
     }
-    await ensureFreeSubscription(user.id).catch(() => undefined);
     return existing as Profile;
   }
 
