@@ -86,6 +86,7 @@ export {
 export {
   getPlanUsageSnapshot,
   assertPlanAllowsTurn,
+  evaluatePlanTurnGate,
   recordPlanTurn,
   getFoundingOfferState,
   dismissFoundingOffer,

@@ -310,20 +310,28 @@ export async function dismissFoundingOffer(userId: string): Promise<void> {
   );
 }
 
-export async function assertPlanAllowsTurn(input: {
-  userId: string;
+/**
+ * Pure plan-limit gate used by {@link assertPlanAllowsTurn}.
+ * Exported for unit coverage of Free/Lite/Pro ceilings without a DB.
+ */
+export function evaluatePlanTurnGate(input: {
+  inferenceRestricted: boolean;
+  entitlements: PlanEntitlements;
+  autoRemaining: number | null;
+  frontierRemaining: number | null;
+  autoCredits: number;
+  frontierCredits: number;
   intensity: UsageIntensity;
   estimatedCredits: number;
-}): Promise<PlanUsageSnapshot> {
-  const snap = await getPlanUsageSnapshot(input.userId);
-  if (snap.inferenceRestricted) {
+}): void {
+  if (input.inferenceRestricted) {
     throw new PlanUsageBlockedError(
       "restricted",
       "AI usage is paused due to a billing problem. Update billing to continue."
     );
   }
 
-  const ents = snap.entitlements;
+  const ents = input.entitlements;
 
   if (input.intensity === "frontier") {
     if (ents.frontierMonthlyTurns === 0) {
@@ -341,7 +349,10 @@ export async function assertPlanAllowsTurn(input: {
         "This request is too large for your plan. Try a shorter conversation or upgrade."
       );
     }
-    if (ents.frontierMonthlyTurns != null && (snap.frontierRemaining ?? 0) <= 0) {
+    if (
+      ents.frontierMonthlyTurns != null &&
+      (input.frontierRemaining ?? 0) <= 0
+    ) {
       throw new PlanUsageBlockedError(
         "frontier_exhausted",
         "No Frontier conversations left this period. Auto still works, or upgrade to Pro."
@@ -349,7 +360,7 @@ export async function assertPlanAllowsTurn(input: {
     }
     if (
       ents.frontierSoftCreditCap != null &&
-      snap.frontierCredits + input.estimatedCredits > ents.frontierSoftCreditCap
+      input.frontierCredits + input.estimatedCredits > ents.frontierSoftCreditCap
     ) {
       throw new PlanUsageBlockedError(
         "fair_use",
@@ -357,20 +368,40 @@ export async function assertPlanAllowsTurn(input: {
       );
     }
   } else {
-    if (ents.autoMonthlyTurns != null && (snap.autoRemaining ?? 0) <= 0) {
+    if (ents.autoMonthlyTurns != null && (input.autoRemaining ?? 0) <= 0) {
       throw new PlanUsageBlockedError(
         "auto_exhausted",
         "No Auto conversations left this month. Upgrade to Lite or Pro to continue."
       );
     }
-    if (snap.autoCredits + input.estimatedCredits > ents.autoFairUsePeriodCredits) {
+    if (
+      input.autoCredits + input.estimatedCredits >
+      ents.autoFairUsePeriodCredits
+    ) {
       throw new PlanUsageBlockedError(
         "fair_use",
         "Auto usage paused under fair use this period. Please slow down or contact support."
       );
     }
   }
+}
 
+export async function assertPlanAllowsTurn(input: {
+  userId: string;
+  intensity: UsageIntensity;
+  estimatedCredits: number;
+}): Promise<PlanUsageSnapshot> {
+  const snap = await getPlanUsageSnapshot(input.userId);
+  evaluatePlanTurnGate({
+    inferenceRestricted: snap.inferenceRestricted,
+    entitlements: snap.entitlements,
+    autoRemaining: snap.autoRemaining,
+    frontierRemaining: snap.frontierRemaining,
+    autoCredits: snap.autoCredits,
+    frontierCredits: snap.frontierCredits,
+    intensity: input.intensity,
+    estimatedCredits: input.estimatedCredits,
+  });
   return snap;
 }
 
