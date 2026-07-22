@@ -19,7 +19,7 @@ export {
   type ModelProfile,
   type ProviderBinding,
 } from "./models";
-export { resolveRoute } from "./router";
+export { resolveRoute, resolveRouteAsync } from "./router";
 export * from "./usage";
 export * from "./pricing";
 export {
@@ -31,4 +31,18 @@ export {
 } from "./credits";
 export { settleUsage, computeCreditsCharged } from "./meter";
 export { runInference } from "./complete";
+export {
+  ensureProviderOpsSnapshot,
+  filterAndOrderBindings,
+  getProviderOpsSync,
+  getRoutableModels,
+  invalidateProviderOpsCache,
+  isProviderConfigured,
+  isModelEnabledForRouting,
+  listProviderAdminViews,
+  setProviderOpsSnapshotCache,
+  type ProviderAdminView,
+  type ModelAdminView,
+  type ProviderOpsSnapshot,
+} from "./provider-ops";
 

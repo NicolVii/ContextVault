@@ -53,3 +53,12 @@ export {
   createPlanCampaignOverride,
   revokePlanCampaignOverride,
 } from "@/lib/billing/plan-editor";
+
+export {
+  listProviderAdminViews,
+  updateProviderConfig,
+  updateModelOverride,
+  runProviderHealthTest,
+  type ProviderAdminView,
+  type ModelAdminView,
+} from "@/lib/inference/provider-ops";

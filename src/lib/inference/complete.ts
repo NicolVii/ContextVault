@@ -18,6 +18,15 @@ import {
 import { estimateCreditsForPreflight } from "./pricing";
 import { estimateTokensFromMessages } from "./usage";
 import { resolveModelProfile, type ProviderBinding } from "./models";
+import {
+  ensureProviderOpsSnapshot,
+  filterAndOrderBindings,
+  getProviderConfig,
+  isProviderUnderDailyCeiling,
+  recordProviderOpsEvent,
+  type ProviderOpsSnapshot,
+} from "./provider-ops";
+import { providerCostUsdMicros } from "./pricing";
 import type { InferenceRequest, InferenceResult, UsageDraft } from "./types";
 
 export { InsufficientCreditsError, PlanUsageBlockedError };
@@ -54,42 +63,72 @@ async function resolveApiKey(
   userId: string,
   provider: string,
   billingMode: "platform" | "byok",
-  allowByokFallback: boolean
+  allowByokFallback: boolean,
+  snapshot: ProviderOpsSnapshot
 ): Promise<{ key: string; source: "platform" | "byok" } | null> {
+  const cfg = getProviderConfig(provider, snapshot);
+  if (!cfg.enabled || cfg.mockOnly) return null;
+
   if (billingMode === "byok") {
-    if (!allowByokFallback) return null;
+    if (!allowByokFallback || !cfg.allowByok) return null;
     const byok = await loadUserProviderKey(userId, provider);
     return byok ? { key: byok, source: "byok" } : null;
   }
 
-  const platform = platformKeysFor(provider);
-  if (platform.length > 0) {
-    const idx = Math.floor(Date.now() / 60_000) % platform.length;
-    return { key: platform[idx] ?? platform[0]!, source: "platform" };
+  if (cfg.allowPlatform) {
+    const platform = platformKeysFor(provider);
+    if (platform.length > 0) {
+      const idx = Math.floor(Date.now() / 60_000) % platform.length;
+      return { key: platform[idx] ?? platform[0]!, source: "platform" };
+    }
   }
 
-  if (!allowByokFallback) return null;
+  if (!allowByokFallback || !cfg.allowByok) return null;
   const byok = await loadUserProviderKey(userId, provider);
   return byok ? { key: byok, source: "byok" } : null;
 }
 
 function orderedBindings(
   routeBinding: ProviderBinding,
-  profileBindings: ProviderBinding[]
+  profileBindings: ProviderBinding[],
+  snapshot: ProviderOpsSnapshot
 ): ProviderBinding[] {
-  const rest = profileBindings.filter(
-    (b) =>
-      !(b.provider === routeBinding.provider && b.providerModelId === routeBinding.providerModelId)
+  const preferred = filterAndOrderBindings(
+    [routeBinding, ...profileBindings],
+    snapshot
   );
-  return [routeBinding, ...rest];
+  // Dedupe while keeping ops priority order; ensure route binding wins ties.
+  const seen = new Set<string>();
+  const out: ProviderBinding[] = [];
+  const routeKey = `${routeBinding.provider}:${routeBinding.providerModelId}`;
+  const filtered = preferred.filter((b) => {
+    const key = `${b.provider}:${b.providerModelId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  // Prefer the routed binding first when it survived filtering.
+  const routeFirst = filtered.find(
+    (b) => `${b.provider}:${b.providerModelId}` === routeKey
+  );
+  if (routeFirst) {
+    out.push(routeFirst);
+    for (const b of filtered) {
+      if (`${b.provider}:${b.providerModelId}` !== routeKey) out.push(b);
+    }
+    return out;
+  }
+  return filtered;
 }
 
 /**
  * Inference Router — sole bridge from product code to provider adapters.
  * Resolves model selection, gates credits, calls adapters with failover, settles usage.
+ * Honors provider/model ops status (enabled, mock-only, daily ceiling, eligibility).
  */
 export async function runInference(req: InferenceRequest): Promise<InferenceResult> {
   const started = Date.now();
+  const snapshot = await ensureProviderOpsSnapshot();
 
   const snap = await getPlanUsageSnapshot(req.userId);
   const gatedReq: InferenceRequest = {
@@ -100,12 +139,13 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
       req.billingMode === "byok" && !snap.entitlements.byok ? "platform" : req.billingMode,
   };
 
-  const route = resolveRoute(gatedReq.selection, gatedReq);
+  const route = resolveRoute(gatedReq.selection, gatedReq, snapshot);
   const intensity = classifyUsageIntensity(gatedReq.selection, route.modelId);
   const profile = resolveModelProfile(route.modelId);
   const bindings = orderedBindings(
     { provider: route.provider, providerModelId: route.providerModelId },
-    profile?.bindings ?? []
+    profile?.bindings ?? [],
+    snapshot
   );
 
   const inputEstimate = Math.max(
@@ -116,12 +156,15 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
 
   let hasRunnable = false;
   for (const b of bindings) {
+    const underCeiling = await isProviderUnderDailyCeiling(b.provider, snapshot);
+    if (!underCeiling) continue;
     if (
       await resolveApiKey(
         req.userId,
         b.provider,
         gatedReq.billingMode,
-        snap.entitlements.byok
+        snap.entitlements.byok,
+        snapshot
       )
     ) {
       hasRunnable = true;
@@ -148,6 +191,8 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
   let usedProviderModelId = route.providerModelId;
   let effectiveBillingMode = gatedReq.billingMode;
   const errors: string[] = [];
+  let failoverCount = 0;
+  let attempts = 0;
 
   if (useMock) {
     const adapter = getAdapter("mock")!;
@@ -159,20 +204,53 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
       json: req.constraints?.json,
     });
     usedProvider = "mock";
+    await recordProviderOpsEvent({
+      requestId: req.requestId,
+      provider: "mock",
+      modelId: route.modelId,
+      providerModelId: route.providerModelId,
+      outcome: "mock_fallback",
+      latencyMs: Date.now() - started,
+      costUsdMicros: 0,
+    });
   } else {
     for (const binding of bindings) {
+      const underCeiling = await isProviderUnderDailyCeiling(
+        binding.provider,
+        snapshot
+      );
+      if (!underCeiling) {
+        errors.push(`${binding.provider}: daily cost ceiling reached`);
+        continue;
+      }
+
       const adapter = getAdapter(binding.provider);
       if (!adapter) continue;
       const resolved = await resolveApiKey(
         req.userId,
         binding.provider,
         gatedReq.billingMode,
-        snap.entitlements.byok
+        snap.entitlements.byok,
+        snapshot
       );
       if (!resolved) {
         errors.push(`${binding.provider}: no api key`);
         continue;
       }
+
+      attempts += 1;
+      if (attempts > 1) {
+        failoverCount += 1;
+        await recordProviderOpsEvent({
+          requestId: req.requestId,
+          provider: binding.provider,
+          modelId: route.modelId,
+          providerModelId: binding.providerModelId,
+          outcome: "failover",
+        });
+      }
+
+      const attemptStarted = Date.now();
       try {
         completion = await adapter.complete({
           model: binding.providerModelId,
@@ -187,11 +265,39 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
         if (resolved.source === "byok" && snap.entitlements.byok) {
           effectiveBillingMode = "byok";
         }
+
+        const estUsage =
+          completion.usage?.measures ??
+          estimateTokensFromMessages(messages, completion.content).measures;
+        const inputTokens = estUsage.inputTokens ?? 0;
+        const outputTokens = estUsage.outputTokens ?? 0;
+        const cost =
+          effectiveBillingMode === "byok"
+            ? 0
+            : providerCostUsdMicros(route.modelId, inputTokens, outputTokens);
+
+        await recordProviderOpsEvent({
+          requestId: req.requestId,
+          provider: binding.provider,
+          modelId: route.modelId,
+          providerModelId: binding.providerModelId,
+          outcome: "success",
+          latencyMs: Date.now() - attemptStarted,
+          costUsdMicros: cost,
+        });
         break;
       } catch (err) {
-        errors.push(
-          `${binding.provider}: ${err instanceof Error ? err.message : "failed"}`
-        );
+        const message = err instanceof Error ? err.message : "failed";
+        errors.push(`${binding.provider}: ${message}`);
+        await recordProviderOpsEvent({
+          requestId: req.requestId,
+          provider: binding.provider,
+          modelId: route.modelId,
+          providerModelId: binding.providerModelId,
+          outcome: "failure",
+          latencyMs: Date.now() - attemptStarted,
+          errorClass: "unknown",
+        });
       }
     }
   }
@@ -205,6 +311,7 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
   }
 
   const providerName = completion.mocked ? "mock" : usedProvider;
+  const latencyMs = Date.now() - started;
   const usageBase: Omit<UsageDraft, "measures" | "measuresSource"> = {
     requestId: req.requestId,
     tenantId: req.tenantId,
@@ -228,7 +335,10 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
     usage = { ...usageBase, ...est };
   }
 
-  const settlement = await settleUsage(usage);
+  const settlement = await settleUsage(usage, {
+    latencyMs,
+    failoverCount,
+  });
   const charged =
     settlement.creditsCharged ||
     computeCreditsCharged(usage);
@@ -254,7 +364,7 @@ export async function runInference(req: InferenceRequest): Promise<InferenceResu
     },
     usage,
     meta: {
-      latencyMs: Date.now() - started,
+      latencyMs,
       mocked: completion.mocked,
     },
   };

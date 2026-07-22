@@ -23,12 +23,20 @@ export function computeCreditsCharged(
   return estimateCredits(draft.modelId, inputTokens, outputTokens);
 }
 
+export interface SettleUsageOptions {
+  latencyMs?: number | null;
+  failoverCount?: number;
+}
+
 /**
  * Idempotent usage settlement keyed by request_id.
  * Writes usage_events and debits the credit wallet when billingMode=platform
  * and credits_charged > 0. Failover retries share one request_id → one debit.
  */
-export async function settleUsage(draft: UsageDraft): Promise<SettlementResult> {
+export async function settleUsage(
+  draft: UsageDraft,
+  options?: SettleUsageOptions
+): Promise<SettlementResult> {
   const admin = createSupabaseAdminClient();
 
   const { data: existing } = await admin
@@ -78,6 +86,8 @@ export async function settleUsage(draft: UsageDraft): Promise<SettlementResult> 
     provider_cost_usd_micros: providerCost,
     credits_charged: creditsCharged,
     price_book_version: priceBook.version || PRICE_BOOK_VERSION,
+    latency_ms: options?.latencyMs ?? null,
+    failover_count: options?.failoverCount ?? 0,
   });
 
   if (insertErr) {
