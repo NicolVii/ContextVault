@@ -1,7 +1,7 @@
-import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { timed } from "@/lib/perf";
+import { requestCache } from "@/lib/request-cache";
 
 export interface SessionContext {
   supabase: ReturnType<typeof createSupabaseServerClient>;
@@ -13,7 +13,7 @@ export interface SessionContext {
  * Safe for layouts + pages to call repeatedly; does not replace middleware
  * session refresh.
  */
-export const getCachedUser = cache(async (): Promise<User | null> => {
+export const getCachedUser = requestCache(async (): Promise<User | null> => {
   return timed("auth.getUser", async () => {
     const supabase = createSupabaseServerClient();
     const {
@@ -27,7 +27,7 @@ export const getCachedUser = cache(async (): Promise<User | null> => {
  * Resolve the authenticated user for a route handler / RSC. Returns null when
  * there is no valid session so callers can respond with 401 / redirect.
  */
-export const getSessionContext = cache(async (): Promise<SessionContext | null> => {
+export const getSessionContext = requestCache(async (): Promise<SessionContext | null> => {
   const supabase = createSupabaseServerClient();
   const user = await getCachedUser();
   if (!user) return null;
