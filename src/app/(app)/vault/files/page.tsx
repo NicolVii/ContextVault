@@ -1,8 +1,10 @@
+"use client";
+
 import { DocumentLibrary } from "@/components/DocumentLibrary";
 
 /**
- * Thin server shell — documents + plan/storage entitlements load on the client
- * so Soft Navigation is not blocked on both queries (V2 SSR regression).
+ * Client page: Soft Navigation paints chrome immediately instead of waiting on
+ * documents + plan/storage entitlement work (V2 SSR regression).
  */
 export default function VaultFilesPage() {
   return (

@@ -1,8 +1,10 @@
+"use client";
+
 import { ReviewQueue } from "@/components/ReviewQueue";
 
 /**
- * Thin server shell — review queue loads on the client so navigation is not
- * blocked on the full proposed-memories query.
+ * Client page: Soft Navigation paints chrome immediately instead of waiting on
+ * the full proposed-memories query (V2 SSR regression).
  */
 export default function VaultReviewPage() {
   return (

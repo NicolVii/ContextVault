@@ -1,9 +1,8 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { PlanUsagePanel, PlanRecentList } from "@/components/PlanUsagePanel";
-import { getCachedUser, getSessionContext } from "@/lib/auth";
+import { getCachedUser } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { ensureUserProfile } from "@/lib/profile";
 import { ensureCreditAccount, getCreditBalance } from "@/lib/inference/credits";
 import { getCommercialCapabilities } from "@/lib/billing/commercial";
 import { getPlanUsageSnapshot, type PlanUsageSnapshot } from "@/lib/billing/plan-usage";
@@ -83,27 +82,24 @@ async function PlanUsageSection({ userId }: { userId: string }) {
   );
 }
 
-/**
- * Plan stays server-rendered, but chrome paints immediately and usage vs recent
- * stream in separate Suspense boundaries. Snapshot is computed once.
- */
-export default async function VaultPlanPage() {
+async function PlanUsageLoader() {
   const user = await getCachedUser();
   if (!user) redirect("/login");
+  return <PlanUsageSection userId={user.id} />;
+}
 
-  const ctx = await getSessionContext();
-  if (!ctx) redirect("/login");
-
-  const profile = await ensureUserProfile(ctx.supabase, user);
-  if (!profile) redirect("/onboarding");
-
+/**
+ * Sync shell so Soft Navigation can paint chrome immediately. Plan usage and
+ * recent activity stream via Suspense. Auth/profile already gated by `(app)/layout`.
+ */
+export default function VaultPlanPage() {
   return (
     <div className="mx-auto max-w-lg">
       <p className="mb-6 text-sm text-ink-muted">
         One memory. Every leading model. Calm usage — not a wallet.
       </p>
       <Suspense fallback={<PlanUsageFallback />}>
-        <PlanUsageSection userId={user.id} />
+        <PlanUsageLoader />
       </Suspense>
     </div>
   );
