@@ -103,6 +103,21 @@ Launch catalog in `SUBSCRIPTION_PLANS`:
 
 Free users also get `cheapOnlyRouting` in `runInference` so Auto stays on cheap models.
 
+### Admin demo grants & plan simulations
+
+**Status: Fully functional (service-role / admin API)**
+
+Tables: `admin_entitlement_grants`, `admin_plan_simulations` (RLS on; service_role only).
+
+Effective plan priority in `resolveEffectiveEntitlement` / `resolveUsagePeriod`:
+
+1. Active plan simulation
+2. Active admin entitlement grant
+3. Real Stripe subscription
+4. Free fallback
+
+Grants and simulations support temporary Free/Lite/Pro, start/expiry, Auto/Frontier turn bonuses, credit bonus, storage override, per-feature overrides, reason, and `created_by`. Mutations go through `POST /api/admin/entitlements` (admin+) and are appended to `admin_audit_log`. Rows always set `exclude_from_revenue=true` and never count as paid revenue. Thinking and Vault Plan show `DemoSubscriptionBanner` while a demo source is active.
+
 ---
 
 ## 4. Stripe billing routes
@@ -212,7 +227,7 @@ Memory: `MEMORY_PROVIDER=supabase` (default) or `mem0` — orthogonal to Stripe;
 
 `recordBillingTelemetry` → `billing_telemetry_events` (fire-and-forget; never breaks product paths).
 
-Observed event names: `checkout_started`, `subscription_period_granted`, `payment_failed`, `inference_restricted`, `charge_refunded`, `subscription_canceled`, `inference_turn`.
+Observed event names: `checkout_started`, `subscription_period_granted`, `payment_failed`, `inference_restricted`, `charge_refunded`, `subscription_canceled`, `inference_turn`. Inference turns include `meta.excludeFromRevenue` / `meta.entitlementSource` so demo grants and simulations can be filtered out of revenue analytics.
 
 ---
 
@@ -299,7 +314,7 @@ Gaps relative to a go-live audit: no end-to-end Stripe Checkout/Portal test; no 
 | Vault Plan & Usage UI | Fully functional (local paths) |
 | BillingPanel | Deprecated shim |
 | Workspaces budgets | Scaffolded |
-| Admin commercial console | Absent (ops via Stripe/DB) |
+| Admin commercial console | Minimal RBAC console + entitlement grant/simulation API; Stripe remains source of paid truth |
 | Price book COGS micros | Configured but unverified (placeholders) |
 
 ---
