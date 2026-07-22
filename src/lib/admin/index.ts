@@ -26,3 +26,21 @@ export {
 } from "@/lib/admin/auth";
 
 export { recordAdminAudit } from "@/lib/admin/audit";
+
+export {
+  getAdminOverviewStats,
+  listAdminUsers,
+  getAdminUserDetail,
+  listAdminAuditEntries,
+  type AdminOverviewStats,
+  type AdminUserListItem,
+  type AdminUserDetail,
+  type AdminAuditEntry,
+} from "@/lib/admin/console";
+
+export {
+  resetUserPlanUsage,
+  grantAutoBonus,
+  grantFrontierBonus,
+  grantCreditBonus,
+} from "@/lib/admin/mutations";

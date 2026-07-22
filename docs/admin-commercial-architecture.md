@@ -13,7 +13,7 @@ Status legend used below:
 
 This document is an **audit of the current codebase**, not a redesign. Related checklist: [`legal-readiness-checklist.md`](./legal-readiness-checklist.md). Demo / offline verification matrix: [`demo-mode-test-matrix.md`](./demo-mode-test-matrix.md).
 
-There is **no separate admin console** for commercial ops. Operators use Stripe Dashboard, Supabase tables/RPC, `/api/status` (non-secret diagnostics), and application UI under Vault.
+Staff ops use the protected **Admin Console** under `/admin` (RBAC via `user_roles`, mutations audited in `admin_audit_log`). Stripe Dashboard remains the source of paid subscription truth; the console covers demo grants, simulations, bonuses, usage resets, and audit browse.
 
 ---
 
@@ -314,7 +314,7 @@ Gaps relative to a go-live audit: no end-to-end Stripe Checkout/Portal test; no 
 | Vault Plan & Usage UI | Fully functional (local paths) |
 | BillingPanel | Deprecated shim |
 | Workspaces budgets | Scaffolded |
-| Admin commercial console | Minimal RBAC console + entitlement grant/simulation API; Stripe remains source of paid truth |
+| Admin commercial console | Fully functional V1 (`/admin`, users, user detail, audit) + entitlement/bonus/usage APIs; Stripe remains source of paid truth |
 | Price book COGS micros | Configured but unverified (placeholders) |
 
 ---
@@ -325,4 +325,4 @@ Gaps relative to a go-live audit: no end-to-end Stripe Checkout/Portal test; no 
 2. Stripe test mode: set secret, webhook secret, price IDs, forward webhooks to `/api/billing/webhook`, configure Portal + Tax in Dashboard.
 3. Production: never enable Stripe without legal checklist + `BYOK_ENCRYPTION_KEY` + verified price book; keep `NODE_ENV=production` so dev top-up cannot run.
 4. Refunds today only emit telemetry — manual ops/support confirm unused credit lots before clawback.
-5. Prefer querying `billing_telemetry_events` and Stripe Dashboard over building an admin UI until go-live priorities are set.
+5. Use `/admin` for demo entitlements, bonuses, usage resets, and audit; keep Stripe Dashboard for paid subscription truth and `billing_telemetry_events` for commercial analytics.
