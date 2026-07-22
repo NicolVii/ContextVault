@@ -14,6 +14,7 @@ import {
   type EntitlementSource,
   type ResolvedEntitlement,
 } from "./entitlement-resolution";
+import { ensurePlanConfigLoaded } from "./plan-config-loader";
 
 export class PlanUsageBlockedError extends Error {
   readonly code:
@@ -75,7 +76,9 @@ async function loadResolvedEntitlement(
   userId: string
 ): Promise<ResolvedEntitlement> {
   const admin = createSupabaseAdminClient();
-  const [simulations, grants, subRes] = await Promise.all([
+  // Warm DB-backed plan catalog (TTL cache); sync entitlement helpers read it.
+  const [, simulations, grants, subRes] = await Promise.all([
+    ensurePlanConfigLoaded(),
     listPlanSimulationsForUser(userId),
     listEntitlementGrantsForUser(userId),
     admin

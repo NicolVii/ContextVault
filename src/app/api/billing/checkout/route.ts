@@ -4,6 +4,7 @@ import { getStripe, getOrCreateStripeCustomer, appBaseUrl } from "@/lib/billing/
 import { getCreditPack, getSubscriptionPlan } from "@/lib/billing/products";
 import { assertCheckoutAllowed } from "@/lib/billing/commercial";
 import { recordBillingTelemetry } from "@/lib/billing/telemetry";
+import { ensurePlanConfigLoaded } from "@/lib/billing/plan-config-loader";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,8 @@ export async function POST(request: Request) {
       { status: gate.status }
     );
   }
+
+  await ensurePlanConfigLoaded();
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {

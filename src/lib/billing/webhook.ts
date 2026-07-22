@@ -7,6 +7,7 @@ import {
 } from "./products";
 import { entitlementsForPlan } from "./entitlements";
 import { recordBillingTelemetry } from "./telemetry";
+import { ensurePlanConfigLoaded } from "./plan-config-loader";
 
 const GRACE_DAYS = 7;
 
@@ -73,6 +74,7 @@ export async function handleStripeEvent(
 }
 
 async function dispatchStripeEvent(event: Stripe.Event): Promise<void> {
+  await ensurePlanConfigLoaded();
   switch (event.type) {
     case "checkout.session.completed":
       await onCheckoutCompleted(event.data.object as Stripe.Checkout.Session);
