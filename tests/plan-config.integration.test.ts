@@ -47,19 +47,24 @@ afterEach(() => {
 
 describe("plan entitlement config migration + seed (integration)", () => {
   it("seeds Free, Lite, and Pro plans with active versions", async () => {
-    const { data: plans, error } = await adminClient
+    const admin = adminClient();
+    const { data: plans, error } = await admin
       .from("plans")
       .select("id, label, amount_eur_cents_monthly, founding_eur_cents_monthly, public, active")
       .order("sort_order", { ascending: true });
 
     expect(error).toBeNull();
-    expect(plans?.map((p) => p.id)).toEqual(["free", "lite", "pro"]);
+    expect(plans?.map((p: { id: string }) => p.id)).toEqual([
+      "free",
+      "lite",
+      "pro",
+    ]);
     expect(plans?.[0]?.amount_eur_cents_monthly).toBe(0);
     expect(plans?.[1]?.amount_eur_cents_monthly).toBe(500);
     expect(plans?.[2]?.amount_eur_cents_monthly).toBe(2_800);
     expect(plans?.[2]?.founding_eur_cents_monthly).toBe(2_500);
 
-    const { data: versions, error: vErr } = await adminClient
+    const { data: versions, error: vErr } = await admin
       .from("plan_versions")
       .select("plan_id, version, status")
       .eq("status", "active")
@@ -67,11 +72,14 @@ describe("plan entitlement config migration + seed (integration)", () => {
 
     expect(vErr).toBeNull();
     expect(versions).toHaveLength(3);
-    expect(versions?.every((v) => v.version === 1)).toBe(true);
+    expect(versions?.every((v: { version: number }) => v.version === 1)).toBe(
+      true
+    );
   });
 
   it("seeds entitlements matching TypeScript defaults", async () => {
-    const { data: rows, error } = await adminClient
+    const admin = adminClient();
+    const { data: rows, error } = await admin
       .from("plan_entitlements")
       .select(
         "plan_version_id, auto_monthly_turns, unlimited_auto, frontier_monthly_turns, attachments, storage_bytes, byok, voice, elevated_limits, plan_versions!inner(plan_id, status)"
@@ -80,14 +88,28 @@ describe("plan entitlement config migration + seed (integration)", () => {
     expect(error).toBeNull();
     expect(rows).toHaveLength(3);
 
-    const byPlan = new Map<string, (typeof rows)[number]>();
-    for (const row of rows ?? []) {
-      const joined = row.plan_versions as unknown as {
-        plan_id: string;
-        status: string;
-      };
-      expect(joined.status).toBe("active");
-      byPlan.set(joined.plan_id, row);
+    type EntitlementSeedRow = {
+      plan_version_id: string;
+      auto_monthly_turns: number | null;
+      unlimited_auto: boolean;
+      frontier_monthly_turns: number | null;
+      attachments: boolean;
+      storage_bytes: number | string;
+      byok: boolean;
+      voice: boolean;
+      elevated_limits: boolean;
+      plan_versions:
+        | { plan_id: string; status: string }
+        | { plan_id: string; status: string }[];
+    };
+
+    const byPlan = new Map<string, EntitlementSeedRow>();
+    for (const row of (rows ?? []) as EntitlementSeedRow[]) {
+      const joined = Array.isArray(row.plan_versions)
+        ? row.plan_versions[0]
+        : row.plan_versions;
+      expect(joined?.status).toBe("active");
+      byPlan.set(joined!.plan_id, row);
     }
 
     const free = byPlan.get("free")!;
@@ -129,6 +151,7 @@ describe("plan entitlement config migration + seed (integration)", () => {
   });
 
   it("allows authenticated select but blocks writes", async () => {
+    const admin = adminClient();
     const select = await user.client.from("plans").select("id").order("id");
     expect(select.error).toBeNull();
     expect(select.data?.map((r) => r.id)).toEqual(["free", "lite", "pro"]);
@@ -148,7 +171,7 @@ describe("plan entitlement config migration + seed (integration)", () => {
       .eq("id", "free");
     expect(update.error).not.toBeNull();
 
-    const { data: stillFree } = await adminClient
+    const { data: stillFree } = await admin
       .from("plans")
       .select("label")
       .eq("id", "free")
@@ -157,7 +180,8 @@ describe("plan entitlement config migration + seed (integration)", () => {
   });
 
   it("falls back to TypeScript defaults when active entitlements are removed", async () => {
-    const { data: proVersion } = await adminClient
+    const admin = adminClient();
+    const { data: proVersion } = await admin
       .from("plan_versions")
       .select("id")
       .eq("plan_id", "pro")
@@ -165,7 +189,7 @@ describe("plan entitlement config migration + seed (integration)", () => {
       .single();
     expect(proVersion?.id).toBeTruthy();
 
-    const { error: delErr } = await adminClient
+    const { error: delErr } = await admin
       .from("plan_entitlements")
       .delete()
       .eq("plan_version_id", proVersion!.id);
@@ -180,7 +204,7 @@ describe("plan entitlement config migration + seed (integration)", () => {
       expect(catalog.entitlements.free.byok).toBe(false);
     } finally {
       // Restore seed row so later suites / re-runs stay green.
-      const { error: restoreErr } = await adminClient
+      const { error: restoreErr } = await admin
         .from("plan_entitlements")
         .insert({
           plan_version_id: proVersion!.id,
