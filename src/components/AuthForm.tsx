@@ -63,9 +63,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     <div className="flex min-h-screen items-center justify-center bg-sand-50 px-6">
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
-          <Link href="/">
-            <Logo />
-          </Link>
+          <Logo />
         </div>
         <div className="card p-8">
           <h1 className="text-2xl font-bold text-brand-900">
