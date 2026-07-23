@@ -24,7 +24,7 @@ Stages 1–6 are treated as **complete** even though `00-roadmap.md` status text
 
 ## 1. Executive summary
 
-Cortaix’s target memory architecture is a **modular monolith**: one Next.js deployable, one PostgreSQL database as the **canonical source of truth**, pgvector and optional external stores as **rebuildable derived indexes**, and a **PostgreSQL-backed durable-work layer** for post-response memory processing.
+Cortaix’s target memory architecture is a **modular monolith**: one Next.js deployable; **PostgreSQL** as the **canonical authority** for memory semantics, ownership, provenance, lifecycle, application state, references, extracted document records, and operational coordination; **Supabase Storage** as the allowed canonical repository for **source-file bytes** (with PostgreSQL holding ownership, metadata, and references); pgvector and optional external stores as **rebuildable derived indexes**; and a **PostgreSQL-backed durable-work layer** whose **registration** is part of the durable turn commit while **execution** remains asynchronous after the client response.
 
 The design is grounded in Stages 2–6. Those audits show that the product already has strong **RLS-based user isolation** for normal authenticated reads, a usable review queue for automatic extraction, and replaceable provider adapters — but conversation orchestration is **duplicated and route-local**, memory trust is **phrasing-gated**, extraction and embedding sit on the **response critical path**, billing can **settle before durable assistant persistence**, retrieval is **cosine-only with forced profile injection**, and deletion / external sync are **best-effort sequences**.
 
@@ -38,9 +38,9 @@ The design is grounded in Stages 2–6. Those audits show that the product alrea
 | --- | --- |
 | `/api/think` and `/api/chat` duplicate orchestration | One **Turn Orchestrator** behind all conversational interfaces |
 | Route-local active memory inserts and extraction | One **Memory Ingestion Gateway** + **Memory Processing Pipeline** |
-| PostgreSQL + optional Mem0 with incomplete reconciliation | PostgreSQL **canonical**; Mem0/embeddings/FTS as **derived** |
-| Extraction awaited before HTTP 200 | **Async durable work** after durable assistant persistence |
-| Usage settled inside inference before assistant write | Usage linked to durable turn; settlement final only with persisted assistant (or recoverable compensation) |
+| PostgreSQL + optional Mem0 with incomplete reconciliation | PostgreSQL **canonical** for memory semantics and coordination; Mem0/embeddings/FTS as **derived**; Storage may hold source-file bytes |
+| Extraction awaited before HTTP 200 | **Durable outbox/job registration** before client success; **async execution** after response |
+| Usage settled inside inference before assistant write | Usage linked to durable turn; success only when assistant is durable and usage is finalised **or** a durable usage-repair obligation is recorded |
 | Intent classifier as accidental trust gate | Deterministic policy before semantic trust; ordinary statements do **not** auto-activate trusted memory |
 | Profile rows forced into every prompt | Profile is a **retrieval channel**, not an always-include authority |
 | Retrieved text interpolated as system-adjacent context | Retrieved content classified as **untrusted data** |
@@ -68,7 +68,7 @@ Each requirement is a **Verified audit requirement** unless noted. Architecture 
 | F2 | Remove route-local memory trust and write decisions from conversation endpoints | Think statement/remember active inserts in route (Stages 2, 4) |
 | F3 | Do not treat a turn as successful without durable assistant persistence when a reply is returned | Assistant insert after settle; charge-without-reply (Stages 2, 6) |
 | F4 | Link billing and plan usage to a stable turn/request identity with recoverable atomicity | New UUID per retry; plan turns lack request_id (Stage 6) |
-| F5 | Move extraction, embedding sync, and index sync off the user-facing critical path | Extraction awaited before 200 (Stage 2) |
+| F5 | Move extraction, embedding sync, and index sync **execution** off the user-facing critical path while **registering** that work durably before client success | Extraction awaited before 200 (Stage 2) |
 | F6 | Persist user turns with entitlement ordering that avoids orphan charged states | User message before entitlement; settle before assistant (Stage 2) |
 | F7 | End-to-end turn idempotency so retries do not duplicate messages, charges, or jobs | No turn idempotency (Stages 2, 6) |
 | F8 | Keep assistant, provenance, extraction, and billing reconcilable under partial failure | Soft/hard fail divergence Think vs Chat (Stages 2, 6) |
@@ -134,16 +134,16 @@ Each candidate principle is **accepted**, **modified**, or **rejected**, with au
 
 | # | Principle | Decision | Why | Audit evidence | Cost / tradeoff |
 | --- | --- | --- | --- | --- | --- |
-| P1 | PostgreSQL is the canonical source of truth | **Accept** | Already true for memories, chat, docs; strongest isolation and transactional surface | Stages 1, 3 | Schema design burden in Stage 9 |
-| P2 | External memory systems and vector indexes are derived, never authorities | **Accept** | Mem0 no-id fallback and delete divergence prove authority leaks | Stages 3, 5, 6 | Extra reconciliation latency; rebuild jobs |
+| P1 | PostgreSQL is the canonical authority for memory semantics, ownership, provenance, lifecycle, application state, references, extracted document records, and operational coordination | **Accept / sharpen** | Already true for memories, chat, extracted docs, turns; strongest isolation and transactional surface. Source-file **bytes** may live in Storage with PG holding ownership/metadata/refs | Stages 1, 3 | Schema design burden in Stage 9; Storage/DB dual-write discipline for files |
+| P2 | External memory systems, vector indexes, full-text indexes, and search replicas are derived, never authoritative | **Accept** | Mem0 no-id fallback and delete divergence prove authority leaks | Stages 3, 5, 6 | Extra reconciliation latency; rebuild jobs |
 | P3 | Every memory mutation enters through one application-owned memory boundary | **Accept** | Route-local writes caused asymmetric secret and trust behaviour | Stages 2, 4, 6 | API routes become thin; migration of Think shortcuts |
 | P4 | Language models may propose interpretations but may not directly overwrite trusted canonical memory | **Accept** | LLM/heuristic divergence and active-path trust failures | Stage 4 | Review or deterministic promotion required; slower “instant remember” UX unless Stage 8 defines a safe explicit path |
 | P5 | Deterministic validation and policy run before semantic model processing where possible | **Accept** | Extract finalize’s secret drop works; active paths skip it | Stages 4, 6 | Some false positives may need user override flows (Stage 8) |
 | P6 | User ownership and tenant scope are explicit at every boundary | **Accept / sharpen** | RLS works; parent-child and service-role need explicit ownership checks | Stages 3, 6 | More checks and Stage 9 constraints |
 | P7 | Every durable memory has provenance | **Accept** | Weak provenance today blocks explainability and repair | Stages 4–5 | Storage and UI surface for provenance |
 | P8 | Every side effect is idempotent | **Accept** | Retries double-charge / duplicate messages / jobs | Stages 2, 6 | Requires stable request and job keys |
-| P9 | User-visible response path separated from slower memory-processing work | **Accept** | Extraction on critical path after billed reply | Stage 2 | Eventual consistency for proposed memories; need durable jobs |
-| P10 | No success response for a turn whose assistant result was not durably persisted | **Accept** | Charge-without-reply is High | Stages 2, 6 | Slightly stricter failure surface; may need compensation if provider already returned |
+| P9 | User-visible response path separated from slower memory-processing **execution** | **Accept** | Extraction on critical path after billed reply | Stage 2 | Eventual consistency for proposed memories; requires durable job **registration** before success |
+| P10 | No success response for a replied turn unless the assistant is durable and usage is finalised or a durable usage-repair obligation is recorded | **Accept / sharpen** | Charge-without-reply is High; ambiguous “delayed success” must not reopen the crash window | Stages 2, 6 | Stricter failure surface; Stage 9 defines exact transaction/schema |
 | P11 | Billing and plan usage linked to durable turn via stable request identity | **Accept** | Usage PK helps; plan turns and new UUIDs do not | Stage 6 | Turn record design in Stage 9 |
 | P12 | Retrieved memories and documents are untrusted data, not instructions | **Accept** | Indirect injection surface | Stages 5–6 | Prompt/layout redesign in Stage 12; models may still misbehave (**Unknown**) |
 | P13 | Sensitive-data disclosure is policy-controlled before external send | **Accept** | Sensitive active memories sent freely today | Stage 6 | Possible reduced personalization when policy withholds |
@@ -190,7 +190,7 @@ One Next.js application + PostgreSQL; clear application services for turns, inge
 | User isolation | Strong — keep RLS user clients; scoped service role |
 | Failure atomicity | Strong — turn/usage coordination and durable work in one DB |
 | Idempotency | Strong — shared request/job keys |
-| Latency | Strong — async post-response processing (P9) |
+| Latency | Strong — durable registration before success; async post-response **execution** (P9) |
 | Operational complexity | Moderate — still one deployable; jobs need a runner |
 | Cost | Proportionate to stack; no new distributed infra |
 | Testability | Strong — services unit-testable without HTTP routes |
@@ -267,12 +267,12 @@ flowchart LR
 | External system | Role in target |
 | --- | --- |
 | Supabase Auth | Identity; session subject for RLS |
-| PostgreSQL | Canonical memory, turns, usage, jobs, review state |
+| PostgreSQL | Canonical authority for memory semantics, ownership, provenance, lifecycle, application state, references, extracted document records, turns, usage, jobs, review state, and operational coordination |
 | pgvector | Derived vector index inside the same DB |
-| Supabase Storage | Document binaries; not memory authority |
+| Supabase Storage | May remain the **canonical repository for source-file bytes**; PostgreSQL holds authoritative ownership, metadata, and references. Not a memory-semantics authority |
 | Inference providers | Stateless completion; no memory authority |
 | Embedding providers | Rebuildable vectors; versioned |
-| Optional Mem0 / similar | Derived search index only |
+| Optional Mem0 / similar | Derived search index only; non-authoritative |
 | Stripe | Commercial records; deletion coordinator tracks cancel/retain |
 | Vercel / Next.js | Interaction + orchestration + job triggering |
 
@@ -341,25 +341,25 @@ Logical components share one deployable. Deployable vs logical split is in §19.
 | Component | Responsibilities | Must not | Sync vs async |
 | --- | --- | --- | --- |
 | **1. Interaction Layer** | UI submit; API Zod validation; session presentation; response status; review queue UX; provenance display; correction/delete controls | Create canonical memory rows; choose trust; call providers with raw policy decisions; settle usage | Sync (user-facing) |
-| **2. Turn Orchestrator** | Stable turn/request id; authz scope; session ownership; ops/rate/plan/credit gates; history load; ask Retrieval + Context; inference via Provider Gateway; durable user/assistant messages; usage coordination; enqueue post-response jobs; response metadata | Direct canonical memory writes; extraction; embedding rebuild; provider-format parsing; secret trust decisions beyond calling policy ports | Sync for turn; enqueue async |
+| **2. Turn Orchestrator** | Stable turn/request id; authz scope; session ownership; ops/rate/plan/credit gates; history load; ask Retrieval + Context; inference via Provider Gateway; durable user/assistant messages; usage coordination; **durably register** post-response outbox/jobs in the same coordinated commit as assistant (+ usage or usage-repair); return success only after that commit; assemble response metadata | Direct canonical memory writes; extraction; embedding rebuild; provider-format parsing; secret trust decisions beyond calling policy ports; return success before outbox registration | Sync for turn commit; **registers** async work; does not await pipeline execution |
 | **3. Memory Ingestion Gateway** | Sole entry for remember, chat candidates, manual create, onboarding, imports, docs-as-memory-candidates, profile updates, future integrations; ownership; source attribution; secret/sensitive policy; idempotency; provenance; normalize; hand off to processing | Final taxonomy decisions; silent trusted activation of ordinary statements; provider-specific semantics | Sync ack for explicit user actions; processing may continue async |
-| **4. Memory Processing Pipeline** | Candidate detection → interpretation → validation → dedupe → conflict eval → canonical mutation proposal → embed/index update | Auto-activate ordinary inferred facts; mutate without provenance; bypass policy; define Stage 10 algorithms here | Mostly async via durable work |
-| **5. Canonical Memory Store** | PostgreSQL truth for content, ownership, trust/lifecycle, provenance, versions, source links, review state, external-index sync state | Treat embeddings or Mem0 as truth | Transactional with related turn/job rows where required |
-| **6. Derived Index Layer** | Embeddings, FTS, entity/relationship indexes, optional external indexes | Return context without canonical reconcile; own deletion unilaterally | Async rebuild/sync |
+| **4. Memory Processing Pipeline** | Candidate detection → interpretation → validation → dedupe → conflict eval → canonical mutation proposal → embed/index update | Auto-activate ordinary inferred facts; mutate without provenance; bypass policy; define Stage 10 algorithms here | Mostly async via durable work **execution** |
+| **5. Canonical Memory Store** | PostgreSQL truth for content, ownership, trust/lifecycle, provenance, versions, source links, review state, external-index sync state, document metadata/refs | Treat embeddings, Mem0, or Storage bytes as memory-semantics truth | Transactional with related turn/job rows where required |
+| **6. Derived Index Layer** | Embeddings, FTS, entity/relationship **search indexes**, optional external indexes | Return context without canonical reconcile; own deletion unilaterally; decide whether entity/relationship **records** are canonical (Stage 11) | Async rebuild/sync |
 | **7. Retrieval Service** | Scoped request; multi-channel candidates; canonical reconcile; validity filter; conflict-aware selection; provenance; structured candidates | Final weights (Stage 12); prompt formatting; trust activation | Sync on turn path |
 | **8. Context Builder** | Token budget; model limits; separate memory/doc/history; dedupe; conflict representation; sensitivity disclosure; untrusted-data formatting; provenance package | Treat retrieved text as instructions; unbounded packing | Sync on turn path |
 | **9. Provider Gateway** | LM inference, extraction models, embeddings, external memory APIs, BYOK | Define product memory semantics; skip disclosure policy; hide usage | Sync calls with owned timeouts/retries |
 | **10. Review and User Control** | Present uncertain changes; approve/correct/merge/reject/archive/restore/delete; explain remembered and influential items | Silent background activation of contested items | Sync UI; mutations via CMS/MIG |
-| **11. Durable Work** | Outbox/jobs for extract, embed, sync, conflict, summary, deletion, reconcile; idempotent replay; DLQ/manual review | Block HTTP success waiting for full pipeline | Async |
-| **12. Turn / Usage / Billing** | Bind turn id ↔ messages ↔ inference attempts ↔ usage ↔ wallet ↔ plan; client success rules | Settle finally before durable assistant when a reply is owed | Sync within turn transaction/compensation |
+| **11. Durable Work** | Outbox/jobs for extract, embed, sync, conflict, summary, deletion, reconcile, usage repair; **registration** in the turn’s coordinated transaction; idempotent **execution**/replay; DLQ/manual review | Block HTTP success waiting for full pipeline **execution**; treat pre-registration enqueue failure as outbox-retryable | Registration sync with turn commit; **execution** async after response |
+| **12. Turn / Usage / Billing** | Bind turn id ↔ messages ↔ inference attempts ↔ usage ↔ wallet ↔ plan; client success rules (assistant durable + usage finalised or durable usage-repair obligation) | Settle finally before durable assistant when a reply is owed; return success without usage finalise **or** recorded repair obligation | Sync within turn transaction/compensation |
 | **13. Deletion Coordinator** | Tracked deletion across canonical, indexes, Mem0, docs/storage, conversations, BYOK, account, Stripe, retained audits | Untracked fire-and-forget multi-system deletes | Async with visible status |
 | **14. Audit / Observability / Explainability** | Correlation, turn, source, mutation, retrieval, provider, usage, job, deletion events; user-facing provenance | Copy raw private content into ops logs by default | Best-effort append; explainability durable |
 
 ### 7.1 Turn Orchestrator — inside vs outside
 
-**Inside:** request identity; user scope; session ownership validation; maintenance/rate/plan/credit checks; load history; call Retrieval Service; call Context Builder; call Provider Gateway for inference; durable message writes; usage coordination; create post-response jobs; assemble client metadata (including provenance refs).
+**Inside:** request identity; user scope; session ownership validation; maintenance/rate/plan/credit checks; load history; call Retrieval Service; call Context Builder; call Provider Gateway for inference; durable message writes; usage coordination (finalise or record durable usage-repair obligation); **durably register** post-response outbox/jobs; commit the coordinated transaction; assemble client metadata (including provenance refs); return success only after that commit.
 
-**Outside:** memory taxonomy; extraction prompts; embedding generation; Mem0 sync; review approvals; document parsing; Stripe webhooks; admin RBAC (except consuming ops gates).
+**Outside:** memory taxonomy; extraction prompts; embedding generation; Mem0 sync; review approvals; document parsing; Stripe webhooks; admin RBAC (except consuming ops gates); awaiting full memory-pipeline **execution**.
 
 ### 7.2 Memory Processing Pipeline — stage nature
 
@@ -381,18 +381,27 @@ Logical components share one deployable. Deployable vs logical split is in §19.
 
 ```mermaid
 flowchart LR
-  subgraph Canonical["Canonical PostgreSQL"]
+  subgraph Canonical["Canonical PostgreSQL authority"]
     Msg[Messages]
     Mem[Memory content + trust + provenance]
-    Doc[Documents + chunk text]
+    DocMeta[Document records + ownership + refs]
+    Chunk[Extracted document chunk text]
     Turn[Turn + usage + plan]
     Jobs[Deletion and work jobs]
+  end
+
+  subgraph Bytes["Canonical source-file bytes"]
+    Stor[Supabase Storage object bytes]
   end
 
   subgraph Derived["Derived and rebuildable"]
     Emb[Embeddings + version]
     FTS[Full-text index]
-    Ent[Entity / relationship indexes]
+    EntIdx[Entity / relationship search indexes]
+  end
+
+  subgraph Deferred["Deferred to Stage 11"]
+    EntRel[Entity / relationship record canonicity]
   end
 
   subgraph External["External replicas"]
@@ -408,42 +417,47 @@ flowchart LR
   Msg --> Mem
   Mem --> Emb
   Mem --> FTS
-  Mem --> Ent
+  Mem --> EntIdx
   Mem --> Mem0
-  Doc --> Emb
+  DocMeta --> Stor
+  DocMeta --> Chunk
+  Chunk --> Emb
   Mem --> Score
-  Doc --> Score
+  Chunk --> Score
   Score --> Ctx
   Mem --> UI
   Ctx --> UI
   Mem0 -.->|reconcile before context| Mem
   Emb -.->|never authority| Mem
+  EntIdx -.->|never authority for records| EntRel
 ```
 
 | Information | Class | Notes |
 | --- | --- | --- |
-| Raw user message | **Canonical** | Durable conversation record |
+| Raw user message | **Canonical** | Durable conversation record (PostgreSQL) |
 | Assistant response | **Canonical** | Required for successful replied turns |
-| Canonical memory content | **Canonical** | PostgreSQL authority |
+| Canonical memory content | **Canonical** | PostgreSQL authority for semantics |
 | Memory trust / lifecycle state | **Canonical** | Exact names deferred (Stage 8) |
 | Provenance (source message/doc, actor, policy version) | **Canonical** | Required on mutations |
 | Extraction candidate | **Canonical operational proposal** | Durable proposal/review artifact; not yet trusted memory |
 | Embedding | **Derived and rebuildable** | Versioned; never sole authority |
-| Full-text index | **Derived and rebuildable** | |
-| Entity link | **Derived** (future Stage 11); rebuildable from canonical | Graph DB not required |
-| Relationship edge | **Derived** (future Stage 11); rebuildable | |
+| Full-text index | **Derived and rebuildable** | Non-authoritative |
+| Entity / relationship **search indexes** | **Derived and rebuildable** | Rebuildable retrieval aids; never sole authority |
+| Entity records / relationship records | **Deferred (Stage 11)** | Whether Cortaix has canonical entity records, canonical relationship records, inferred relationships, or a mixture is **not** decided here. User-confirmed or provenance-bearing relationships must **not** be ruled non-canonical in Stage 7. Final graph representation is deferred. |
 | Retrieval score | **Operational telemetry / ephemeral** | May be stored on provenance snapshot |
 | Context package | **Ephemeral + optional durable snapshot** | Snapshot supports explainability |
 | Provider response metadata | **Operational telemetry** | No raw prompt bodies by default |
 | Usage event | **Canonical commercial** | Linked to turn id |
 | Wallet ledger | **Canonical commercial** | |
 | Plan counter | **Canonical commercial** | Must reconcile to turn id |
-| External Mem0 entry | **External replica / derived index** | Reconcile before context use |
-| Document source file | **Canonical binary + metadata** | Storage + DB metadata |
-| Document chunk | **Canonical excerpt + derived embedding** | Content canonical for that chunk; embedding derived |
+| External Mem0 entry | **External replica / derived index** | Non-authoritative; reconcile before context use |
+| Document source-file bytes | **Canonical bytes in Storage** (allowed) | Supabase Storage may remain the canonical repository for source-file bytes |
+| Document ownership, metadata, and storage references | **Canonical (PostgreSQL)** | Authoritative ownership, metadata, and refs live in PostgreSQL |
+| Extracted document / chunk records | **Canonical (PostgreSQL)** | Extracted text and document records are application state under PG authority |
+| Document chunk embedding | **Derived and rebuildable** | Never sole authority |
 | Summary | **Derived** | Rebuildable; not a replacement for sources |
 | Audit event | **Operational telemetry** | Prefer ids/metadata over raw private text |
-| Deletion job | **Canonical operational** | Tracked until terminal |
+| Deletion / outbox job row | **Canonical operational** | Tracked until terminal; registration precedes client success for turn-triggered work |
 | User-facing provenance view | **User-facing projection** | Built from canonical provenance + retrieval decisions |
 | `message_context`-like influence record | **Canonical explainability** | Survives as durable “what influenced this reply” |
 
@@ -479,24 +493,30 @@ sequenceDiagram
   TO->>CB: Build bounded untrusted context
   TO->>PGW: Inference (disclosure policy applied)
   PGW-->>TO: Assistant result + provider meta
+  Note over TO,DW: Coordinated durable commit (before client success)
   TO->>CMS: Durably persist assistant result
-  TO->>TUB: Finalize usage and plan against turn id
-  TO-->>IL: Success only if assistant durable
+  TO->>TUB: Finalize usage/plan OR record durable usage-repair obligation
+  TO->>DW: Durably register post-response memory jobs (outbox)
+  TO->>CMS: Commit coordinated transaction
+  TO-->>IL: Success only after durable assistant + usage finalise-or-repair + job registration
   IL-->>U: Reply + provenance refs
-  TO->>DW: Enqueue memory processing jobs
+  Note over DW: Asynchronous execution after response
+  DW->>DW: Execute registered jobs asynchronously
 ```
 
 ### 9.2 Ordering decisions
 
 | Question | Decision | Rationale |
 | --- | --- | --- |
-| Persist user message before entitlement? | **No for billed inference turns** — register an idempotent turn intent first; entitlement/plan/credit gates before durable user-message commit that will appear as a completed conversational turn. A rejected turn may record a non-conversational denial artifact if needed for audit, but must not create orphan “user spoke, nothing answered” history by default. | Stage 2 orphans on 402 (F6) |
+| Persist user message before entitlement? | **No for billed inference turns** — register an idempotent turn intent first; entitlement/plan/credit gates before durable user-message commit that will appear as a completed conversational turn. A denied turn may record a non-conversational denial artifact if needed for audit, but must not create orphan “user spoke, nothing answered” history by default. | Stage 2 orphans on 402 (F6) |
 | Retrieval before or after durable turn registration? | **After** turn record exists (idempotent identity), **before** inference; retrieval uses the turn id for provenance. | Correlate retrieval to turn (Stage 6 correlation gaps) |
-| Usage settlement and assistant persistence one transaction? | **Prefer one DB transaction or equivalent transactional outbox compensation** so usage cannot finalize without durable assistant for replied turns. | Stage 6 High charge-without-reply |
-| Which failures return error? | Auth, ownership, entitlement, rate (per explicit policy), inference failure after retries, assistant persist failure, disclosure policy hard-block | User must not see success without durability (P10) |
+| Usage settlement and assistant persistence one transaction? | **Prefer one coordinated DB transaction** (exact SQL deferred to Stage 9) so a replied turn cannot succeed unless assistant is durable and usage is finalised **or** a durable idempotent usage-repair obligation is recorded with the turn. | Stage 6 High charge-without-reply; closes ambiguous “5xx or delayed success” |
+| When is post-response memory work registered vs executed? | **Registration** of required outbox/job rows happens **in the same coordinated commit** as assistant (+ usage finalise-or-repair), **before** client success. **Execution** remains asynchronous after the response. | Prevents crash window where success returns but memory work was never created |
+| Which failures return error? | Auth, ownership, entitlement, rate (per explicit policy), inference failure after retries, assistant persist failure, failure to either finalise usage **or** record a durable usage-repair obligation, failure to **register** required outbox/jobs before commit, disclosure policy hard-block | User must not see success without durability (P10) |
 | Which degrade gracefully? | Non-critical derived retrieval channels; document miss; optional external index down → fall back to canonical-only retrieve; soft telemetry | Preserve answer path |
 | Explicit remember synchronous ack? | **Yes** — Gateway returns durable acknowledgement that intake was accepted under policy; final trusted activation may still be sync or async per Stage 8, but never silent. | User trust (Stage 4 explicit UX worth preserving) |
-| Post-response jobs safely run more than once? | **Yes** — jobs must be idempotent; replay must not duplicate canonical effects | Stage 6 retries |
+| Post-response jobs safely run more than once? | **Yes** — once registered, job **execution** must be idempotent; replay must not duplicate canonical effects | Stage 6 retries |
+| Client retry with same turn identity? | **Must** return or reconcile to the same durable outcome without duplicate messages or charges | Stages 2, 6 (F7, X6) |
 
 ### 9.3 Failure-boundary table (target)
 
@@ -512,11 +532,21 @@ sequenceDiagram
 | Context build fail | Error | 5xx | User turn may exist unfinished | No settle | Yes with same turn id |
 | Inference fail | Error | 5xx | Unfinished turn | No final settle | Yes same turn id |
 | Assistant persist fail | Error | 5xx | Compensation: do not finalize billing; mark turn failed | Not final | Yes same turn id |
-| Usage finalize fail after assistant | Recoverable | 5xx or delayed success only after repair job | Assistant exists; usage repair job | Must converge to one | Replay settle idempotent |
-| Enqueue memory job fail | Soft then retry | Success already returned if assistant+usage OK | Outbox retry | Unaffected | Job replay |
-| Async processing fail | Invisible to turn | Review/ops surface | Candidate/job DLQ | Unaffected | Replay |
+| Usage finalize fail after assistant (before success) | Recoverable within commit rules | **No success** until usage is finalised **or** a durable idempotent usage-repair obligation is atomically recorded with the turn | Assistant + repair obligation (if used) | Must converge to one | Same turn id; settle/repair idempotent |
+| Required outbox/job **registration** fail (before row exists) | Hard for replied turns | **No success** — transaction must not commit as successful replied turn | No successful replied-turn commit; **not** retryable by an outbox that was never written | Not final | Same turn id after repair |
+| Crash after commit, before HTTP response | Transport / client timeout | Client may retry with same turn id | Assistant + usage finalise-or-repair + registered jobs already durable | Per committed turn | Yes — reconcile to same outcome |
+| Async job **execution** fail | Invisible to turn success | Review/ops surface | Registered job → retry / DLQ | Unaffected | Job replay (idempotent) |
 
-**Architectural decision:** HTTP success for a replied turn requires durable assistant persistence and finalized-or-recoverably-recorded usage bound to the turn id.
+**Architectural decision:** A replied turn may return success only when:
+
+1. The assistant result is durably persisted, and
+2. Usage and plan effects have been finalised exactly once, **or** a durable, idempotent usage-repair obligation has been atomically recorded with the turn, and
+3. Required post-response memory work has been **durably registered** in the PostgreSQL outbox / job layer, and
+4. The coordinated database transaction has committed.
+
+Job **execution** remains asynchronous after the response. Exact transaction and schema remain **Deferred** to Stage 9. Client retry with the same turn identity must return or reconcile to the same durable outcome without duplicate messages or charges.
+
+**Distinction:** Durable **registration** (outbox/job row exists in the committed turn transaction) is not the same as asynchronous **execution** (worker later processes that row). An enqueue failure **before** the outbox row exists cannot be described as retryable by that same outbox.
 
 ---
 
@@ -534,7 +564,8 @@ sequenceDiagram
   participant RUC as Review Control
   participant AUE as Audit/Explain
 
-  TO->>DW: Enqueue job(turn_id, user_id, source_message_id, idempotency_key)
+  Note over TO,DW: Job already registered in turn commit; this is execution
+  DW->>DW: Claim registered job(turn_id, user_id, source_message_id, idempotency_key)
   DW->>MIG: Deliver intake (or TO already registered intake)
   MIG->>MIG: Policy, normalize, provenance
   MIG->>MPP: Candidates
@@ -545,7 +576,7 @@ sequenceDiagram
   else Deterministic safe mutation allowed by Stage 8 policy
     MPP->>CMS: Apply canonical mutation with provenance
   end
-  MPP->>DIL: Embed + sync derived indexes
+  MPP->>DIL: Embed + sync derived indexes (incl. entity/relationship search indexes)
   DIL-->>CMS: Record index sync state / version
   MPP->>AUE: Mutation and job events
   DW->>DW: Mark job succeeded or DLQ
@@ -553,10 +584,12 @@ sequenceDiagram
 
 **Invariants for async path**
 
+- Jobs are **registered** before client success; this sequence describes **execution**.
 - Jobs carry `user_id`, `turn_id` / `source_id`, and idempotency key.
 - Replay is safe: same key → same canonical effect.
 - External index updates happen **after** canonical write intent is recorded; failures leave sync state `pending`/`failed`, never “remote-only truth.”
 - Ordinary conversational extraction **must not** auto-activate trusted memory (**Architectural decision**; aligns with M2). Exact promotion rules are **Deferred** to Stage 8.
+- Entity/relationship **search-index** updates are derived; whether entity/relationship **records** are canonical is **Deferred** to Stage 11.
 
 ---
 
@@ -564,19 +597,27 @@ sequenceDiagram
 
 **Architectural decision:** Prefer a **PostgreSQL-backed outbox / job table** initially. External queues are deferred until operational evidence justifies them (P18).
 
+### Registration vs execution
+
+| Concern | Rule |
+| --- | --- |
+| **Registration** | Required post-response memory work is written as outbox/job rows in the **same coordinated transaction** as the durable assistant (and usage finalise-or-repair) for replied turns. Registration completes **before** client success. |
+| **Execution** | Workers claim and process registered rows **asynchronously after** the response. Execution failure does not unwind a successful replied turn. |
+| Pre-registration failure | If the outbox/job row was **never written**, that failure is **not** retryable by “the same outbox.” The turn must not return success; recovery uses the same turn identity, not a phantom outbox replay. |
+
 ### Conceptual model (no tables)
 
 | Concern | Target rule |
 | --- | --- |
 | Job ownership | Every job has verified `user_id` (and later workspace id only if Stage 8/9 introduces scoped memory — default personal) |
 | Idempotency | Unique natural key per (type, subject, content revision) |
-| Retry state | `pending → running → succeeded \| failed → dead_letter` |
+| Retry state | `pending → running → succeeded \| failed → dead_letter` (job operational states; not Stage 8 memory lifecycle names) |
 | Dead-letter | Manual review / ops; no silent drop of deletion or billing repair jobs |
 | Observability | Job id correlated to turn id; metrics without raw content |
 | Safe replay | Handlers check canonical state before mutating |
-| Relationship to transactions | Producer writes job row in the same transaction as the triggering canonical event when possible (transactional outbox pattern) |
+| Relationship to transactions | Producer writes job row in the same transaction as the triggering canonical event (**transactional outbox**); client success follows commit |
 
-**Work types (conceptual):** extraction, validation, conflict analysis, embedding rebuild, external index sync, summary refresh, deletion steps, billing repair, reconciliation sweeps.
+**Work types (conceptual):** extraction, validation, conflict analysis, embedding rebuild, external index sync, summary refresh, deletion steps, billing/usage repair, reconciliation sweeps.
 
 **Runner shape:** scheduled or request-triggered worker compatible with Vercel (cron / queue-less poller / `waitUntil`-style continuation). Exact mechanism is operational, not a new distributed bus.
 
@@ -610,18 +651,24 @@ flowchart LR
 
 1. Every conversational attempt has a **stable turn request id** (client-supplied idempotency key validated per user, or server-issued and returned for retries).
 2. Inference attempts are children of the turn; provider failover shares the turn id.
-3. **Client success ⇒ assistant durable** for replied turns.
-4. **Usage finalization and plan consumption reconcile to exactly one durable turn** (credits and plan counters share the turn identity story; plan recording gains idempotency).
-5. Memory jobs enqueue with the same turn id after success path.
-6. Recoverable states explicitly modeled:
+3. **Client success for a replied turn requires:**
+   - durable assistant persistence, and
+   - usage and plan effects finalised exactly once, **or** a durable, idempotent usage-repair obligation atomically recorded with the turn, and
+   - required post-response memory work **durably registered** in the outbox/job layer, and
+   - the coordinated database transaction committed.
+4. **Usage finalization and plan consumption reconcile to exactly one durable turn** (credits and plan counters share the turn identity story; plan recording gains idempotency). Exact transaction and schema are **Deferred** to Stage 9.
+5. Memory job **registration** shares the turn id and the success-path commit; job **execution** runs asynchronously after the response.
+6. Client retry with the same turn identity must return or reconcile to the **same durable outcome** without duplicate messages or charges.
+7. Recoverable states explicitly modeled:
    - Charged but no durable answer → **forbidden as terminal**; repair rolls back or refunds/compensates and marks turn failed.
-   - Durable answer with missing usage → usage repair job.
+   - Durable answer with missing usage finalisation → allowed to succeed **only if** a durable usage-repair obligation was recorded in the same commit; repair then converges exactly once.
    - Double charge on retry → prevented by turn-id idempotency.
    - Plan-turn double count → prevented by turn-id idempotency.
    - Duplicate assistant messages → prevented by turn uniqueness.
-   - Duplicate extraction jobs → prevented by job idempotency keys.
+   - Duplicate extraction jobs → prevented by job idempotency keys once registered.
+   - Failure to register required jobs before the outbox row exists → **no client success**; not outbox-retryable until a row is written.
 
-**Tradeoff:** Slightly more complex turn state machine than today’s fire-and-forget route. Accepted to close Stage 6 High billing integrity gaps.
+**Tradeoff:** Slightly more complex turn state machine than today’s fire-and-forget route. Accepted to close Stage 6 High billing integrity gaps and the post-success enqueue crash window.
 
 **Deferred:** Exact SQL transaction function and ledger schema (Stage 9).
 
@@ -776,10 +823,10 @@ Later stages and implementation PRs must preserve:
 2. Every canonical memory mutation has a verified owner and provenance.
 3. Every conversation turn has a stable idempotency identity.
 4. Every assistant response returned as successful is durably stored.
-5. Billing and plan effects can be reconciled to exactly one durable turn.
-6. Replaying asynchronous work does not duplicate canonical effects.
+5. A replied turn returns success only when usage and plan effects are finalised exactly once **or** a durable idempotent usage-repair obligation is recorded with the turn; billing and plan effects reconcile to exactly one durable turn.
+6. Required post-response memory work is **durably registered** (outbox/job) before client success; **execution** is asynchronous and replaying it does not duplicate canonical effects. Pre-registration enqueue failure is not retryable by a non-existent outbox row.
 7. External index results are reconciled against canonical state before model context.
-8. Deleted, rejected, expired, or otherwise invalid memory cannot enter model context.
+8. Memory that is not retrieval eligible under its canonical lifecycle, validity, and policy rules cannot enter model context.
 9. Untrusted memory or document text cannot change system policy.
 10. Sensitive-data disclosure is decided before provider transmission.
 11. User A cannot attach child records to User B’s parent objects.
@@ -796,6 +843,8 @@ Later stages and implementation PRs must preserve:
 22. Rate-limit and operational-control failures follow an explicit product policy; accidental fail-open is not an invariant of the platform.
 23. Canonical memory content changes invalidate or version derived embeddings before those embeddings are trusted for retrieval.
 24. Cross-user content isolation under RLS for normal product paths must not regress below today’s verified guarantee (X10).
+25. PostgreSQL remains the canonical authority for memory semantics, ownership, provenance, lifecycle, application state, references, extracted document records, and operational coordination; Storage may hold source-file bytes under PG ownership/metadata/refs; external memory systems and search indexes remain derived.
+26. Entity and relationship **search indexes** are derived; whether entity/relationship **records** are canonical is deferred to Stage 11 and must not be prejudged here.
 
 ---
 
@@ -857,16 +906,17 @@ The target must **coexist** with the current system without a big-bang cutover. 
 
 | Current asset | Coexistence rule | Protection that must stay active |
 | --- | --- | --- |
-| Existing memories | Remain canonical rows; new fields additive | RLS; active-only retrieval filters |
+| Existing memories | Remain canonical rows; new fields additive | RLS; retrieval eligibility filters (current statuses such as proposed/active may still apply during coexistence; final Stage 8 names not established here) |
 | Existing embeddings | Treated as derived; may lack version → rebuild when versioning lands | Null embedding fail-closed in `match_memories` |
 | Message history | Remains; turn ids may wrap existing sessions gradually | Session ownership checks when introduced |
-| Review queue | Continues for proposed; Gateway feeds same or compatible states | Proposed never retrieved |
+| Review queue | Continues for proposed; Gateway feeds same or compatible states | Items not retrieval-eligible under current rules stay out of retrieval |
 | `message_context` | Keep as influence record; enrich later | Do not drop provenance writes |
 | Mem0 mirrors | Remain optional derived; tighten reconcile before context | User-scoped Mem0 filters; insert rollback patterns |
 | `/api/think` | Facade over Turn Orchestrator during migration | Auth, maintenance, RLS clients |
 | `/api/chat` | Same orchestrator; avoid new divergent features | Same |
 | RLS | Untouched in strength; Stage 9 may add parent-child checks | `auth.uid()` policies and match RPCs |
 | Billing/usage data | Existing `request_id` usage rows remain; new turns add stronger linkage | Usage PK idempotency intent |
+| Document storage objects | Bytes may remain in Storage; PG continues to own metadata/refs | Storage policies + document row ownership |
 
 **Must not weaken during migration:** RLS isolation; proposed-not-retrieved; extract-path secret drop (until Gateway supersedes with universal policy); Mem0 user filters; Stripe webhook claim pattern.
 
@@ -880,10 +930,14 @@ The target must **coexist** with the current system without a big-bang cutover. 
 | Make Mem0 the source of truth | **Reject** | Divergence, no-id fallback, delete modes (Stages 3–6) |
 | Let extraction model directly update trusted memory | **Reject** | P4; Stage 4 divergence |
 | Keep extraction synchronous on response path | **Reject** | F5; Stage 2 critical-path risk |
+| Return success before durable outbox/job registration | **Reject** | Crash window after assistant+usage commit with no memory work |
+| Treat “5xx or delayed success” as an open choice after assistant persist | **Reject** | Success only when assistant durable and usage finalised or usage-repair obligation recorded |
 | Store all profile facts in every prompt | **Reject** | R2; Stage 5 High |
-| Add a graph database immediately | **Reject** | P18; Stage 11 can use relational derived edges first |
+| Add a graph database immediately | **Reject** | P18; Stage 11 decides entity/relationship record canonicity and representation; search indexes may be relational/derived without choosing a graph DB |
+| Classify all entity links and relationship edges as non-canonical now | **Reject** (premature) | Search indexes are derived; record canonicity deferred to Stage 11 |
 | Add a dedicated vector database immediately | **Reject** | pgvector sufficient; embeddings are derived |
 | Use an external queue immediately | **Reject** (defer) | Start with Postgres outbox; revisit on evidence |
+| Declare PostgreSQL the sole repository for source-file bytes | **Reject** (overbroad) | Storage may remain canonical for bytes; PG owns semantics, ownership, metadata, refs |
 | Store only summaries instead of source memories | **Reject** | Breaks explainability and correction (product intent) |
 | Treat documents as memories | **Reject** as identity merge | Documents remain separate sources; may produce memory *candidates* via Gateway |
 | Let every explicit remember bypass review | **Defer / modify** | Explicit UX preserved; **must not** bypass secret policy; trust promotion rules → Stage 8 |
@@ -896,12 +950,13 @@ The target must **coexist** with the current system without a big-bang cutover. 
 
 | Risk / tradeoff | Class | Mitigation direction (not implementation) |
 | --- | --- | --- |
-| Eventual consistency for proposed memories after reply | Tradeoff | Durable jobs + review UI freshness |
-| Stricter success criteria may increase visible 5xx vs silent soft-fail | Tradeoff | Better than charge-without-reply |
+| Eventual consistency for proposed memories after reply | Tradeoff | Durable job registration before success + review UI freshness |
+| Stricter success criteria may increase visible failures vs silent soft-fail | Tradeoff | Better than charge-without-reply or success-without-registered memory work |
 | Explicit remember feels slower if review required | Tradeoff | Stage 8 may define safe sync trusted path for explicit acts after policy |
 | Outbox runner operational burden | Tradeoff | Still cheaper than distributed bus |
 | Dual-write period during migration | Risk | Facades + invariants tests; Stage 16 |
-| Over-design before Stage 8 taxonomy | Risk | This doc forbids finalizing taxonomy |
+| Over-design before Stage 8 taxonomy | Risk | This doc forbids finalizing taxonomy / lifecycle names |
+| Premature entity graph decisions | Risk | Stage 11 owns record canonicity and representation |
 | Fail-closed rate limits may hurt availability | Tradeoff | Explicit degraded mode better than silent open |
 | Disclosure policy may reduce personalization | Tradeoff | User control surfaces |
 
@@ -912,9 +967,9 @@ The target must **coexist** with the current system without a big-bang cutover. 
 | Topic | Stage |
 | --- | --- |
 | Memory taxonomy; trust levels; lifecycle state names; explicit vs inferred; temporary validity; supersede/contradiction semantics | **8** |
-| Exact tables, columns, constraints, indexes, RLS policy SQL, service interfaces, RPCs, transactions | **9** |
+| Exact tables, columns, constraints, indexes, RLS policy SQL, service interfaces, RPCs, transactions (including usage finalise vs usage-repair obligation schema) | **9** |
 | Extraction prompts; deterministic validation details; dedupe algorithms; correction detection; conflict analysis; confidence formulas | **10** |
-| Entity types; relationship types; entity resolution; graph representation | **11** |
+| Entity types; relationship types; entity resolution; whether entity/relationship records are canonical, inferred, or mixed; graph representation | **11** |
 | Hybrid retrieval; reranking weights; thresholds; token budgets; conflict packing; final prompt formatting | **12** |
 | Build vs reuse Mem0 / Letta / LangMem / LangGraph / other | **13** |
 | Exact fail-closed vs degraded knobs for rate/ops | Product/ops policy alongside Stage 9 |
@@ -927,30 +982,32 @@ The target must **coexist** with the current system without a big-bang cutover. 
 
 | # | Decision | Outcome |
 | --- | --- | --- |
-| 1 | Canonical source of truth | **PostgreSQL** |
-| 2 | External memory providers | **Optional derived indexes**, never authoritative |
+| 1 | Canonical authority for memory semantics / ownership / provenance / lifecycle / application state / references / extracted docs / operational coordination | **PostgreSQL** |
+| 1b | Canonical repository for source-file bytes | **Supabase Storage may remain**; PostgreSQL holds ownership, metadata, and references |
+| 2 | External memory providers, vector indexes, FTS, search replicas | **Optional derived indexes**, never authoritative |
 | 3 | Modular monolith vs distributed | **Modular monolith (Option B)** |
-| 4 | Post-response processing | **Postgres-backed durable work / outbox** |
+| 4 | Post-response processing | **Postgres-backed durable work / outbox**: **register before client success**; **execute asynchronously after** |
 | 5 | Think + Chat | **Converge on one Turn Orchestrator** |
 | 6 | Explicit remember bypass processing? | **No bypass of Gateway policy/processing**; Stage 8 may allow faster trust promotion after policy |
 | 7 | Ordinary statements → trusted memory? | **No** by default |
 | 8 | Success requires durable assistant? | **Yes** for replied turns |
-| 9 | When usage becomes final | **With durable assistant**, via turn-linked finalize/repair |
-| 10 | Idempotency propagation | **Stable turn request id** across messages, usage, jobs |
+| 9 | When usage becomes final / when success is allowed | Success only if usage/plan finalised exactly once **or** durable idempotent usage-repair obligation recorded with the turn; exact schema → Stage 9 |
+| 10 | Idempotency propagation | **Stable turn request id** across messages, usage, jobs; retries reconcile to same outcome |
 | 11 | Retrieval reconciliation | **Mandatory against canonical** before context |
 | 12 | Profile always-include channel? | **No** — ranked/candidate channel |
 | 13 | Retrieved content in instruction hierarchy | **Untrusted data**, not system policy |
 | 14 | Secret/sensitive policy enforcement | **Ingestion Gateway** (+ disclosure gate before providers) |
 | 15 | Providers receive raw sensitive context? | **Only if disclosure policy allows** |
-| 16 | Memory processing blocks chat? | **No** (async after success path) |
+| 16 | Memory processing blocks chat? | **No** — execution is async after success; registration is part of the success commit |
 | 17 | Embeddings canonical? | **No — rebuildable derived** with version id |
 | 18 | Provider switching / vector spaces | **Never mix incompatible spaces** |
 | 19 | Deletion completion | **Tracked stateful workflow to terminal status** |
 | 20 | Cross-user parent-child | **Prevent via ownership checks + Stage 9 constraints** |
 | 21 | Workspaces and memory | **Do not broaden personal memory access** |
 | 22 | User-facing provenance | **Produced by retrieval/context + durable influence records** |
-| 23 | Failure repair | **Idempotent job replay + billing repair** |
-| 24 | Intentionally deferred | **Stages 8–13 list in §23** |
+| 23 | Failure repair | **Idempotent job replay + billing/usage repair**; pre-registration failures are not outbox-retryable |
+| 24 | Entity/relationship record canonicity | **Deferred to Stage 11**; only search indexes classified as derived here |
+| 25 | Intentionally deferred | **Stages 8–13 list in §23** |
 
 ---
 
@@ -961,18 +1018,19 @@ The target must **coexist** with the current system without a big-bang cutover. 
 | 1 | Resolves or structurally contains High / Conditional High from Stages 2–6 | **Met** — see §2 and invariants |
 | 2 | Preserves RLS multi-user isolation | **Met** — P17, invariants 17–18, 24 |
 | 3 | Removes route-local trust decisions from conversation endpoints | **Met** — Gateway + Orchestrator |
-| 4 | PostgreSQL canonical authority | **Met** |
+| 4 | PostgreSQL canonical authority for memory semantics and coordination | **Met** — Storage may hold source-file bytes under PG ownership/metadata/refs |
 | 5 | Multiple model/embedding/memory providers | **Met** — Provider Gateway |
-| 6 | Memory processing off critical path | **Met** — durable work |
-| 7 | Idempotent recoverable side effects | **Met** — turn + job ids |
+| 6 | Memory processing off critical path | **Met** — register before success; execute async after |
+| 7 | Idempotent recoverable side effects | **Met** — turn + job ids; usage finalise-or-repair |
 | 8 | Provenance and explainability possible | **Met** |
-| 9 | Future entities/relationships without graph DB now | **Met** — derived relational indexes |
+| 9 | Future entities/relationships without forcing a graph DB or premature non-canonical ruling | **Met** — search indexes derived; record canonicity deferred to Stage 11 |
 | 10 | Hybrid retrieval without premature weights | **Met** — Retrieval Service boundary only |
 | 11 | Safe deletion / external cleanup path | **Met** — Deletion Coordinator |
 | 12 | No unnecessary infrastructure | **Met** — Option B + Postgres jobs |
 | 13 | Coexist with current application | **Met** — §20 |
 | 14 | Later-stage decisions remain open | **Met** — §23 |
 | 15 | Specific enough for Stages 8–9 | **Met** — components, invariants, data matrix, sequences |
+| 16 | No success-before-outbox crash window | **Met** — §9, §11, §12 |
 
 ---
 
@@ -1040,7 +1098,7 @@ No migrations, no column lists, no extraction algorithms, no retrieval weights, 
 | Class | Examples in this document |
 | --- | --- |
 | Verified audit requirement | §2 tables F1–X10 |
-| Architectural decision | Option B; Postgres canonical; async processing; turn idempotency; profile not always-include |
+| Architectural decision | Option B; PostgreSQL memory-semantics authority; Storage may hold source-file bytes; async job execution after durable registration; turn idempotency; profile not always-include |
 | Tradeoff | Eventual proposed memory; stricter success; outbox ops |
 | Assumption | Single-deployable scale remains sufficient |
 | Deferred decision | §23 Stages 8–13 |
