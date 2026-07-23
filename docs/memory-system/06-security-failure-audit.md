@@ -29,13 +29,13 @@ The highest material risks are **not** a demonstrated cross-tenant memory dump. 
 1. **Active-path secret storage** — `scanForForbiddenSecrets` runs only inside automatic extraction `finalize`. Statement, remember, manual POST, onboarding, and content PATCH flag via `isSensitive` but still store secrets as **`active`**.
 2. **Indirect prompt injection / model trust** — retrieved memory and document text are interpolated **verbatim** into the **system** prompt under soft fences; exploitability is model-dependent; **no live exploit is demonstrated** in-repo.
 3. **Billing / persistence non-atomicity** — `settleUsage` runs inside `runInference` **before** assistant-message persistence; a post-settle assistant insert failure yields **charged without stored reply**. Plan-turn recording lacks `request_id` idempotency.
-4. **Parent/child integrity gaps** — `chat_messages` RLS checks `user_id` only, not session ownership; a known foreign `sessionId` can accept the attacker’s own messages (session pollution, not content read). `message_context` can attach foreign `memory_id` / chunk FKs under the caller’s `user_id`.
+4. **Parent/child relational integrity gaps** — `chat_messages` INSERT RLS checks the inserted row’s `user_id`, not the parent session owner; a known foreign `sessionId` can accept the attacker’s own message rows. Product SELECT RLS still hides those rows from the session owner (integrity corruption, not a demonstrated confidentiality breach). `message_context` can similarly attach foreign `memory_id` / chunk FKs under the caller’s `user_id`.
 5. **Availability fail-open** — rate limiting and operational-control snapshot loads default to “allow / controls off” on errors, trading safety for uptime.
-6. **External disclosure by design** — non-mock inference sends identity, memories, document excerpts, history, and the user message to providers; Mem0 (if enabled) and OpenAI embeddings (if enabled) receive raw text. Provider retention outside the repo is **Unknown**.
+6. **External disclosure by design** — non-mock inference sends identity, memories, document excerpts, history, and the user message to providers; Mem0 (if enabled) and OpenAI embeddings (if enabled) receive raw text. Provider retention outside the repo is **Unknown**. OpenAI embedding **metering** today applies only to document-upload chunk embedding, not memory create/reembed or retrieval query embeddings.
 
 **Service-role use is extensive** (billing, admin, BYOK, metering, audits, account delete) and is **necessary privileged use** when scoped to a verified session or staff gate. It is **not** classified Critical merely because it bypasses RLS. Residual risk is **app-discipline**: an unscoped or wrong `user_id` filter becomes a concrete cross-user path.
 
-**Safe behaviour worth preserving** includes RLS + `auth.uid()` RPCs, request-scoped user clients, structured identity allowlist + `directIdentityAnswer`, extraction secret drop + sensitive overwrite, proposed-memory review on the auto path, Stripe webhook claim idempotency, usage `request_id` PK, private document storage policies, Mem0 user-scoped search filters, and explicit operational kill-switches (when the snapshot loads successfully).
+**Safe behaviour worth preserving** includes RLS + `auth.uid()` RPCs, request-scoped user clients, structured identity allowlist + `directIdentityAnswer`, extraction secret drop + sensitive overwrite, proposed-memory review on the auto path, Stripe webhook claim idempotency, usage `request_id` PK, private document storage policies, Mem0 user-scoped search filters, Mem0-before-local delete ordering on individual memory delete (when Mem0 is linked), and explicit operational kill-switches (when the snapshot loads successfully).
 
 ---
 
@@ -116,7 +116,8 @@ Cross-cutting:
   • Vercel runtime / logs  ← server console.error, uncaught errors, request metadata
   • Admin console          ← staff JWT + user_roles via service role
   • User export            ← GET /api/export (memories*, profile, doc metadata)
-  • Account deletion       ← Mem0 wipe → storage remove → auth.admin.deleteUser → CASCADE
+  • Account deletion       ← await removeAll → storage remove (ignore errs) → auth.admin.deleteUser → CASCADE
+                              (Mem0 removeAll fail aborts before Auth; Stripe not cancelled)
 ```
 
 ### 3.1 Boundary cards
@@ -129,14 +130,14 @@ Cross-cutting:
 | 4 | Next.js → Data API (service role) | Audits, rate limit, billing, BYOK ciphertext, admin | Service-role key | App filters + staff roles | Env secret must stay server-only | Admin path/body UUIDs (staff) | Most financial writes | Supabase (full) | Audit fail-open | Fail-open on rate/ops snapshot | Admin RLS deny tests |
 | 5 | Postgres RLS | Row predicates | `auth.uid()` | Policies / RPC INVOKER | At-rest **Unknown** (host) | N/A | N/A | DB operators | N/A | Deny | Integration RLS |
 | 6 | Storage | PDF/text objects under `{userId}/…` | JWT or service role | Storage policies | Bucket private | filename, client MIME | path prefix user id | Supabase Storage | Account delete lists paths | Upload fail before row; delete ignores storage err | No document pipeline tests |
-| 7 | Embeddings | Memory/query/chunk text | Platform OpenAI key or local | N/A | TLS to OpenAI | text content | provider choice | OpenAI if configured | Throws body text on error | Embed fail blocks insert; PATCH reembed after content | Local vs OpenAI factory tests limited |
+| 7 | Embeddings | Memory/query/chunk text | Platform OpenAI key or local | N/A | TLS to OpenAI | text content | provider choice | OpenAI if configured | Throws body text on error | Embed fail blocks insert; PATCH reembed after content; **metered only** for document-upload chunks when OpenAI | Local vs OpenAI factory tests limited |
 | 8 | Inference adapters | Full composed messages | Platform or BYOK key | Entitlement / credits | TLS | message, history, stored context | routing, temperature | OpenRouter et al. | Ops events (no prompt body) | Failover; settle after success | Inference / commercial tests |
-| 9 | Mem0 | Memory content + metadata + user_id | `MEM0_API_KEY` | `filters.user_id` | TLS | content | cv_memory_id metadata | Mem0 | Thrown API detail | Insert rollback deletes CV row | `mem0-*.test.ts` |
+| 9 | Mem0 | Memory content + metadata + user_id | `MEM0_API_KEY` | `filters.user_id` | TLS | content | cv_memory_id metadata | Mem0 | Thrown API detail | Insert: rollback CV row on Mem0 fail. Delete: await Mem0 (404 only ignored) before local delete; `removeAll` failure aborts account delete before Auth | `mem0-*.test.ts` |
 | 10 | Stripe | Customer, prices, metadata user id | Webhook signature / secret key | Signature + claim row | TLS | Checkout initiated by user | metadata set server-side | Stripe | Telemetry / webhook logs | Claim/release on fail | Webhook integration |
 | 11 | Vercel logs | Uncaught errors, `console.error` | Platform | Ops access | Platform | May include error.message | request path | Vercel | console | N/A | **Unknown** production log policy |
 | 12 | Admin console | User PII, usage, controls | Session + `user_roles` | `requireApiRole` | Same | target user UUIDs | actor id | Staff browsers | `admin_audit_log` | Role fail → user | Admin auth tests |
 | 13 | Export | memories `*`, profile, doc meta, email | Session | RLS | Download to user | N/A | payload assembly | User device | `data.export` audit | Soft empty arrays | No dedicated export test |
-| 14 | Account delete | Mem0 wipe, storage paths, Auth user | Session + confirm | Self only | Cascades | confirm, scope | admin deleteUser | Mem0, Storage, Auth | `account.delete` then SET NULL audits | Partial orphans if mid-fail | Cascade via `deleteTestUser` only |
+| 14 | Account delete | Await `removeAll` → storage remove (errors ignored) → Auth deleteUser → signOut | Session + confirm | Self only | Cascades after Auth delete | confirm, scope | admin deleteUser | Mem0, Storage, Auth; Stripe **not** cancelled | `account.delete` then SET NULL audits | Mem0 `removeAll` fail aborts before Auth; Mem0 success + Auth fail leaves remote gone/local remain; storage may remain after Auth success; Stripe may stay live | Cascade via `deleteTestUser` only |
 
 ---
 
@@ -146,9 +147,9 @@ Cross-cutting:
 | --- | --- | --- |
 | Unauthenticated internet client | Hit public pages and `/api/*` without cookies | 401 on product APIs; middleware does **not** gate `/api/*` — routes must self-enforce (they do for audited routes) |
 | Authenticated normal user | Own data CRUD, think/chat, upload, export, self-delete | Accidental secret storage; oversharing via retrieval; billed orphan turns |
-| Malicious authenticated user | Craft IDs, adversarial text/docs, flood writes, retry storms | Session pollution; prompt injection against own model; cost/abuse; secret persistence |
-| Cross-account access attempt | Guess/forge UUIDs | RLS blocks reads/updates; residual FK pollution vectors |
-| Submit another user’s resource ID | session / memory / document / message IDs | Read denied; write pollution possible for session/provenance |
+| Malicious authenticated user | Craft IDs, adversarial text/docs, flood writes, retry storms | Parent/child FK integrity corruption; prompt injection against own model; cost/abuse; secret persistence |
+| Cross-account access attempt | Guess/forge UUIDs | RLS blocks reads/updates; residual FK integrity vectors |
+| Submit another user’s resource ID | session / memory / document / message IDs | Read denied; write-side parent/child ownership pollution possible |
 | Adversarial document uploader | Hidden instructions in PDF/text | Chunks enter system prompt verbatim |
 | Adversarial memory storer | Injection / “reveal all” text | Stored active or proposed; retrieved into system |
 | Secrets / third-party PII storer | Passwords, medical, others’ data | Extract path blocks some secrets; active paths do not |
@@ -192,9 +193,9 @@ Cross-cutting:
 2. **Which use request-scoped RLS client?** Think, chat, memories, documents, sessions, search, export, profile, and the user-facing parts of account wipe.
 3. **Which use admin client?** Rate limit, audit, account Auth/storage delete, billing/credits/usage/BYOK/plan/admin console, webhook, provider-ops, operational controls, role lookup.
 4. **Trust client `user_id`?** **No** on product routes inspected. Admin/billing mutations take target user UUIDs under staff gates. Webhook prefers Stripe metadata user id after signature verification.
-5. **Trust client resource IDs without ownership confirm?** **Partially.** Memory/document/session **reads** rely on RLS (safe for confidentiality). **Writes** of messages into a foreign `sessionId` are not blocked by app-level ownership checks; RLS allows insert when `user_id = auth.uid()` regardless of session owner (**Verified** integrity gap from Stage 3).
+5. **Trust client resource IDs without ownership confirm?** **Partially.** Memory/document/session **reads** rely on RLS (safe for confidentiality). **Writes** of messages into a foreign `sessionId` are not blocked by app-level ownership checks; INSERT RLS allows the row when `user_id = auth.uid()` regardless of session owner (**Verified** relational-integrity gap from Stage 3). The foreign session owner still cannot **SELECT** those attacker-owned rows under current product RLS.
 6. **Does RLS block forged ownership?** **Yes** for memories/documents/profile inserts with foreign `user_id` (WITH CHECK). **Verified** in `tests/memory.test.ts`.
-7. **Child rows on another user’s parent?** **Possible** for `chat_messages.session_id` and `message_context` FKs to another user’s memory/chunk if UUID known (**Verified** schema; pollution not content leak).
+7. **Child rows on another user’s parent?** **Possible** for `chat_messages.session_id` and `message_context` FKs to another user’s memory/chunk if UUID known (**Verified** schema; parent/child ownership pollution / integrity corruption — not a demonstrated cross-user confidentiality breach).
 8. **Service-role callers always filter?** **Most call sites filter**; residual risk is discipline. Inventory in §6.
 9. **Admin-role ≠ service role?** **Yes.** `getUserRole` / `requireApiRole` read `user_roles` via service role; role errors fail closed to `"user"`.
 10. **Workspace membership grants memory access?** **No.** Workspaces exist for billing/BYOK adjacency; memories remain user-scoped (Stage 3).
@@ -259,18 +260,18 @@ Factory: `createSupabaseAdminClient()` in `src/lib/supabase/admin.ts` (throws if
 
 | Issue | Impact |
 | --- | --- |
-| Message insert into foreign `session_id` | Attacker’s messages appear in victim session timeline; victim cannot read attacker messages via RLS, but session UX/history contaminated for owner queries that join by session |
-| `message_context` FK to foreign memory/chunk | Hollow/cross provenance under attacker `user_id` |
+| Message insert into foreign `session_id` | **Parent/child ownership pollution.** Attacker who knows B’s session UUID can INSERT their own `chat_messages` row (`user_id = A`) referencing B’s session. **Product reads:** B does **not** see A’s message — SELECT RLS requires `auth.uid() = chat_messages.user_id`. A sees only A’s own rows under that session id. **Not** a demonstrated cross-user confidentiality breach and **not** contamination of B’s normal RLS-scoped timeline. **Consequences:** deleting B’s session cascades and deletes A’s orphaned rows; service-role/admin queries may observe a mixed-user session relationship; analytics or future joins that assume one owner per session may become incorrect |
+| `message_context` FK to foreign memory/chunk | Hollow/cross provenance under attacker `user_id` (integrity, not peer content read via RLS product paths) |
 | Chunk `user_id` vs document `user_id` diverge | `match_document_chunks` filters chunk user only (Stage 3) — requires prior bad write |
 
 ### 7.3 Service-role / Mem0 / export
 
 | Path | Isolation |
 | --- | --- |
-| Service role | Full access; product paths pass session user id |
+| Service role | Full access; product paths pass session user id; may observe mixed-user session FKs from §7.2 |
 | Mem0 search | `filters: { user_id }`; cross-user retrieval **not** established |
 | Mem0 no-`cv_memory_id` fallback | May inject non-canonical **own** remote text; status/expiry reconcile skipped (Stage 5) |
-| Export | Own rows only via RLS; includes embeddings |
+| Export | Own rows only via RLS; `select("*")` includes embedding vectors (data-minimisation / payload concern — §19) |
 
 ---
 
@@ -321,7 +322,7 @@ Indirect injection **surface is verified**. Successful jailbreak against product
 
 | Category | Accept? | Blocked? | Flagged? | Active/proposed | Embedded? | External send? | Model context? | Audit logs? | Server logs? | Export? | Deletion removes all? | Mem0 retain? | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Passwords | Yes on active paths | Extract finalize only | No (forbidden family) | Active if statement/manual | Yes if stored | Inference/Mem0/embed if stored | Yes if retrieved | Metadata ids, not content typically | Unlikely unless error echoes | Yes (`select *`) | DB yes; providers **Unknown** | If mirrored | `redaction`/`extraction` for extract path |
+| Passwords | Yes on active paths | Extract finalize only | No (forbidden family) | Active if statement/manual | Yes if stored | Inference/Mem0/embed if stored | Yes if retrieved | Metadata ids, not content typically | Unlikely unless error echoes | Yes (`select *`, incl. vectors) | DB after Mem0-before-local success; providers **Unknown** | If Mem0 mirrored; delete awaits Mem0 first | `redaction`/`extraction` for extract path |
 | API keys / tokens | Same | Extract patterns | — | Active possible | Yes | Yes | Yes | No key bodies found in audit helpers | Error bodies possible | Yes | Same | Same | Pattern tests |
 | Access tokens | Same | Partial patterns | — | Possible | Yes | Yes | Yes | — | — | Yes | — | — | Partial |
 | Credit-card data | Same | Extract digit/terms | — | Active possible | Yes | Yes | Yes | — | — | Yes | — | — | Pattern tests |
@@ -363,7 +364,7 @@ No sensitivity or expiry filter on Think profile boost; `match_memories` exclude
 | Anthropic | system + messages | Yes | Yes | Yes | Yes | Yes | Yes | — | Platform or BYOK | — | Same |
 | Google | Chat completions shape | Yes | Yes | Yes | Yes | Yes | Yes | — | Platform or BYOK | — | Same |
 | Groq | Same | Yes | Yes | Yes | Yes | Yes | Yes | — | Platform or BYOK | — | Same |
-| OpenAI embeddings | Raw text arrays | Query/memory/chunk text | Memory text | Chunk text | No | No | If embedded | — | `OPENAI_API_KEY` | — | Verified when `EMBEDDING_PROVIDER=openai` |
+| OpenAI embeddings | Raw text arrays | Query/memory/chunk text | Memory text | Chunk text | No | No | If embedded | — | `OPENAI_API_KEY` | — | Verified send when enabled; **metered only** on document-upload chunk path |
 | Local embeddings | None external | N/A | Hash locally | Local | — | — | Stays local | — | N/A | — | Verified |
 | Mem0 | content, metadata, user_id | As memory message | Yes | No (unless also memory) | No | Metadata only | If stored | `user_id` filter | `MEM0_API_KEY` | Hybrid described; no retention SLA | Verified send; **Unknown** retain |
 | Supabase | All app data | Yes | Yes | Yes | Yes | Yes | Yes | RLS / admin | Anon + service | Hosted policy **Unknown** | Verified |
@@ -379,19 +380,19 @@ No sensitivity or expiry filter on Think profile boost; `match_memories` exclude
 
 | Capability | Current behaviour | Gap? |
 | --- | --- | --- |
-| See every stored memory | Vault list; `status != deleted` | Embeddings exposed in API/export |
+| See every stored memory | Vault list; `status != deleted` | List/export `select("*")` returns embedding vectors (unnecessary client exposure) |
 | See proposed | Review queue | OK |
 | Identify creating message | `source_detail` think/chat session tag; not always precise message id | Partial |
 | See memories that influenced answer | API returns `usedMemories`; Thinking UI provenance weaker than ChatView (Stage 5 / README disagreement) | UX gap |
-| Correct memory | PATCH content | Reembed failure inconsistency |
+| Correct memory | PATCH content | Reembed failure inconsistency; reembed not metered |
 | Reject proposed | Review reject | Rejected still blocks exact re-proposal |
 | Archive | Status update / forget ILIKE ≤5 | Soft; proposed untouched by forget |
-| Permanent delete memory | DELETE + Mem0 remove best-effort | `{ok:true}` without row count |
+| Permanent delete memory | Await Mem0 delete (404 ignored; other errors propagate) then Supabase delete | `{ok:true}` without verifying a local row was deleted; Mem0 fail blocks local delete |
 | Delete document + chunks | DELETE storage then row CASCADE | Storage errors ignored |
 | Delete conversation | **No product API** (Stage 3) | Gap |
-| Export data | JSON memories*, profile, doc meta | No messages/chunks/files; includes embeddings |
-| Delete account | Confirm + cascades | No Stripe cancel; Mem0/storage best-effort order |
-| Remove Mem0 copies | `remove` / `removeAll` on delete paths | Failure → orphan remote **Conditional** |
+| Export data | JSON memories*, profile, doc meta | No messages/chunks/files; memories include embedding vectors |
+| Delete account | Audit → await `removeAll` → storage remove → Auth delete → signOut | No Stripe cancel; storage remove results ignored; Mem0 `removeAll` failure aborts before Auth |
+| Remove Mem0 copies | Individual: Mem0-before-local; account: await `removeAll` before Auth | Non-404 Mem0 errors block local cleanup; Mem0 success + later local/Auth fail can leave remote gone / local remain; provider-side retention after success **Unknown** |
 | Remove provider logs | **No** | External **Unknown** |
 | Understand external send | Soft product copy; legal placeholders | Gap |
 | Opt out memory extraction | **No** dedicated opt-out | Gap |
@@ -403,23 +404,47 @@ No sensitivity or expiry filter on Think profile boost; `match_memories` exclude
 
 ## 12. Retention and deletion analysis
 
+### 12.1 Individual memory deletion (Mem0 provider) — **Verified** order
+
+1. Load the canonical Supabase memory (`Mem0MemoryProvider.remove` → `loadRow`).
+2. If a Mem0 id is present in `source_detail`, call and **await** Mem0 `deleteMemory`.
+3. Ignore Mem0 **404** only (`ignoreNotFound: true`); propagate other Mem0 errors.
+4. Route then deletes the Supabase row **only after** `provider.remove` returns successfully.
+5. No automatic retry or compensation if steps diverge after a successful Mem0 delete.
+
+Therefore: a non-404 Mem0 failure **normally prevents** local Supabase deletion. If Mem0 deletion succeeds and the later Supabase deletion fails, the **remote memory is gone while the local row remains**.
+
+(Supabase-only provider: `remove` is a no-op; route deletes the local row directly.)
+
+### 12.2 Full account deletion — **Verified** order
+
+1. Record the deletion audit (`account.delete`).
+2. Call and **await** `MemoryProvider.removeAll` (Mem0: `deleteAllForUser`).
+3. List/remove storage objects (remove results are **ignored**; shallow `list` result discarded).
+4. Call `auth.admin.deleteUser`.
+5. Sign out.
+
+Therefore: with the Mem0 provider, a `removeAll` **failure aborts the route before storage and Auth deletion** (error propagates; account is **not** deleted). If Mem0 cleanup succeeds and Auth deletion later fails, **remote memories may already be deleted while the local account remains**. Storage objects can remain after successful Auth/database deletion because storage removal errors are ignored. Stripe subscriptions are **not** cancelled by the account route and may remain live after the local account is deleted. Treat **Stripe**, **storage**, and **Mem0** as **separate** failure modes. Mem0 partial deletion or provider-side retention after a successful API delete remains **Unknown** without runtime/contractual evidence.
+
+### 12.3 Path table
+
 | Path | Order | Cascades | SET NULL | External calls | Error handling | Retried? | Success before cleanup done? | Orphans possible? | Idempotent? | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Memory hard DELETE | Mem0 remove → DB delete | Provenance memory_id SET NULL | Yes | Mem0 | Throws on DB err; Mem0 best-effort varies | Manual | Client ok even if 0 rows | Mem0 remote if remove fails after? order remove first | Delete twice ok | memory.test owned delete |
+| Memory hard DELETE | Await Mem0 delete (if linked) → DB delete | Provenance memory_id SET NULL | Yes | Mem0 | Non-404 Mem0 errors abort before local delete; DB err → 500; DELETE may return ok with 0 rows | Manual | Client may get ok without row deleted | Mem0 gone / local remain if Mem0 OK then DB fail | Second delete: Mem0 404 ignored then local no-op | memory.test owned delete |
 | Memory archive | Status update | None | — | Mem0 syncMetadata on review paths | — | — | Immediate | Still in DB | Yes | Partial |
 | Memory rejection | Status rejected | — | — | Sync | — | — | Yes | Blocks re-proposal | Yes | extraction/review related |
 | Supersede | Enum exists | **No product writers** (Stage 4) | — | — | — | — | — | — | — | — |
-| Document DELETE | Storage remove → row | Chunks CASCADE | — | Storage | Storage err ignored | No | May report ok with leftover object | Storage orphan | Second delete 404 | None |
+| Document DELETE | Storage remove → row | Chunks CASCADE | — | Storage | Storage err ignored | No | May report ok with leftover object | Storage object orphan | Second delete 404 | None |
 | Conversation DELETE | Schema CASCADE | Yes | — | — | **No API** | — | — | Sessions accumulate | — | None |
-| Account deletion | Audit → Mem0 removeAll → storage paths → `deleteUser` → signOut | Most FKs CASCADE | `audit_log.user_id` | Mem0, Storage, Auth | Fails on deleteUser | No | Audit written before Auth delete | Storage if path miss; Stripe live sub; Mem0 | deleteUser once | Cascade memories via helper |
+| Account deletion | Audit → await removeAll → storage remove → deleteUser → signOut | Most FKs CASCADE after Auth delete | `audit_log.user_id` | Mem0, Storage, Auth | removeAll fail aborts before Auth; deleteUser fail → 500 after possible Mem0/storage work | No | Audit written before Auth delete | **Separate:** storage objects; live Stripe sub; Mem0 remote-gone/local-remain if Auth fails after removeAll | deleteUser once | Cascade memories via helper |
 | Audit-log retention | Survives user delete (SET NULL) | — | user_id | — | Fail-open write | — | — | Anonymised rows remain | Append | None |
-| Billing/usage retention | CASCADE with user | — | some telemetry SET NULL | Stripe customer may remain | — | — | — | Stripe **Unknown** | — | webhook tests |
+| Billing/usage retention | CASCADE with user | — | some telemetry SET NULL | Stripe customer may remain live | — | — | — | Stripe **Unknown** / not cancelled | — | webhook tests |
 | Provider-ops logs | Platform | — | — | — | — | — | — | Remain | Append | ops tests |
-| Mem0 deletion | On memory/account paths | — | — | HTTP | Failures throw or best-effort | No auto | Account continues to Auth delete after removeAll await | Remote orphans | delete 404 ignore option | mem0 client tests |
-| Storage-object deletion | Account/document | — | — | Storage API | Ignored on doc delete | No | Possible | Yes | — | None |
+| Mem0 deletion | See §12.1–12.2 | — | — | HTTP | Awaited; 404-only ignore on single delete; removeAll failure fails closed for account | No auto | Account does **not** proceed to Auth after removeAll fail | Remote-gone/local-remain; provider retention **Unknown** | 404 ignore on single | mem0 client tests |
+| Storage-object deletion | Account/document | — | — | Storage API | Results ignored on account and document delete | No | Possible after Auth success | Yes (storage-specific) | — | None |
 | BYOK-key deletion | User DELETE API or CASCADE | CASCADE on user | — | — | — | — | Ciphertext gone with row | — | Yes | byok encrypt tests |
-| Stripe customer | Not cancelled in account DELETE | DB row CASCADE | — | **No cancel API in account route** | — | — | User told deleted | Live Stripe sub | — | lifecycle tests separate |
-| Failed partial deletion | — | — | — | — | Mid-path | No job | Yes possible | Yes | — | **Unknown** runtime |
+| Stripe customer / subscription | Not cancelled in account DELETE | DB row CASCADE | — | **No cancel API in account route** | — | — | User may be deleted locally | Live Stripe sub (Stripe-specific) | — | lifecycle tests separate |
+| Failed partial deletion | Per mode above | — | — | — | Mid-path; no compensation job | No job | Mode-dependent | Mode-dependent | — | **Unknown** runtime |
 
 ---
 
@@ -445,14 +470,17 @@ session? → retrieve → embed/docs → identity → history
 | 4 | Assistant insert fail | User; **usage settled** | **Yes** | Provider done | 500 | **Unsafe** (new requestId → new charge) | Charge without reply | No | Usage row | **High** | None end-to-end |
 | 5 | Provenance insert fail | Assistant exists | Yes | Done | Think **200**; Chat **502** | Think OK; Chat confusing | Hollow provenance | No | — | Medium divergent | None |
 | 6 | Extraction failure | Assistant; settled | Yes | Possibly extraction LLM | May still 200 if caught/fallback | Heuristic fallback | — | Fallback | — | Low–Medium | extraction timeout tests |
-| 7 | Proposed insert fail | Assistant; settled | Yes | Embed on insert | Error after success path | Retry may duplicate proposed if partial | Possible | No | — | High UX/integrity | None |
-| 8 | Active statement insert fail | None chat | No | Embed/Mem0 | Error | Yes | — | Mem0 rolls back CV row | — | Low | Mem0 rollback |
+| 7 | Proposed insert fail | Assistant; settled | Yes | Embed on insert (**not** metered) | Error after success path | Retry may duplicate proposed if partial | Possible | No | — | High UX/integrity | None |
+| 8 | Active statement insert fail | None chat | No | Embed/Mem0 (**embed not metered**) | Error | Yes | — | Mem0 rolls back CV row | — | Low | Mem0 rollback |
 | 9 | Chat equivalents | Same settle-before-assistant; stricter store errors | Same | Same | 502 mapping | Same charge risk | Same | No | — | High | orchestration |
-| 10 | Content update + reembed fail | **New content saved** | N/A | Embed/Mem0 fail | 500 | Retry reembed | Stale index | Manual retry | — | Medium | None |
+| 10 | Content update + reembed fail | **New content saved** | N/A (reembed **not** metered) | Embed/Mem0 fail | 500 | Retry reembed | Stale index | Manual retry | — | Medium | None |
 | 11 | Mem0 insert remote fail | Supabase deleted (rollback) | N/A | Mem0 fail | Error | Yes | — | Rollback | — | Mitigated | mem0 provider |
-| 12 | Mem0 delete then Supabase fail | Remote gone; DB remains | N/A | Mem0 deleted | 500 | Retry DB; remote already gone | Divergent | No | — | Medium Conditional | None |
-| 13 | Document pipeline fails | Storage and/or `failed` row; partial chunks possible | Embed meter may have fired | Embed | 500 | Partial retry messy | Orphans | Manual | audit on success only | Medium | **No tests** |
-| 14 | Account delete midway | Audit written; maybe Mem0/storage done | N/A | Partial | 500 if Auth fails | Risky | Orphans | No | Partial | High Conditional | Partial cascade only |
+| 12 | Mem0 delete OK, Supabase delete fail | Local row remains; remote gone | N/A | Mem0 deleted | 500 | Retry local delete; remote already gone | Divergent | No auto compensation | — | Medium Conditional | None |
+| 12b | Mem0 delete non-404 fail | Local row **unchanged** | N/A | Mem0 fail | 500 | Retry | None | N/A | — | Low (fail-closed local) | None |
+| 13 | Document pipeline fails | Storage and/or `failed` row; partial chunks possible | Chunk embed meter may have fired (**only** metered embed path) | Embed | 500 | Partial retry messy | Orphans | Manual | audit on success only | Medium | **No tests** |
+| 14 | Account delete — Mem0 `removeAll` fails | Audit only; **no** Auth delete | N/A | Mem0 fail | 500 / error | Retry; account intact | — | No | Partial audit | Medium Conditional | None |
+| 14b | Account delete — Mem0 OK, Auth fails | Audit + Mem0 wiped (+ maybe storage attempt) | N/A | Mem0 gone; Auth remains | 500 | Risky (remote already cleared) | Remote-gone / local remain | No | Partial | High Conditional | None |
+| 14c | Account delete — Auth OK, storage leftovers / Stripe live | Local account gone (CASCADE) | N/A | Auth deleted; Stripe not cancelled | 200 ok | N/A | Storage objects; live Stripe sub | No | account.delete | High Conditional (separate modes) | Partial cascade only |
 | 15 | Credit settle fail after insert usage | usage_events row | Debit may skip on retry | Provider done | Error | **Debit skip** if alreadySettled | Free inference | No | usage row | **High** | Unit compute-only |
 | 16 | Assistant fail after settle | Same as #4 | Yes | Yes | 500 | Unsafe | Yes | No | usage | **High** | None |
 | 17 | Rate-limit RPC fail | N/A | N/A | None | **Allowed** | Abuse open | — | No | — | High availability | **No tests** |
@@ -478,9 +506,9 @@ session? → retrieve → embed/docs → identity → history
 | Retries charge twice? | New `crypto.randomUUID()` per try → **yes** credit risk; same id would short-circuit settle | Routes mint new ids |
 | requestId idempotency | `usage_events` PK + early return | `meter.ts` |
 | Direct identity billed? | **No** inference/settle | `directIdentityAnswer` |
-| Extraction/embedding costs metered? | Embed metered when OpenAI embeddings; extraction LLM **not** separately settled as chat purpose in extract helper | `meter-embed.ts` |
+| Extraction / embedding costs metered? | **Document-upload chunk embeddings only** call `meterEmbeddingUsage` (and only when `EMBEDDING_PROVIDER=openai`). **Not metered:** memory create embeddings, memory re-embed, Think/Chat retrieval query embeddings, document-retrieval query embeddings. Local embeddings have no external COGS and are not metered. Extraction-model usage is **not** separately settled through the main inference usage pipeline (it may still incur provider cost when LLM extraction runs). | `documents/route.ts` + `meter-embed.ts`; no other call sites |
 | Failover double-count usage? | One settle after loop; shared requestId | `complete.ts` |
-| Tests | Stripe webhook strong; `settleUsage` end-to-end weak; “idempotent” unit is compute-only | `production-safety.test.ts` |
+| Tests | Stripe webhook strong; `settleUsage` end-to-end weak; “idempotent” unit is compute-only; embedding meter coverage limited to helper behaviour | `production-safety.test.ts` |
 
 **Additional integrity gap:** if `usage_events` insert succeeds and `apply_credit_delta` fails, retry returns `alreadySettled` and **skips debit**. If settle succeeds and `recordPlanTurn` runs again on a retried request with a **new** requestId, credits may double while plan counters also advance.
 
@@ -511,7 +539,7 @@ session? → retrieve → embed/docs → identity → history
 
 | Abuse | Possible? |
 | --- | --- |
-| Excessive embeddings | Yes via retrieve/upload/memory writes within RL; RL fail-open worsens |
+| Excessive embeddings | Yes via retrieve/upload/memory writes within RL; **only upload chunk embeds are metered** when OpenAI; RL fail-open worsens unmetered query/memory embed volume |
 | Excessive extraction | One extract per successful think/chat turn |
 | Many memories | Yes; no uniqueness; 60/min soft |
 | Duplicate paraphrases | Yes — no semantic dedupe on active write |
@@ -566,7 +594,7 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 | # | Scenario | Preconditions | Controls | Expected behaviour | Exposed/corrupted | User-visible | Auditability | Status | Severity | Test | Runtime needed? |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | A submits B’s memory ID | Know UUID | RLS | Read/update/delete denied / empty | None content | 404/empty/ok delete | Low | Verified | Low (mitigated) | memory.test | No |
-| 2 | A submits B’s session ID | Know UUID | RLS read; insert own user_id | Cannot read B msgs; can insert A msgs into B session | Session pollution | A may get odd history (only own msgs) | Weak | Verified | Medium | None for pollution | Optional |
+| 2 | A submits B’s session ID | Know UUID | INSERT RLS on message `user_id`; SELECT RLS hides peer rows | A can INSERT A-owned rows under B’s `session_id`; B **cannot** SELECT those rows; A sees only A’s rows | Parent/child ownership pollution; cascade on session delete removes A’s rows; admin/service-role may see mixed-user FK | No change to B’s RLS-scoped timeline | Weak | Verified | Medium (integrity) | None for FK pollution | Optional |
 | 3 | A submits B’s document ID | Know UUID | RLS | 404 delete / no read | None | 404 | — | Verified | Low | None | No |
 | 4 | A uses B’s message ID as provenance | Know UUID | FK + RLS insert own user_id | May attach context row | Provenance integrity | Hidden | Weak | Verified schema | Medium | None | Optional |
 | 5 | Memory: ignore system instructions | Active store | Soft fences | Stored; may influence model | Self policy | Model-dependent | Content in DB | Conditional | Conditional High | None | Yes (model) |
@@ -578,7 +606,7 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 | 11 | Retry after extract fail | Prior assistant+settle | New requestId | Second charge possible | Double bill; duplicate msgs | User retries | Two usage rows | Verified order | High | None | Optional |
 | 12 | Assistant persist fail after settle | Insert error | None compensating | Charged, no stored reply | Billing integrity | 500 | usage exists | Verified | **High** | None | Optional |
 | 13 | Reembed fails after PATCH | Embed error | None rollback | Content new, index stale | Retrieval quality | 500 | — | Verified | Medium | None | Optional |
-| 14 | Auth deleted, external cleanup fail | Mem0/Stripe fail modes | Best-effort | DB gone; remote remain | Orphans | Success if Auth ok after awaits | Partial | Conditional | High Conditional | Partial | Yes |
+| 14 | Account delete partial failures | Mem0 on and/or Stripe live and/or storage objects | Await removeAll; storage remove ignored; no Stripe cancel | **Mem0 fail:** abort before Auth (account remains). **Mem0 OK + Auth fail:** remote memories gone, local account remains. **Auth OK:** local CASCADE; storage may remain; Stripe may stay live | Separate: Mem0 divergence; storage objects; live Stripe | 500 or success depending on step | Partial audit | Conditional | High Conditional (per mode) | Partial | Yes |
 | 15 | Rate limit unavailable | RPC down | Fail-open | Unlimited | Cost/abuse | Normal | — | Verified | High | None | Optional |
 | 16 | Service-role omits user filter | Bug ship | Code review | Cross-user R/W | **Critical potential** | Varies | Ops | Theoretical / Conditional | Critical **if** occurs | Admin RLS elsewhere | Code review |
 | 17 | Thousands paraphrased memories | Auth | Soft RL | Allowed | Bloat, retrieval noise | Success | — | Verified | Medium | None | Optional |
@@ -592,17 +620,18 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 
 | Area | Coverage | Gaps |
 | --- | --- | --- |
-| RLS memory/profile isolation | Strong (`memory.test.ts`) | Session pollution; message_context FK |
+| RLS memory/profile isolation | Strong (`memory.test.ts`) | Parent/child session FK integrity; message_context FK |
 | Admin config RLS | Strong | — |
 | Redaction / extraction secrets | Strong for **extract** path | Statement/manual/active path not asserted as blocked |
 | Context identity allowlist / DIA | Good | No adversarial injection suite |
-| Mem0 client mapping / user filter | Unit | No-id fallback behaviour; hybrid divergence |
+| Mem0 client mapping / user filter | Unit | No-id fallback; delete-order failure modes; hybrid divergence |
 | Stripe webhook idempotency | Strong | — |
 | settleUsage atomic debit | **Weak** (compute-only “idempotent” test) | Insert-then-debit failure; plan turn double |
+| Embedding metering scope | Call site only on document upload | Unmetered memory/query embeds undocumented in tests |
 | Rate limit | **None** | Fail-open |
 | Document pipeline | **None** | Orphans, MIME spoof |
-| Account DELETE HTTP | **None** (Auth cascade helper only) | Storage, Mem0, Stripe |
-| Export embeddings leakage | **None** | — |
+| Account DELETE HTTP | **None** (Auth cascade helper only) | Mem0 abort-before-Auth; storage ignore; Stripe cancel |
+| Export / list embedding vectors | **None** | Data-minimisation of `select("*")` |
 | Think/chat route soft-fail divergence | **None** | — |
 | Prompt injection | **None** | — |
 
@@ -616,17 +645,18 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 | 2 | Charge without assistant persist | `runInference` → route insert | Failure | Assistant insert fails after settle | User billed without stored answer | Order in complete.ts + routes | request_id helps same-id retry only | New UUID retries | No live | Optional |
 | 3 | settleUsage debit skip after event insert | `meter.ts` | Failure | Debit RPC fails after insert | Free usage on retry | Code | PK idempotency | Undercharge | No | Optional |
 | 4 | Rate-limit / ops-control fail-open | ratelimit; system-controls | Outage / attacker | DB/RPC errors | Abuse, bypass maintenance | Explicit catch returns | Intentional availability | Cost blow-up | No | Optional |
-| 5 | Indirect prompt injection via retrieved text | `context.ts` | Malicious user / doc | Active adversarial content | Model ignores policy / exfils own context | Verbatim interpolation | Soft guidelines; RLS; DIA | Model-dependent | **No** | Yes |
+| 5 | Indirect prompt injection via retrieved text | `context.ts` | Malicious user / doc | Active adversarial content | Model ignores policy / discloses own context | Verbatim interpolation | Soft guidelines; RLS; DIA | Model-dependent | **No** | Yes |
 | 6 | Sensitive overshare in retrieval | profile boost; no sensitivity filter | Normal use | Medical etc. active | Sensitive text to model on weak relevance | Stage 5 | Proposed review on extract only | Overshare | Mechanism yes | Optional |
-| 7 | Account delete leaves Stripe/Mem0/storage orphans | `api/account` | User / failure | External fail or no Stripe cancel | Paid sub continues; remote data | Code omits cancel; best-effort storage | DB CASCADE | External retain | Partial | Yes |
-| 8 | Session / provenance integrity pollution | chat_messages; message_context | Cross-account | Know UUID | Integrity not confidentiality | RLS design | RLS on reads | Polluted sessions | Schema yes | Optional |
+| 7 | Account delete: Stripe / storage / Mem0 as separate modes | `api/account` | User / failure | Per mode in §12.2 | Live Stripe after local delete; storage leftovers after Auth OK; Mem0 wipe without Auth if Auth fails after removeAll; removeAll fail keeps account | Code: no Stripe cancel; storage errors ignored; await removeAll before Auth | DB CASCADE after Auth | Mode-specific residual; Mem0 retention **Unknown** | Partial static | Yes |
+| 8 | Parent/child session & provenance integrity | chat_messages; message_context | Cross-account | Know UUID | Relational ownership pollution; not peer timeline contamination under product RLS | RLS design | SELECT RLS hides peer message content | Admin/analytics mixed-owner sessions | Schema yes | Optional |
 | 9 | Plan-turn double count on retry | `recordPlanTurn` | Retry | New request after settle | Entitlement exhaustion / unfair caps | No request_id in RPC | Credit settle idempotent separately | Counters drift | No | Optional |
-| 10 | Export/API embedding exfiltration to client | export; memories GET `*` | User / stolen session | Export or list | Large vectors; side-channel | select * | Auth | Client-held embeddings | Static | No |
+| 10 | Memory list/export returns embedding vectors | export; memories GET `*` | Authenticated user (or stolen session) | Export or list | Unnecessary client exposure; larger payloads; possible model/provider fingerprinting or secondary leakage if the response is captured. Distinct from content disclosure: a stolen session already yields memory text | `select("*")` | Auth | Vectors on client | Static | No |
 | 11 | Mem0 no-id fallback | mem0-provider | Mem0 on | Missing cv_memory_id | Non-canonical/stale context | Stage 5 | user_id filter | Status bypass | No | Yes Mem0 |
 | 12 | Compromised service-role key | deploy | Attacker | Key leak | Full tenant data | Inherent | Server-only convention | Catastrophic | N/A | Deploy hygiene |
 | 13 | Webhook metadata user trust | billing/webhook | Attacker w/ sig or Stripe bug | Signed event with crafted metadata | Mis-attributed grants | Prefers metadata | Signature + server checkout metadata | Conditional | No | Stripe live |
 | 14 | Document MIME spoof / orphan files | documents API | User | Fake type / mid-fail | Cost, storage junk | Client file.type | Size + allow-list + bucket | Bypass content-type | No | Optional |
-| 15 | README overclaims (service-role scope; secrets always blocked; provenance UI) | docs | Operators | Trust README | False assurance | Disagreements herein | This audit | Misconfiguration | N/A | No |
+| 15 | Unmetered OpenAI embeddings on memory/query paths | embeddings + missing meter call sites | User / abuse | `EMBEDDING_PROVIDER=openai` | Provider cost without usage_events for memory create/reembed and retrieval query embeds | Only `documents/route.ts` calls `meterEmbeddingUsage` | Doc-upload metering only | Cost visibility gap | Static yes | Optional |
+| 16 | README overclaims (service-role scope; secrets always blocked; provenance UI) | docs | Operators | Trust README | False assurance | Disagreements herein | This audit | Misconfiguration | N/A | No |
 
 **No Critical in-product cross-user memory disclosure was verified** under normal RLS product paths.
 
@@ -641,14 +671,15 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 5. **Proposed-memory review** for automatic extraction.  
 6. **Zod / schema validation** on extraction JSON and many API bodies.  
 7. **Private storage policies** and path prefix `{userId}/…`.  
-8. **User-scoped Mem0 searches** (`filters.user_id`) and insert rollback on Mem0 failure.  
+8. **User-scoped Mem0 searches** (`filters.user_id`), insert rollback on Mem0 failure, and **Mem0-before-local** individual delete ordering (non-404 errors fail closed for the local row).  
 9. **Provider-operation logging** without prompt bodies.  
 10. **Usage `request_id` PK** intent for credit settle idempotency (complete the atomicity story later — not designed here).  
-11. **Account deletion DB cascades** after Auth delete.  
+11. **Account deletion DB cascades** after Auth delete; `removeAll` is awaited so Mem0 wipe failure does not proceed to Auth delete.  
 12. **Explicit operational controls** and admin RBAC distinct from mere service-role possession.  
 13. **Stripe webhook claim/release** idempotency pattern.  
 14. **BYOK production encryption key requirement** (no service-role KEK fallback in prod).  
-15. **Dev top-up hard-disabled in production**.
+15. **Dev top-up hard-disabled in production**.  
+16. **Product SELECT RLS** on `chat_messages.user_id`, which prevents foreign-session INSERT pollution from becoming a peer-visible timeline leak.
 
 ---
 
@@ -667,9 +698,10 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 - Whether any out-of-repo cron/worker uses the service role unscoped.  
 - Production log redaction / log drain contents.  
 - Live model obedience to adversarial memories (injection severity).  
-- Mem0 account behaviour for delete failures and retention after `removeAll`.  
-- Stripe customer/subscription state after app account delete.  
-- Whether Thinking soft-fail paths are hit in production error rates.
+- Mem0 **provider-side retention** after successful `deleteMemory` / `deleteAllForUser` (partial deletion or delayed purge) — not established in-repo.  
+- Stripe customer/subscription state and billing continuity after app account delete (route does not cancel).  
+- Whether Thinking soft-fail paths are hit in production error rates.  
+- Real OpenAI spend from **unmetered** memory/query embedding paths under load.
 
 ### 21.3 Factual disagreements (prior artifacts left unchanged)
 
@@ -679,6 +711,8 @@ Chat turn ↔ usage `request_id` ↔ extraction ↔ memory ids are only loosely 
 | README secrets | Implies extraction security covers memory capture generally | Active statement/manual paths bypass forbidden-secret drop |
 | README provenance UI | Every reply shows memories used | Stronger for ChatView; Thinking weaker (Stage 5) |
 | README “always proposed” | Extraction never auto-active | True for extract; false for Think statement/remember and manual POST |
+| `meter-embed.ts` comment | “only embedding generation is metered” (implies all generation) | Only **document-upload chunk** embedding calls `meterEmbeddingUsage`; memory create/reembed and query embeds are unmetered |
+| Stage 3 / earlier shorthand on session pollution | May imply victim timeline contamination | Victim product reads do not see attacker rows; integrity/FK pollution only |
 | `00-roadmap.md` statuses | Stage 2 “next”, 3–6 pending | Stages 1–5 treated complete per Stage 6 brief |
 
 ---
@@ -704,10 +738,11 @@ Stage 7 (target architecture) should treat the following as primary inputs — *
 - `src/lib/embeddings/index.ts`
 
 ### Billing / failure atomicity
-- `src/lib/inference/meter.ts`, `src/lib/billing/plan-usage.ts`
+- `src/lib/inference/meter.ts`, `src/lib/billing/plan-usage.ts`, `src/lib/billing/meter-embed.ts`
 - `src/lib/ratelimit.ts`, `src/lib/admin/system-controls.ts`
 - `src/app/api/account/route.ts`, `src/app/api/export/route.ts`
 - `src/lib/billing/byok.ts`, `src/lib/billing/byok-crypto.ts`, `src/lib/billing/webhook.ts`
+- `src/lib/memory/mem0-provider.ts` (`remove` / `removeAll` ordering)
 
 ### Admin / privileged
 - `src/lib/admin/auth.ts`, `src/app/api/admin/**`
@@ -725,13 +760,13 @@ Stage 7 (target architecture) should treat the following as primary inputs — *
 | Class | Items |
 | --- | --- |
 | **Verified vulnerabilities** | None labelled Critical for cross-user content read under RLS product paths |
-| **Verified unsafe / inconsistent behaviour** | Active-path secret store; settle-before-assistant; Think soft-fail provenance; DELETE memory always ok; export embeddings; sessionId write pollution; PATCH reembed order; rate/ops fail-open |
-| **Conditional risks** | Prompt injection success; Mem0 no-id; service-role bug; Stripe metadata; account external orphans |
+| **Verified unsafe / inconsistent behaviour** | Active-path secret store; settle-before-assistant; Think soft-fail provenance; DELETE memory always ok; list/export embedding vectors via `select("*")`; foreign-session INSERT integrity pollution; PATCH reembed order; rate/ops fail-open; unmetered memory/query OpenAI embeds |
+| **Conditional risks** | Prompt injection success; Mem0 no-id; service-role bug; Stripe metadata; account-delete modes (Mem0 abort; Mem0-ok/Auth-fail; storage leftovers; live Stripe) |
 | **Theoretical risks** | Compromised service-role key blast; future tool-using agents acting on injected URLs |
-| **Privacy gaps** | No extraction/retrieval/provider opt-outs; sensitive retrieval; legal placeholders; Thinking provenance UX |
-| **Integrity gaps** | Parent/child FK; hollow provenance; Mem0/Supabase divergence; duplicate memories |
-| **Availability / cost risks** | Fail-open RL/controls; retry storms; unlimited paraphrase writes within soft limits |
-| **Mitigated risks** | RLS memory isolation; extract secret drop; Stripe event claim; identity allowlist; Mem0 insert rollback; BYOK prod key requirement |
+| **Privacy gaps** | No extraction/retrieval/provider opt-outs; sensitive retrieval; legal placeholders; Thinking provenance UX; embedding vector over-exposure on export/list |
+| **Integrity gaps** | Parent/child session FK (not peer-visible timeline); hollow provenance; Mem0/Supabase divergence after Mem0-ok/local-fail; duplicate memories |
+| **Availability / cost risks** | Fail-open RL/controls; retry storms; unlimited paraphrase writes within soft limits; unmetered embed paths |
+| **Mitigated risks** | RLS memory isolation; extract secret drop; Stripe event claim; identity allowlist; Mem0 insert rollback; Mem0-before-local delete fail-closed on non-404; BYOK prod key requirement; SELECT RLS hiding foreign-session inserts from session owner |
 | **Assumptions / Unknowns** | §21 |
 
 ---
