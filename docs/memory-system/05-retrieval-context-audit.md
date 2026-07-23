@@ -48,8 +48,8 @@ On every Think/Chat question turn the product:
 ### Highest-severity findings (ranked preview)
 
 1. **Profile always-in context** — Up to 10 active profile facts are injected regardless of query relevance, with synthetic similarity 1.0, and **without `expires_at` filtering** (**Correctness / Privacy / Performance**).
-2. **Mem0 no-`cv_memory_id` bypass** — If every remote hit lacks `cv_memory_id`, Mem0 returns remote content **without** Supabase active/expiry/type reconciliation (**Correctness / Security / Privacy**).
-3. **Prompt fences are advisory only** — Retrieved memory/document text is injected raw; a stored “ignore the system prompt” string can compete with guidelines (**Security**).
+2. **Mem0 no-`cv_memory_id` fallback** — If every remote hit lacks `cv_memory_id`, Mem0 returns remote content **without** Supabase active/expiry/type/canonical-row reconciliation. Search remains filtered by the current user id; primary risk is **stale / rejected / expired / non-canonical own content**, not established cross-user leakage (**High Correctness / Privacy**; Conditional High trust-boundary) (**Assumption** on Mem0 filter integrity).
+3. **Indirect prompt-injection surface** — Retrieved memory/document text is interpolated verbatim into the system message; human-readable fences do not guarantee isolation. Exploitability is **model-dependent**; this audit did **not** run a live adversarial test and demonstrated **no** successful exploit (**Conditional High Security**).
 4. **Think UI hides retrieval provenance** — Product path returns `usedMemories`/`usedChunks` but `ThinkingView` only shows timestamp/model/`memoryRegistered`; README’s “every reply shows which memories were used” is false for Thinking (**Correctness / Explainability**).
 5. **Conflict and duplicate blindness** — Contradictory cities, employers, preferences, overlapping chunks, and profile∩semantic duplicates all reach the prompt (**Correctness**).
 6. **History is message-bounded, not turn/token-bounded** — Orphan user turns and incomplete assistant pairs enter future context; long threads can exceed model limits with no truncation (**Correctness / Performance**).
@@ -277,23 +277,26 @@ When **any** hit has `cv_memory_id`:
 
 When **every** hit lacks `cv_memory_id`:
 
-- Returns `hits.map(toRetrievedMemory)` — **no status, expiry, or type enforcement** (**Security / Correctness risk**).
+- Returns `hits.map(toRetrievedMemory)` — **no** Supabase status, expiry, type, or canonical-row reconciliation (**Verified**).
+- The Mem0 search request is **still** scoped with `filters: { user_id: <current user> }` (**Verified**).
+- This static audit did **not** establish cross-user retrieval. Cross-user leakage would need additional evidence or a failure in Mem0’s user filtering (**Assumption / Unknown**).
+- **Primary established risk:** stale, rejected, expired, legacy, or otherwise **non-canonical** content (still under the same Mem0 user filter) entering model context (**High Correctness / Privacy**; Conditional High trust-boundary).
 
 ### 5.3 Determinations checklist
 
 | # | Question | Answer |
 | --- | --- | --- |
 | 1 | Search + top-k | Mem0 search; top_k = limit (default 8) |
-| 2 | User scoping | Mem0 filter + Supabase `.in(id)` under RLS |
+| 2 | User scoping | Mem0 `user_id` filter on search; Supabase `.in(id)` under RLS on reconcile path |
 | 3 | Metadata requirements | Soft: `cv_memory_id` required for safe path |
 | 4 | Canonical reconciliation | Yes when IDs present |
 | 5 | Active-status enforcement | Yes on reconcile path only |
 | 6 | Expiry enforcement | App-side on reconcile; Mem0 also gets `expiration_date` on add/update |
 | 7 | Type enforcement | Only if `options.types` passed (Think/Chat do not) |
-| 8 | All hits lack `cv_memory_id` | **Unsafe fallback** — remote text returned |
+| 8 | All hits lack `cv_memory_id` | Fallback returns remote text **without** canonical reconcile; search still user-filtered; risk is non-canonical own content (**not** proven cross-user) |
 | 9 | Some hits lack id | Those hits skipped; others reconciled |
 | 10 | Rejected/archived/deleted/missing row | Dropped on reconcile |
-| 11 | Stale Mem0 content | Prompt uses **Supabase `content`**, not Mem0 text, when reconciled — good; score still from Mem0 |
+| 11 | Stale Mem0 content | Prompt uses **Supabase `content`**, not Mem0 text, when reconciled — good; score still from Mem0; no-id fallback uses Mem0 text |
 | 12 | Switch back to Supabase | Requires rows to have embeddings; Mem0 inserts store `embedding: null` → those rows **invisible** to `match_memories` until reembed (**Correctness risk**) |
 | 13 | Proposed remotely searchable? | **Yes** Mem0 may return them; reconcile filters `active` so they **do not** enter context (unless no-id fallback) |
 | 14 | Score comparable to pgvector? | **Unknown / Assumption no** — different systems; both treated as `similarity` |
@@ -399,11 +402,11 @@ No dedicated `match_document_chunks` or `DocumentRetriever` test (**Verified** g
 13. **Empty context** — If no memories, chunks, or identity: append `(No saved user context was relevant to this message.)`
 14. **Maximum lengths** — Persona 500; chunk content 500 in prompt; memory content uncapped here (DB max 8000).
 15. **Truncation** — Persona and chunk only; memories/full system prompt not truncated by token budget.
-16. **Token estimation** — Not in `context.ts`; inference uses `estimateTokensFromMessages` / provider usage separately; `contextChars` is a rough char sum for routing.
+16. **Token estimation** — Not in `context.ts`; inference uses `estimateTokensFromMessages` / provider usage separately; `contextChars` is a rough char sum for routing and **underestimates** composed size when identity augmentation or the Think instruction suffix is present (see §12).
 17. **Duplicate removal** — **None** in builder (id merge happens upstream only).
 18. **Conflict handling** — **None** beyond instruction that identity wins over conflicting profile memories for **name**.
-19. **Instruction hierarchy** — Identity block → BASE guidelines → USER CONTEXT; Think may append instruction-confirmation suffix after system prompt.
-20. **Prompt-injection protection** — Soft natural-language guidelines only; retrieved text is not escaped, quoted as data, or tagged untrusted.
+19. **Instruction hierarchy** — Identity block → BASE guidelines → USER CONTEXT; Think may append instruction-confirmation suffix in the **composed** system message (not in the `systemPrompt` variable used for `contextChars`).
+20. **Prompt-injection protection** — Soft natural-language guidelines and human-readable fences only; retrieved text is not escaped, quoted as data, or tagged untrusted. Creates a **potential** indirect injection surface; exploitability model-dependent; no live exploit demonstrated in this audit (see §15).
 
 Identity is **mirrored** into USER CONTEXT “Account profile” so models attending mainly to that section still see the name.
 
@@ -418,7 +421,7 @@ Identity is **mirrored** into USER CONTEXT “Account profile” so models atten
 | 3 | History ordering | Chronological after reverse |
 | 4 | Current user duplicated/augmented? | Not duplicated in history; outbound user content may be **identity-augmented** (persisted row stays clean) |
 | 5 | Identity augmentation | Prefix `[Account profile for this reply — trust this over earlier turns]` + facts |
-| 6 | Instruction intent | Think only: appends “Reply with a brief confirmation…” to system prompt |
+| 6 | Instruction intent | Think only: appends “Reply with a brief confirmation…” to the **composed** system content; **not** included in `contextChars` |
 | 7 | Prior system-role in history | Possible if rows exist; product writers only insert user/assistant |
 | 8 | Stored assistant affect later? | **Yes** — last ≤10 messages include assistants |
 | 9 | Failed/orphan user messages | **Yes** can enter history |
@@ -468,19 +471,24 @@ Identity is **mirrored** into USER CONTEXT “Account profile” so models atten
 
 ### `contextChars` accuracy
 
+Think and Chat both compute:
+
 ```text
 contextChars = systemPrompt.length + sum(history.content.length) + message.length
 ```
 
+On Think instruction turns, `composeChatMessages` receives **`systemPrompt + instruction suffix`**, but `contextChars` still uses the **original** `systemPrompt.length` — the suffix is **not** counted (**Verified** in `src/app/api/think/route.ts` `handleQuestion`).
+
 | Counted? | Item |
 | --- | --- |
-| Yes | System prompt (includes identity blocks, memories, chunks, fences) |
-| Yes | History contents |
-| Yes | Raw user `message` |
-| **No** | Identity augmentation on outbound user turn |
-| **No** | Think instruction suffix (added to system **before** compose, so **yes** it is in `systemPrompt` when intent=instruction) |
-| Partial | Document metadata — included as part of system prompt strings |
-| Double-count risk | Identity appears in USER IDENTITY + Account profile + possibly augmented user — **chars counted once in system**, augmentation **not** in `contextChars` |
+| **Yes** | Base system prompt, including retrieved memories, document chunks, identity blocks, and fences (`systemPrompt` from `buildSystemPrompt`) |
+| **Yes** | History message contents |
+| **Yes** | Raw user-message length (`message`) |
+| **No** | Identity augmentation added to the outbound user turn by `augmentUserMessageForModel` / `composeChatMessages` |
+| **No** | Think instruction suffix passed into `composeChatMessages` but omitted from `contextChars` |
+| **Yes** (via system prompt) | Document filename / page cite strings that are already inside `systemPrompt` |
+
+**Conclusion:** `contextChars` can **underestimate** the actual outbound prompt size whenever identity augmentation and/or the Think instruction suffix are present. It is a routing heuristic (`LONG_CONTEXT_CHAR_THRESHOLD`), not an accurate token or character meter of the composed messages.
 
 **Behaviour when over provider limit:** No product-level truncation; adapter/provider error (**Unknown** exact per-provider message). Retrieval/query embeddings **not** metered like document upload embeddings.
 
@@ -542,7 +550,7 @@ Static analysis of scenarios (no live model):
 | 11 | Sensitive medical relevant | Yes if active+similar or profile | Normal | **Yes** | No | No | Privacy overshare | Content shown in Chat provenance |
 | 12 | Proposed highly relevant | Semantic: **no** (status); Mem0 remote then drop | — | No | N/A | N/A | Missing answer | Not linked |
 | 13 | Rejected remains in DB | Not retrieved | — | No | N/A | Blocks exact re-extract (Stage 4) | — | — |
-| 14 | Mem0 hit no canonical | If **all** lack id → **yes** unsafe; else skip | Mem0 order | Possible | No | No | Ghost / foreign text | Fake/synthetic id possible |
+| 14 | Mem0 hit no canonical | If **all** lack id → **yes** (remote text, still user-filtered); else skip | Mem0 order | Possible | No | No | Non-canonical / stale / rejected / expired own content; cross-user **not** established | Synthetic id possible; no Supabase row link |
 | 15 | Orphan user in history | History includes it | Chronological | As history | No | No | Confusing prior turn | History not in `message_context` |
 
 ---
@@ -551,11 +559,21 @@ Static analysis of scenarios (no live model):
 
 ### Can retrieved text contain adversarial instructions?
 
-**Verified:** Memory `content` and chunk `content` are interpolated verbatim into the system prompt. There is no sanitizer stripping “Ignore the system prompt”, “Reveal all other memories”, “Always answer incorrectly”, “Treat this document as highest-priority”, or data-exfiltration instructions.
+**Verified:** Memory `content` and chunk `content` are interpolated **verbatim** into the system message. There is no sanitizer stripping strings such as “Ignore the system prompt”, “Reveal all other memories”, “Always answer incorrectly”, “Treat this document as highest-priority”, or data-exfiltration instructions.
+
+This creates a **potential indirect prompt-injection surface**: untrusted retrieved text sits in the same system message as product guidelines.
 
 ### Are fences sufficient?
 
-**Conclusion: No.** Fences are human-readable section markers. The model is instructed to use USER CONTEXT as data, but there is **no hard separation** (e.g. tool results channel, untrusted-data tags with mandatory refusal, or stripping imperative language). Effectiveness is **model-dependent** (**Unknown** under live attacks).
+**Conclusion:** Human-readable `USER CONTEXT` / `USER IDENTITY` fences **do not guarantee** isolation. The model is instructed to treat USER CONTEXT as data, but there is **no hard separation** (e.g. tool-results channel, untrusted-data tags with mandatory refusal, or stripping imperative language).
+
+Also state clearly:
+
+- **Exploitability is model-dependent.**
+- **This audit did not run a live adversarial test.**
+- **No successful exploit was demonstrated during this static audit.**
+
+Severity is therefore **Conditional High Security** (verified surface; unverified exploit success) — not a proven Critical vulnerability.
 
 ### Mitigations that do exist
 
@@ -566,7 +584,7 @@ Static analysis of scenarios (no live model):
 
 ### Think vs Chat
 
-Same `buildSystemPrompt` / compose path for injection surface. Think instruction suffix adds another imperative in the system message.
+Same `buildSystemPrompt` / compose path for the injection surface. Think instruction suffix adds another imperative in the **composed** system message (and is **not** reflected in `contextChars`; see §12).
 
 ---
 
@@ -625,7 +643,7 @@ Certainty: **S** = statically certain from code; **M** = model-dependent answer 
 | 8 | Current projects | Full | `project` type if similar | Yes | Maybe | Yes | No | Same | Type not boosted | M |
 | 9 | Do I like seafood? | Full | Preference if similar | Yes | Maybe | Yes | No | Same | Preference↔negation | M |
 | 10 | What medication do I take? | Full | Sensitive if active+similar | **Sensitive profiles included** | Maybe | Yes | No | Same | **Privacy overshare** | M |
-| 11 | Ignore all memories… | Full still | Still retrieved & injected | Still | Still | Yes | No | Same | Model may obey user or memories | M |
+| 11 | Ignore all memories… | Full still | Still retrieved & injected | Still | Still | Yes | No | Same | Model may obey user or memories (indirect injection / instruction conflict is model-dependent; not exploit-proven here) | M |
 | 12 | Capital of France? | Full | Low-sim noise possible | Yes irrelevant | Unrelated docs possible | Yes | No | Same | Profile pollution of general Q | M |
 | 13 | Two contradictory memories | Full | Both if both ≥0.05 | Yes | — | Yes | No | Both listed | Ambiguous answer | M |
 | 14 | Memory + document match | Full | Mem + chunks | Yes | Yes | Yes | No | Mem then docs | No conflict merge | M |
@@ -657,8 +675,8 @@ Certainty: **S** = statically certain from code; **M** = model-dependent answer 
 
 | Sev | ID | Class | Risk |
 | --- | --- | --- | --- |
-| **Critical** | R1 | Security | Retrieved memory/document text can inject instructions; fences are advisory |
-| **Critical** | R2 | Security / Privacy | Mem0 all-hits-without-`cv_memory_id` bypasses canonical status/expiry filters |
+| **Conditional High** | R1 | Security | Verified indirect prompt-injection **surface**: memory/document text interpolated verbatim into the system message; fences do not guarantee isolation. Exploitability model-dependent; **no live exploit demonstrated** in this audit |
+| **High** (Conditional High trust-boundary) | R2 | Correctness / Privacy | Mem0 all-hits-without-`cv_memory_id` returns remote text without Supabase status/expiry/type/canonical reconcile. Search still user-filtered; primary risk is non-canonical **own** content. Cross-user leakage **not** established |
 | **High** | R3 | Privacy / Correctness | Profile always-include (≤10) ignores relevance, sensitivity, and **expiry** |
 | **High** | R4 | Correctness | No conflict detection — contradictory facts co-injected |
 | **High** | R5 | Correctness | Similarity-only ranking ignores confidence / pin / recency |
@@ -669,7 +687,7 @@ Certainty: **S** = statically certain from code; **M** = model-dependent answer 
 | **Medium** | R10 | Correctness | Document RPC ignores `documents.status`; overlapping chunks stack |
 | **Medium** | R11 | Performance | Double embed on Think (memory retrieve + separate doc embed); critical-path latency |
 | **Low** | R12 | Explainability | `message_context` omits identity, history, provider, query version |
-| **Low** | R13 | Correctness | `contextChars` undercounts identity-augmented user turn |
+| **Low** | R13 | Correctness | `contextChars` underestimates outbound size (omits identity augmentation and Think instruction suffix) |
 | **Low** | R14 | Integrity | Think ignores `message_context` insert errors |
 
 ---
@@ -694,15 +712,16 @@ Certainty: **S** = statically certain from code; **M** = model-dependent answer 
 ## 21. Unknowns requiring runtime verification
 
 1. Live Mem0 score calibration vs pgvector cosine on identical corpora.
-2. How often Mem0 returns hits missing `cv_memory_id` in production.
-3. Model obedience rates when USER CONTEXT contains jailbreak-like memory text.
-4. Whether local hashing embeddings retrieve “right” facts for realistic vaults at threshold 0.05 (may be very permissive).
-5. End-to-end latency breakdown: embed vs RPC vs LLM under OpenAI embeddings.
-6. Behaviour when provider rejects oversized prompts (exact error + user-visible outcome).
-7. Whether any failed document leaves orphan chunks with embeddings in real failure modes.
-8. Frequency of profile lists exceeding 10 in real accounts (silent truncation impact).
-9. Whether users rely on pin expecting retrieval boost (product expectation vs code).
-10. Cross-path drift: same question on `/api/think` vs `/api/chat` with instruction-shaped name questions.
+2. How often Mem0 returns hits missing `cv_memory_id` in production, and whether those hits are only the same user’s legacy/stale rows.
+3. Whether Mem0’s `user_id` filter can fail or leak across users (would elevate R2 beyond Correctness/Privacy).
+4. Model obedience rates when USER CONTEXT contains jailbreak-like memory text (live adversarial evaluation of R1).
+5. Whether local hashing embeddings retrieve “right” facts for realistic vaults at threshold 0.05 (may be very permissive).
+6. End-to-end latency breakdown: embed vs RPC vs LLM under OpenAI embeddings.
+7. Behaviour when provider rejects oversized prompts (exact error + user-visible outcome), including cases where `contextChars` underestimated size.
+8. Whether any failed document leaves orphan chunks with embeddings in real failure modes.
+9. Frequency of profile lists exceeding 10 in real accounts (silent truncation impact).
+10. Whether users rely on pin expecting retrieval boost (product expectation vs code).
+11. Cross-path drift: same question on `/api/think` vs `/api/chat` with instruction-shaped name questions.
 
 ---
 
@@ -712,8 +731,8 @@ Stage 6 (security, privacy, and failure analysis) should re-read and attack at l
 
 | Priority | Path | Why |
 | --- | --- | --- |
-| P0 | `src/lib/ai/context.ts` | Injection surface, fences, identity rules |
-| P0 | `src/lib/memory/mem0-provider.ts` | No-id fallback; reconcile gaps |
+| P0 | `src/lib/ai/context.ts` | Indirect injection surface (verbatim retrieve), fences, identity rules |
+| P0 | `src/lib/memory/mem0-provider.ts` | No-id fallback (canonical reconcile gap; user-filtered search) |
 | P0 | `src/app/api/think/route.ts` | Soft provenance/history errors; dual embed; profile select |
 | P0 | `src/lib/orchestration/chat.ts` | Parallel path; stricter errors |
 | P0 | `supabase/migrations/20260720000007_functions.sql` | RPC filters vs missing document.status |
@@ -754,11 +773,11 @@ Shared application constants: `MIN_SIMILARITY = 0.05`, retrieve `limit: 8`, prof
 | Order | distance | Mem0 score order | created_at ASC | distance |
 | Dedupe | none | none | id merge later | none |
 | Errors | throw | throw | soft empty | soft empty / embed throw |
-| Fallback | none | no-id remote dump* | none | empty list |
+| Fallback | none | no-id remote text* (user-filtered; no canonical reconcile) | none | empty list |
 | Latency | embed+RPC | HTTP+SQL | SQL | embed+RPC |
 | Tests | partial | partial | none | none |
 
-\*Unless all hits lack `cv_memory_id`.
+\*When every Mem0 hit lacks `cv_memory_id`: remote text enters without Supabase status/expiry/type reconcile; Mem0 search remains filtered by current `user_id`. Primary risk is non-canonical own content; cross-user leakage not established by this audit.
 
 ---
 
@@ -769,7 +788,7 @@ Shared application constants: `MIN_SIMILARITY = 0.05`, retrieve `limit: 8`, prof
 | README: every reply shows which memories were used | **False for ThinkingView**; true for unmounted/legacy ChatView |
 | Stage 2: profile memories soft-miss only | Additionally: profile query **omits expiry**, unlike `match_memories` (Stage 2 did not highlight expiry gap) |
 | Stage 3: null embeddings invisible | Confirmed for pgvector; Mem0 inserts intentionally null → invisible after provider switch |
-| Stage 4: proposed never enter match/profile boost | Confirmed for pgvector + Mem0 reconcile; **exception** Mem0 no-id fallback |
+| Stage 4: proposed never enter match/profile boost | Confirmed for pgvector + Mem0 reconcile; **exception** Mem0 no-id fallback (user-filtered remote text; non-canonical own content risk — cross-user not established) |
 | `00-roadmap.md` Stage 2 status “next” | Stages 1–4 treated complete per task; roadmap **not** edited |
 
 ---
