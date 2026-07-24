@@ -20,7 +20,7 @@
 | Assertion grounding (`memory_assertion_entities`) | **Canonical operational role→entity links** for a revision (kept in sync with mention resolution; not a free-floating second identity store) |
 | Entity-resolution candidates / scope-label candidates | **Candidate operational data** |
 | Relationship **series** + **episodes** + support | **Derived and rebuildable** projections supported by assertions; multiple temporal episodes may coexist (exact-bounds episode keys §26) |
-| Pairwise **episode relations** (overlap/containment/adjacency) | **Derived and rebuildable** — table `memory_entity_relationship_episode_relations` (§26.3) |
+| Pairwise **episode relations** (overlap/containment/adjacency/disjoint/unknown) | **Derived and rebuildable dense set** — table `memory_entity_relationship_episode_relations` (§26.3); `N(N-1)/2` rows; missing ≠ disjoint |
 | Relationship **user decisions** (confirm/reject/suppress display) | **Canonical operational** — survive full series/episode rebuilds (§23.1); splits may mark `needs_review` |
 | Entity search indexes | **Derived and rebuildable** (Stage 7 derived layer) |
 
@@ -38,7 +38,7 @@ Binding product rules:
 10. Provisional entity creation is rate- and count-limited; overflow leaves mentions unresolved or queued for review.
 11. User relationship confirmations, rejections, and display preferences are stored as **canonical operational decisions**, never only on derived series/episode rows.
 12. Mentions have an explicit retention lifecycle (`active` / `archived` / …); archival and purge are schema-backed (§13.4).
-13. Pairwise temporal overlap/containment/adjacency lives in `memory_entity_relationship_episode_relations`, not a scalar on one episode.
+13. Pairwise temporal relations (incl. `disjoint`/`unknown`) live densely in `memory_entity_relationship_episode_relations` (`N(N-1)/2`), not a scalar on one episode; missing ≠ disjoint.  
 14. `series_identity_key` uses distinct asymmetric vs symmetric formulas (§23.1).
 
 This document answers Stage 10’s five handoff questions, defines exact tables/services/commands/jobs, and hands Stage 12 safe query contracts **without** ranking or packing.
@@ -900,14 +900,15 @@ Selected structure:
 
 1. `memory_entity_relationship_series` — derived identity of `(user, source_entity, target_entity, relationship_type)`.  
 2. `memory_entity_relationship_episodes` — one row per **exact temporal identity** episode (e.g. 2018–2020 and 2024–2026 coexist).  
-3. `memory_entity_relationship_support` — ties assertions/revisions to an **episode**.  
-4. `memory_entity_relationship_user_decisions` — **canonical operational** user confirm/reject/suppress/restore (§23.1).  
-5. Support cites assertion + revision + mentions.  
-6. Episode trust/temporal/modality/disclosure **cached from support** and reconciled.  
-7. Candidate supports → episode `authority_class='candidate'` only.  
-8. Trusted supports → trusted episodes (`temporal_class` current vs historical).  
-9. User display confirm/reject writes the **user-decision table first**, then reconciles derived series/episode caches.  
-10. Manual edge creation → must create `relationship_fact` assertion first (user command).
+3. `memory_entity_relationship_episode_relations` — dense pairwise temporal relations among active episodes (`N(N-1)/2`; §26.3).  
+4. `memory_entity_relationship_support` — ties assertions/revisions to an **episode**.  
+5. `memory_entity_relationship_user_decisions` — **canonical operational** user confirm/reject/suppress/restore (§23.1).  
+6. Support cites assertion + revision + mentions.  
+7. Episode trust/temporal/modality/disclosure **cached from support** and reconciled.  
+8. Candidate supports → episode `authority_class='candidate'` only.  
+9. Trusted supports → trusted episodes (`temporal_class` current vs historical).  
+10. User display confirm/reject writes the **user-decision table first**, then reconciles derived series/episode caches.  
+11. Manual edge creation → must create `relationship_fact` assertion first (user command).
 
 **Binding rule:** A relationship episode/series cannot be more authoritative than its supporting assertions.
 
@@ -1199,13 +1200,15 @@ episode_key = sha256(
 | Multiple current episodes + single-current cardinality hint | Keep separate; set series `series_state=conflict_open`; do not auto-distrust |
 | Projector version change | New keys may differ; full rebuild; map user decisions by `series_identity_key` (and old→new episode_key table only if migration note exists — v1: series-level decisions preferred) |
 
-### 26.3 Pairwise episode relations (derived — not merge)
+### 26.3 Pairwise episode relations — dense derived model
 
 Scalar `overlap_status` on a single episode **cannot** represent “contains B, overlaps C, adjacent to D.” Pairwise facts live in:
 
 **`memory_entity_relationship_episode_relations`** — fully derived and rebuildable.
 
-After episodes for a series are built, the projector computes relations for every unordered pair `{E1,E2}` using interval algebra on displayed bounds:
+#### Dense pairwise rule (normative)
+
+For every unordered pair of **active** episodes within the same relationship series, store **exactly one** derived relation row. The closed vocabulary is:
 
 | `relation_type` (left relative to right) | Meaning |
 | --- | --- |
@@ -1214,22 +1217,45 @@ After episodes for a series are built, the projector computes relations for ever
 | `contained_by` | Left properly contained by right |
 | `adjacent_before` | Left ends immediately before right starts |
 | `adjacent_after` | Left starts immediately after right ends |
-| `disjoint` | No overlap/adjacency (optional to store; may omit to save rows) |
-| `unknown` | Insufficient bounds to classify |
+| `disjoint` | No overlap/adjacency — **stored explicitly** |
+| `unknown` | Insufficient temporal information to classify |
 
-**Canonical orientation:** store exactly one row per unordered pair with `left_episode_id < right_episode_id` (UUID order). `relation_type` describes **left relative to right**. Read-time may expose the inverse (`contains` ↔ `contained_by`, `adjacent_before` ↔ `adjacent_after`, `overlapping`/`disjoint`/`unknown` self-inverse).
+**Absence of a row must never mean `disjoint`.** Absence means the derived relation set is incomplete, stale, not yet rebuilt, or inconsistent.
+
+For a reconciled series with `N` active episodes (`episode_state='active'`; exclude inactive, deleted, purged, rebuild_pending):
+
+```text
+episode_relation_count = N × (N - 1) / 2
+```
+
+Examples: 1→0, 2→1, 3→3, 4→6 relation rows.
+
+**Canonical orientation:** `left_episode_id < right_episode_id` (UUID order). `relation_type` describes **left relative to right**. Read-time may expose the inverse (`contains` ↔ `contained_by`, `adjacent_before` ↔ `adjacent_after`; `overlapping` / `disjoint` / `unknown` are self-inverse).
 
 **Uniqueness:** `(user_id, series_id, left_episode_id, right_episode_id)`.
 
+**Projector obligations:**
+
+1. Build or replace the **complete dense** relation set in the same reconciliation TX / versioned rebuild as the episode set.  
+2. Store `disjoint` and `unknown` explicitly — never omit.  
+3. Never interpret a missing row as a temporal relation.  
+4. Detect `episode_relation_count ≠ N(N-1)/2` as derived-state drift and rebuild.  
+5. Rebuild the complete set when an episode is added, removed, corrected, or changes temporal identity.  
+6. Delete stale relation rows when an episode disappears.  
+7. Use the same `relationship_projector_version` as the episode set.  
+8. Stage 12 must consume only reconciled series (matching projector version / completeness), or be given an explicit completeness flag.
+
 **Constraints:**
 
-1. Both episodes same `user_id` and same `series_id` (composite FKs).  
-2. `left_episode_id <> right_episode_id`.  
-3. Only active (non-purged) episodes participate; inactive/rebuild_pending excluded.  
-4. Rows recreated on series/episode rebuild; no user decisions or assertion trust stored here.  
+1. Both episodes same `user_id` and same `series_id` (composite FKs — §38.7c).  
+2. `left_episode_id < right_episode_id` (implies ≠).  
+3. Only active episodes participate.  
+4. No user decisions or assertion trust stored here.  
 5. Does not grant or alter assertion trust.
 
-**Optional episode cache:** `has_temporal_overlap boolean` on `memory_entity_relationship_episodes` — derived convenience (`true` if any pairwise row is `overlapping|contains|contained_by`). **Not authoritative**; pairwise details always from the relations table.
+**Reconciliation invariant:** for each reconciled series, `episode_relation_count = active_episode_count × (active_episode_count - 1) / 2`.
+
+**Optional episode cache:** `has_temporal_overlap boolean` — derived convenience (`true` if any pairwise row is `overlapping|contains|contained_by`). **Not authoritative.**
 
 Identical `undated_current` keys collapse to one episode (same key); they do not create a self-pair.
 
@@ -1245,7 +1271,7 @@ Never auto-distrust assertions for graph cardinality.
 ### 26.5 Stage 12 presentation
 
 1. List episodes separately with bounds + support counts.  
-2. Load pairwise relations via `listEpisodeRelations` / `listRelationsForEpisode`; never infer one period from overlap.  
+2. Load pairwise relations via `listEpisodeRelations` / `listRelationsForEpisode` (dense set; never treat missing as disjoint; never infer one period from overlap).  
 3. Do not present historical/`ended` as current.  
 4. Show user decision badges from canonical decision table (`application_state='active'` only).  
 5. Evidence per period = that episode’s support assertions (explainability).  
@@ -1588,9 +1614,10 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `is_active` | boolean | NO | `true` |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
-**Unique:** `(user_id, id)`; at most one `is_primary` active per entity (partial unique).  
+**Unique:** `(user_id, id)`.  
+**Partial unique:** at most one `is_primary` active per entity.  
 **No unique** on `normalized_value` (ambiguity allowed — identical names ≠ identical entities).  
-**FK:** composite to entity CASCADE; optional composite to assertion.  
+**FK:** `(user_id, entity_id) → memory_entities(user_id, id)` ON DELETE CASCADE; optional `(user_id, source_assertion_id) → memory_assertions(user_id, id)`.  
 **Indexes:** `(user_id, normalized_value)` WHERE `is_active`.  
 **Canonical name:** `is_primary=true` row is authoritative display name; writers must sync `memory_entities.primary_label` + `primary_alias_id` in same TX (§10.1).  
 **RLS/writers:** same pattern; owned by `EntityAliasStore`.  
@@ -1655,7 +1682,7 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `created_at` | timestamptz | NO | `now()` |
 
 **Unique:** `(user_id, mention_id, entity_id)`.  
-**FK:** composite mention, entity.  
+**FK:** `(user_id, mention_id) → memory_entity_mentions(user_id, id)`; `(user_id, entity_id) → memory_entities(user_id, id)`.  
 **TTL:** supersede on re-resolve.  
 **Rebuildable:** Yes.
 
@@ -1710,13 +1737,15 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `last_reconciled_at` | timestamptz | NO | `now()` |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
-**Unique asymmetric:** `(user_id, source_entity_id, target_entity_id, relationship_type)`.  
+**Unique:** `(user_id, id)` — required composite FK parent for episodes, episode_relations, and support.  
 **Unique:** `(user_id, series_identity_key)`.  
+**Unique asymmetric:** `(user_id, source_entity_id, target_entity_id, relationship_type)`.  
 **Unique symmetric:** enforce `source_entity_id < target_entity_id` for symmetric types + same unique tuple.  
-**FK:** composite both entities.  
+**FK:** `(user_id, source_entity_id) → memory_entities(user_id, id)`; `(user_id, target_entity_id) → memory_entities(user_id, id)`.  
 **Rebuildable:** **Yes** (re-apply user decisions after rebuild).  
 **Note:** Uniqueness is on the **series identity**, not on a single temporal period.  
-**Canonical user decisions:** `memory_entity_relationship_user_decisions` only.
+**Canonical user decisions:** `memory_entity_relationship_user_decisions` only.  
+**Dense relations:** after reconcile, episode_relations row count must equal `N(N-1)/2` for N active episodes.
 
 ### 38.7b `memory_entity_relationship_episodes` — **derived temporal periods**
 
@@ -1740,12 +1769,13 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `last_reconciled_at` | timestamptz | NO | `now()` |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
+**Unique:** `(user_id, series_id, id)` — required composite FK parent for episode_relations and support.  
 **Unique:** `(user_id, series_id, episode_key)`.  
 **FK:** `(user_id, series_id) → memory_entity_relationship_series(user_id, id)`.  
 **Rebuildable:** **Yes** (row UUIDs may change; `episode_key` stable for same identity+projector version).  
 **Writers:** EntityRelationshipProjector only.  
 **Join rule:** supports attach only when their computed `episode_key` matches — **no soft overlap merge**.  
-**Pairwise overlap:** not stored as a scalar here — see `memory_entity_relationship_episode_relations`.  
+**Pairwise overlap:** dense `memory_entity_relationship_episode_relations` (not a scalar here).  
 **Allows:** multiple episodes per series (e.g. works_at 2018–2020 and 2024–2026).
 
 ---
@@ -1764,9 +1794,21 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
 **Unique:** `(user_id, series_id, left_episode_id, right_episode_id)`.  
-**Checks:** `left_episode_id < right_episode_id`; `left <> right`.  
-**FKs:** composite to series; composite to both episodes (same user + series).  
-**Rebuildable:** **Yes** — deleted and recreated on series/episode rebuild.  
+**Checks:** `left_episode_id < right_episode_id` (implies ≠ self).  
+**FKs (exact):**
+```text
+(user_id, series_id)
+  → memory_entity_relationship_series(user_id, id)
+
+(user_id, series_id, left_episode_id)
+  → memory_entity_relationship_episodes(user_id, series_id, id)
+
+(user_id, series_id, right_episode_id)
+  → memory_entity_relationship_episodes(user_id, series_id, id)
+```
+These structurally guarantee same user, same series, no cross-series/cross-user pairs, and no self-pairs (with the CHECK).  
+**Dense completeness:** for N active episodes on the series, exactly `N(N-1)/2` rows; `disjoint` and `unknown` stored explicitly; missing row ≠ disjoint.  
+**Rebuildable:** **Yes** — deleted and recreated on series/episode rebuild (same projector version as episodes).  
 **Writers:** EntityRelationshipProjector only.  
 **No** user decisions, trust, or assertion authority stored here.  
 **Classification:** Derived projection.
@@ -1792,8 +1834,15 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `is_active` | boolean | NO | `true` |
 | `created_at` | timestamptz | NO | `now()` |
 
-**Unique:** `(user_id, episode_id, assertion_id, revision_id)` WHERE `is_active`.  
-**FK:** composite series, episode, assertion, revision.  
+**Unique:** `(user_id, id)`; active unique `(user_id, episode_id, assertion_id, revision_id)` WHERE `is_active`.  
+**FKs:**
+```text
+(user_id, series_id) → memory_entity_relationship_series(user_id, id)
+(user_id, series_id, episode_id) → memory_entity_relationship_episodes(user_id, series_id, id)
+(user_id, assertion_id) → memory_assertions(user_id, id)   -- Stage 9 parent unique
+(user_id, assertion_id, revision_id) → memory_assertion_revisions(user_id, assertion_id, id)
+```
+Optional mention FKs: `(user_id, subject_mention_id)` / `(user_id, object_mention_id)` → `memory_entity_mentions(user_id, id)`.  
 **Rebuildable:** Yes.
 
 ---
@@ -1824,6 +1873,7 @@ Split: `id`, `user_id`, `source_entity_id`, `new_entity_id`, `moved_mention_ids`
 
 `id`, `user_id`, `entity_id`, `provider`, `external_type`, `external_key_hash`, `external_key_encrypted` (nullable), `authority` user_confirmed|system, `is_active`, times.  
 **Unique:** `(user_id, provider, external_type, external_key_hash)`.  
+**FK:** `(user_id, entity_id) → memory_entities(user_id, id)`.  
 Never store raw email/phone in `external_key` plaintext columns in v1 — hash (+ optional app-level encrypt).
 
 ---
@@ -1844,6 +1894,7 @@ One-to-many possible project entities for a normalized scope label.
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
 **Unique:** `(user_id, scope_label_normalized, entity_id)` WHERE `is_active` — **many entities per label allowed**.  
+**FK:** `(user_id, entity_id) → memory_entities(user_id, id)`.  
 **Rebuildable:** Yes.
 
 ### 38.11b `memory_entity_scope_label_bindings` — **operational confirmed mapping**
@@ -1862,6 +1913,7 @@ Context-specific binding of a label to one project.
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
 **Unique:** `(user_id, scope_label_normalized, context_fingerprint)` WHERE `is_active`.  
+**FK:** `(user_id, entity_id) → memory_entities(user_id, id)`.  
 **Not an ACL.** Rebuildable only if authority is system-proposed; user_confirmed bindings are operational and retained across rebuilds of candidates.
 
 ---
@@ -1913,9 +1965,10 @@ Reuse Stage 9 `deletion_workflows` / steps; add steps in §56. Optional `memory_
 10. `primary_label` may only change via primary-alias sync TX.  
 11. Relationship user decisions are same-user only; workers cannot insert owner confirmations.  
 12. Mention archive/purge commands enforce eligibility (§13.4).  
-13. Episode_relations both episodes same user and same series; left < right.  
+13. Episode_relations both episodes same user and same series; left < right; dense completeness `N(N-1)/2` after reconcile.  
 14. `series_identity_key` recomputed after merge/split; never includes assertion/episode/trust.  
-9. CHECK `source_entity_id <> target_entity_id` for nonsensical self-loops except allowed types none in v1 for person-self loops on reports_to etc. Self may appear as source of reports_to.
+15. CHECK `source_entity_id <> target_entity_id` for nonsensical self-loops except allowed types none in v1 for person-self loops on reports_to etc. Self may appear as source of reports_to.  
+16. Composite FK parents expose compatible unique keys: series `UNIQUE (user_id, id)`; episodes `UNIQUE (user_id, series_id, id)`; entities/aliases/mentions `UNIQUE (user_id, id)`.
 
 ---
 
@@ -1963,7 +2016,8 @@ EntityAliasStore
 
 EntityRelationshipProjector
   → reads grounding + assertions + disclosure
-  → writes series + episodes + support + episode_relations (rebuildable; exact episode_key)
+  → writes series + episodes + support + dense episode_relations (rebuildable; exact episode_key; `N(N-1)/2`)
+  → stores disjoint/unknown explicitly; missing row = drift, never disjoint
   → sets optional has_temporal_overlap cache from pairwise rows
   → reapplies active user decisions onto series caches
 
@@ -2054,8 +2108,9 @@ interface AssertionEntityGroundingStore {
 interface EntityRelationshipProjector {
   reconcileForAssertion(userId: string, assertionId: string, revisionId: string): Promise<void>;
   rebuildForEntity(userId: string, entityId: string): Promise<void>;
-  // Writes series + episodes + support + episode_relations using exact temporal identity (§26);
-  // never merges non-identical episode_keys; then reapplies active user decisions to caches
+  // Writes series + episodes + support + dense episode_relations (§26.3) using exact temporal identity;
+  // never merges non-identical episode_keys; stores disjoint/unknown explicitly;
+  // enforces episode_relation_count = N(N-1)/2 for active episodes; then reapplies active user decisions
 }
 
 interface RelationshipUserDecisionStore {
@@ -2133,8 +2188,8 @@ Workers **must not** set `user_confirmed` / confirm merge/split / invent trusted
 | --- | --- | --- | --- | --- |
 | `resolve_assertion_entities` | assertion | assertion_id, revision_id, resolver_version | per revision+version | stale revision abort |
 | `resolve_document_entity_mentions` | document | document_id, content_sha256 | per fingerprint | cancel on delete |
-| `project_entity_relationships` | assertion | assertion_id, revision_id, relationship_projector_version | per revision | rebuilds series/episodes + reapply decisions |
-| `rebuild_entity_relationships` | entity | entity_id, reason | per entity+version | sole normative name; former draft `rebuild_entity_projection` superseded — do not dual-register |
+| `project_entity_relationships` | assertion | assertion_id, revision_id, relationship_projector_version | per revision | rebuilds series/episodes + dense episode_relations (`N(N-1)/2`) + reapply decisions |
+| `rebuild_entity_relationships` | entity | entity_id, reason | per entity+version | sole normative name; former draft `rebuild_entity_projection` superseded — do not dual-register; rebuilds complete dense relation set |
 | `reapply_relationship_user_decisions` | relationship_series or user | series_identity_key | per key+updated_at | cache only |
 | `archive_eligible_mentions` | user | soft_cap, as_of | per user+day | §13.4 |
 | `reconcile_self_entity_profile` | user | profile_updated_at | per profile version | |
@@ -2263,6 +2318,7 @@ interface EntityQueryPort {
   explainRelationshipEpisode(userId, episodeId): RelationshipEpisodeExplanation;
   explainRelationshipSeries(userId, seriesId): RelationshipSeriesExplanation;
   listEpisodeRelations(userId, seriesId): RelationshipEpisodeRelationRef[];
+  // Requires reconciled series: episode_relation_count = N(N-1)/2; never treat missing as disjoint
   listRelationsForEpisode(userId, episodeId): RelationshipEpisodeRelationRef[];
   listRelationshipUserDecisions(userId, seriesIdentityKey): DecisionRef[]; // active only for display caches
 
@@ -2278,7 +2334,8 @@ interface EntityQueryPort {
   // - not present historical episodes as current
   // - not collapse multiple episodes into one fact
   // - not merge overlapping non-identical temporal identities
-  // - present pairwise overlap/containment/adjacency via episode_relations (never one scalar)
+  // - present dense pairwise episode_relations (never one scalar; never infer missing=disjoint)
+  // - use only reconciled series (matching projector version / completeness) or explicit incomplete flag
   // - not pick an arbitrary project when scope label is ambiguous
   // - surface user decision badges from application_state=active only (exclude needs_review)
   // - ignore mentions with retention_state != active for live retrieval
@@ -2300,13 +2357,15 @@ Filters allowed: entity_id, kind, relationship_type, series_id, episode_id, temp
 | Deleted source mid-job | Mark source_deletion_state; continue on assertion |
 | Duplicate retry | Idempotent command_results |
 | Episode/series drift | rebuild_entity_relationships |
+| Episode relation count ≠ N(N-1)/2 | derived-state drift → rebuild complete dense set in same TX/version; never treat missing as disjoint |
+| Missing relation row interpreted as disjoint | forbidden; Stage 12 uses reconciled series only |
 | User decision cache drift | reapply_relationship_user_decisions (decisions win) |
 | Primary label drift | reconcile_entity_primary_label (alias wins) |
 | Self/profile drift | reconcile_self_entity_profile (profile wins primary) |
 | Provisional limit hit | unresolved / review_queued; no more creates |
 | Soft-cap pressure | archive_eligible_mentions (§13.4); never archive protected |
 | Ambiguous project label | return ambiguous_project_scope; no silent pick |
-| Overlapping non-identical intervals | separate episodes + episode_relations rows; no silent merge |
+| Overlapping non-identical intervals | separate episodes + dense episode_relations (incl. overlapping explicitly); no silent merge |
 | Ambiguous split of confirmed connection | decision → needs_review; no dual apply |
 | Purge with NOT NULL normalized text | forbidden — nullable + CHECK; purge nulls both texts |
 | Merge cycle attempt | Reject RPC |
@@ -2359,9 +2418,11 @@ Filters allowed: entity_id, kind, relationship_type, series_id, episode_id, temp
 | 37 | Soft-overlap merges distinct jobs | Exact episode_key only | Projector v1 algorithm | Future clustering misuse | Partial-overlap → two episodes + relations test | 15 |
 | 38 | Soft-cap archives grounded mentions | §13.4 eligibility checks | Retention service | Race with grounding | Archive blocked_grounding test | 15 |
 | 39 | Archived/purged mentions re-enter resolution | retention_state='active' filter | Resolver queries active only | Missing filter | Purged excluded + null text test | 15 |
-| 40 | Scalar overlap loses multi-neighbour facts | episode_relations table | Projector writes pairs | Cache-only has_temporal_overlap misuse | One episode contains+overlaps test | 15 |
+| 40 | Scalar overlap loses multi-neighbour facts | dense episode_relations (`N(N-1)/2`) | Projector writes complete pair set incl. disjoint/unknown | Cache-only has_temporal_overlap misuse; missing≠disjoint | Contains+overlaps+adjacent dense count test | 15 |
 | 41 | Split duplicates confirmations | needs_review policy | DecisionStore split handler | Bug copies both | Ambiguous split test | 15 |
 | 42 | Asymmetric key min/max collapse | Separate formulas §23.1 | Type registry symmetric flag | Wrong symmetry metadata | reports_to direction test | 15 |
+| 43 | Cross-series/cross-user episode pair | Composite FKs to series `(user_id,id)` and episodes `(user_id,series_id,id)` + left<right | Projector same-series only | Miswritten DEFINER | Cross-series/cross-user insert fails | 15 |
+| 44 | Incomplete dense relation set | Count invariant + same projector version | Rebuild jobs / Stage 12 reconciled-only | Lag before rebuild | Count mismatch → drift rebuild test | 15 |
 
 ---
 
@@ -2543,13 +2604,13 @@ PDF yields >50 name-like mentions; after document cap, further mentions `review_
 User `relationship_suggestion_reject` writes canonical decision; later `rebuild_entity_relationships` recreates series/episodes; rejection remains; cache shows suppressed; explainability cites decision row.
 
 ### E55 — Partially overlapping employment dates
-Supports 2018–2021 and 2020–2022 → **two episodes** (different exact keys); one `episode_relations` row `relation_type=overlapping` with `left_episode_id < right_episode_id`; not merged; series may be conflict_open if cardinality requires; no auto-distrust.
+Supports 2018–2021 and 2020–2022 → **two active episodes** (different exact keys); dense set has **exactly 1** `episode_relations` row (`N=2` ⇒ `2×1/2=1`) with `relation_type=overlapping`, `left_episode_id < right_episode_id`; not merged; series may be conflict_open if cardinality requires; no auto-distrust. Missing row would mean drift, not disjoint.
 
 ### E56 — Soft-cap archives old unresolved mention
 Eligible unresolved mention archived: `retention_state=archived`, `mention_text_raw` null, **normalized retained**; fingerprint retained; excluded from resolution; still explainable to owner; grounded/confirmed mentions untouched.
 
 ### E57 — One episode contains B, overlaps C, adjacent D
-Three pairwise `episode_relations` rows from the same left episode (via ordered pairs); optional `has_temporal_overlap=true` cache; Stage 12 lists each neighbour distinctly.
+Four active episodes on one series ⇒ dense set has **exactly 6** relation rows (`4×3/2=6`), including the three neighbour relations from A plus the other pairs among B/C/D (each classified, including any `disjoint`/`unknown` explicitly). Optional `has_temporal_overlap=true` cache; Stage 12 lists each neighbour distinctly and never treats a missing pair as disjoint.
 
 ### E58 — Ambiguous split of confirmed “friend_of Sarah”
 Mentions split across two Sarahs without clear evidence → decision `application_state=needs_review`, `reason_code=entity_split_ambiguous`; caches not confirmed; user `relationship_decision_reassign`.
@@ -2863,10 +2924,14 @@ flowchart LR
 73. Archived mentions are excluded from active resolution and Stage 12 live retrieval.  
 74. Explainability APIs distinguish relationship **series** from relationship **episodes**.  
 75. Job name `rebuild_entity_relationships` is normative; former draft name `rebuild_entity_projection` is superseded and must not be dual-registered.  
-76. Pairwise temporal relations are stored in `memory_entity_relationship_episode_relations`, not as a scalar `overlap_status` on episodes.  
+76. Pairwise temporal relations are stored densely in `memory_entity_relationship_episode_relations` (`N(N-1)/2` for N active episodes), not as a scalar `overlap_status` on episodes.  
 77. Asymmetric `series_identity_key` preserves endpoint order; symmetric keys normalize with min/max entity ids.  
 78. Ambiguous entity splits set relationship user decisions to `needs_review` and never auto-duplicate confirmations.  
 79. Purged mentions have NULL `mention_text_normalized` and `mention_text_raw` and cannot participate in resolution or Stage 12 retrieval.  
+80. `disjoint` and `unknown` episode relations are stored explicitly; absence of a row never means disjoint.  
+81. For each reconciled series, `episode_relation_count = active_episode_count × (active_episode_count - 1) / 2`.  
+82. Series exposes `UNIQUE (user_id, id)`; episodes expose `UNIQUE (user_id, series_id, id)` so episode_relations composite FKs structurally enforce same-user/same-series pairs.  
+83. Stage 12 consumes only reconciled dense relation sets (or an explicit incompleteness signal).  
 
 ---
 
@@ -2921,10 +2986,10 @@ flowchart LR
 | 9L | Relationship user decisions | Derived rows cannot hold durable UX decisions | Add `memory_entity_relationship_user_decisions` + reapply job | Design yes; **required** | Survive rebuild | Stage 9 |
 | 9M | Mention retention lifecycle | Soft-cap archive claimed without schema | Add `retention_state`/`archived_at`/`purged_at` on mentions + archive job | Design yes; **required** | Privacy + history | Stage 9 |
 | 9N | Job rename | Former draft `rebuild_entity_projection` ambiguous | Add **only** `rebuild_entity_relationships`; do not register the old name | Design yes | Clarity | Stage 9 |
-| 9P | Pairwise episode relations | Scalar overlap cannot model multi-neighbour relations | Add `memory_entity_relationship_episode_relations` | Design yes; **required** | Derived only | Stage 9 |
+| 9O | Deletion purge of decisions | Account purge incomplete | `purge_relationship_user_decisions` step | **No** for account safety | Privacy | Stage 9 |
+| 9P | Pairwise episode relations | Scalar overlap cannot model multi-neighbour relations | Add dense `memory_entity_relationship_episode_relations` (`N(N-1)/2`) | Design yes; **required** | Derived only; missing≠disjoint | Stage 9 |
 | 9Q | Decision application_state | Split ambiguity not representable | Add `application_state` + reason codes on user_decisions | Design yes; **required** | No dual confirm | Stage 9 |
 | 9R | Nullable mention_text_normalized | Purge privacy blocked by NOT NULL | Make nullable + lifecycle CHECKs §13.4 | Design yes; **required** | Privacy | Stage 9 |
-| 9O | Deletion purge of decisions | Account purge incomplete | `purge_relationship_user_decisions` step | **No** for account safety | Privacy | Stage 9 |
 
 Do **not** amend `memory_assertion_links` link_type for domain relationships.
 
@@ -3039,11 +3104,13 @@ Stage 11 does **not** edit Stage 10. Freeze/authority/disclosure unchanged.
 | 48 | Exact deterministic episode construction | **Met** — §26 Option A |
 | 49 | Mention archival schema-backed | **Met** — §13.4 / §38.4 |
 | 50 | Series vs episode APIs unambiguous | **Met** — §42 / §49 |
-| 51 | Pairwise episode_relations model | **Met** — §26.3 / §38.7c |
+| 51 | Dense pairwise episode_relations model | **Met** — §26.3 / §38.7c (`N(N-1)/2`; missing≠disjoint) |
 | 52 | Asymmetric/symmetric series_identity_key | **Met** — §23.1 |
 | 53 | Split-safe relationship decisions | **Met** — §23.1.1 |
 | 54 | Purged mention null normalized text | **Met** — §13.4 |
 | 55 | Job rename consistency | **Met** — `rebuild_entity_relationships` only |
+| 56 | Composite FK parent unique keys | **Met** — series `(user_id,id)`; episodes `(user_id,series_id,id)` |
+| 57 | Stage 9 amendments ordered 9A–9R | **Met** — §56 |
 
 ---
 
@@ -3120,11 +3187,13 @@ No disagreement that assertions are canonical or that Stage 10 annotations are n
 - [x] Stage 12 contracts without ranking; multi-episode + ambiguous project aware  
 - [x] Relationship user decisions canonical; series flags are caches  
 - [x] Exact episode_key; no silent merge of different bounds  
-- [x] Pairwise episode_relations (not scalar overlap_status)  
+- [x] Dense pairwise episode_relations (`N(N-1)/2`); disjoint/unknown explicit; missing≠disjoint  
+- [x] Series `UNIQUE (user_id, id)`; episodes `UNIQUE (user_id, series_id, id)`; episode_relations FKs target those keys  
 - [x] Asymmetric vs symmetric series_identity_key formulas  
 - [x] Split decisions: transfer or needs_review; never dual-confirm  
 - [x] Mention retention_state; purged nulls normalized+raw text  
 - [x] Interfaces/jobs use series/episode terminology; rebuild_entity_relationships only  
+- [x] Ownership constraints numbered sequentially; Stage 9 amendments 9A–9R ordered  
 - [x] Amendments listed, docs 9/10 not edited  
 - [x] Production behaviour unchanged  
 - [x] Only Stage 11 document modified  
