@@ -19,7 +19,8 @@
 | Mentions (`resolved_entity_id`) | **Canonical operational span resolution** |
 | Assertion grounding (`memory_assertion_entities`) | **Canonical operational role→entity links** for a revision (kept in sync with mention resolution; not a free-floating second identity store) |
 | Entity-resolution candidates / scope-label candidates | **Candidate operational data** |
-| Relationship **series** + **episodes** + support | **Derived and rebuildable projections** supported by assertions; multiple temporal episodes may coexist |
+| Relationship **series** + **episodes** + support | **Derived and rebuildable** projections supported by assertions; multiple temporal episodes may coexist (exact-bounds episode keys §26) |
+| Relationship **user decisions** (confirm/reject/suppress display) | **Canonical operational** — survive full series/episode rebuilds (§23.1) |
 | Entity search indexes | **Derived and rebuildable** (Stage 7 derived layer) |
 
 Binding product rules:
@@ -34,6 +35,8 @@ Binding product rules:
 8. Scope labels remain relevance metadata (possibly one-to-many project candidates), never ACLs.
 9. Profile remains the account identity source; the self entity is a thin synchronized anchor.
 10. Provisional entity creation is rate- and count-limited; overflow leaves mentions unresolved or queued for review.
+11. User relationship confirmations, rejections, and display preferences are stored as **canonical operational decisions**, never only on derived series/episode rows.
+12. Mentions have an explicit retention lifecycle (`active` / `archived` / …); archival is schema-backed (§13.4).
 
 This document answers Stage 10’s five handoff questions, defines exact tables/services/commands/jobs, and hands Stage 12 safe query contracts **without** ranking or packing.
 
@@ -175,11 +178,13 @@ Assertion (canonical fact)
 Refinements beyond the “likely direction”:
 
 1. Provisional entities are **canonical operational rows** with `resolution_authority='system_proposed'` — not derived-only.  
-2. Relationship **series + episodes** are **always rebuildable** from grounding + assertions; repeated temporal periods are separate episodes.  
-3. Manual “draw an edge” UX must call a user command that creates/links a `relationship_fact` assertion, then projects.  
+2. Relationship **series + episodes** are **always rebuildable** from grounding + assertions using **exact temporal identity** (§26); repeated periods are separate episodes.  
+3. Manual “draw an edge” UX must create/link a `relationship_fact` assertion, then project series/episodes.  
 4. Entity search/FTS tables are derived indexes only.  
 5. **Primary alias is the canonical display name**; `memory_entities.primary_label` is synchronized denormalized cache (§10.1).  
-6. **Mention resolution is authoritative for spans**; assertion grounding is authoritative for revision-role links and must agree with the mention (§20).
+6. **Mention resolution is authoritative for spans**; assertion grounding is authoritative for revision-role links and must agree with the mention (§20).  
+7. User relationship display/confirm/reject decisions live in `memory_entity_relationship_user_decisions` and **survive rebuilds** (§23.1).  
+8. Mentions use an explicit retention lifecycle; soft-cap archival is schema-backed (§13.4).
 
 **Why not A:** Stage 12 and UX need stable person/project anchors, disambiguation, and “why connected” without re-parsing free text.  
 **Why not B/E:** Independent edges become a second memory store.  
@@ -199,9 +204,11 @@ Refinements beyond the “likely direction”:
 | **`primary_label`** | Denormalized copy of primary alias `display_value` on the entity row | Synchronized read optimization (not independent truth) |
 | **Mention resolution** | `memory_entity_mentions.resolved_entity_id` — what a span refers to | Canonical operational (span-level) |
 | **Assertion grounding** | Mapping from assertion revision role (+ mention) → entity | Canonical operational (assertion-role); must match mention resolution |
-| **Relationship series** | Stable derived identity of `(source, target, type)` | Derived rebuildable parent |
-| **Relationship episode** | One temporal period of a series (e.g. works_at 2018–2020) | Derived rebuildable; multiple per series |
+| **Relationship series** | Derived identity of `(source, target, type)` | Derived rebuildable parent |
+| **Relationship episode** | One temporal period of a series identified by **exact normalized temporal identity** | Derived rebuildable; multiple per series |
 | **Relationship support** | Assertion+revision backing an episode | Derived rebuildable |
+| **Relationship user decision** | User confirm/reject/suppress/restore for a series or typed suggestion | **Canonical operational** (survives rebuild) |
+| **`user_display_confirmed` cache** | Optional denormalized flag on series from user decisions | Synchronized cache only — not canonical |
 | **Resolution candidate** | Scored possible entity for a mention | Candidate operational |
 | **Scope-label candidate** | Possible project entity for a normalized scope label | Candidate operational (one-to-many allowed) |
 | **Self entity** | Unique `person` entity with `is_self=true` | Canonical operational (profile-synced thin anchor) |
@@ -232,7 +239,9 @@ Series/episode: self --reports_to--> Tasos (current episode) → derived from su
 | Mentions + `resolved_entity_id` | Canonical operational span resolution | Spans partially re-detectable; **resolution decisions and history are not discarded as mere cache** | Resolution yes |
 | Assertion–entity grounding | Canonical operational role links | Active rows for a revision may be **re-emitted from that revision’s resolved mentions** after revision change; **user grounding authority/history retained** | Yes |
 | Resolution / scope-label candidates | Candidate | Yes | Suggest / disambiguate |
-| Relationship series + episodes + support | Derived projection | **Yes** (full rebuild) | Confirm display, not invent facts |
+| Relationship series + episodes + support | Derived projection | **Yes** (full rebuild; re-applies user decisions afterward) | Display confirm via user-decision table, not invent facts |
+| Relationship user decisions | Canonical operational | **No** | Yes (confirm/reject/suppress/restore) |
+| Mentions retention (`retention_state`) | Canonical operational lifecycle | Archival/compaction rules §13.4 | N/A |
 | Entity FTS / embedding search | Derived | Yes | N/A |
 | External entity refs | Operational optional | On disconnect | User-linked only |
 
@@ -489,6 +498,55 @@ project_scope | concept | possessor | participant | author | recipient
 
 Role answers “how the mention participates,” not “what the relationship is.” Predicates stay on assertions / relationship types.
 
+### 13.4 Mention retention and archival
+
+**Technical decision — Option 1:** add lifecycle fields on `memory_entity_mentions` (do not invent a second mention table in v1). Soft-cap “archive” is only valid because this schema exists.
+
+**Rejected Option 2** (separate retention table): extra join complexity for little privacy gain in v1.  
+**Rejected Option 3** (hard delete as only policy): destroys correction/explainability for recent unresolved mentions.
+
+#### Retention states
+
+```text
+retention_state: active | archived | purge_pending | purged
+```
+
+| Column | Purpose |
+| --- | --- |
+| `retention_state` | Lifecycle axis (orthogonal to `resolution_state`) |
+| `archived_at` | When moved to archived |
+| `purged_at` | When private fields stripped / tombstoned |
+| `archive_reason_code` | e.g. `soft_cap_unresolved`, `source_deleted_compact`, `user_requested` |
+
+#### Eligibility and prohibitions
+
+| Mention class | May archive? |
+| --- | --- |
+| Unresolved / review_queued / ambiguous with `user_confirmation='none'` and **no** active grounding | **Yes** (soft-cap eligible) |
+| `user_confirmation` ∈ {confirmed, rejected} | **No** (preserve resolution history) |
+| Referenced by **active** grounding (`memory_assertion_entities.is_active`) | **No** |
+| Resolved (`resolution_state=linked`) with active grounding | **No** |
+| Resolved but grounding inactive and no user confirmation | Eligible only after N days (config; Stage 15) — prefer keep if entity still active |
+| Source deleted candidate mentions | May archive sooner; keep fingerprint + normalized text |
+
+#### Behaviour
+
+1. **Archived mentions remain FK targets** (grounding history, candidates may point at them).  
+2. **Do not participate in entity resolution candidate generation or auto-link** (`retention_state='active'` required).  
+3. **Do not participate in Stage 12 retrieval filters** as live mentions; Stage 12 may still read via explainability APIs when disclosure allows.  
+4. **Explainability:** archived mentions remain readable to the owner for “why linked / why unresolved” with retention badge; after `purged`, only ids/fingerprints/reason codes.  
+5. **On archive:** set `mention_text_raw = NULL`; **retain** `mention_text_normalized`, `span_fingerprint`, offsets, resolution fields, entity id if any.  
+6. **Restore:** user/system command `mention_restore` → `retention_state='active'`; raw text is **not** restored unless still available from assertion revision spans.  
+7. **Source deletion:** mark `source_deletion_state`; may accelerate archive of unresolved non-confirmed mentions; never auto-delete user-confirmed resolution history.  
+8. **Account deletion:** purge mentions with entity graph (strip/purge then tombstone per Stage 9).  
+9. **Orphans:** mentions with deleted/purged entities follow redirect or clear `resolved_entity_id` only when entity purged; archival still allowed if eligible.  
+10. **Soft-cap enforcement order:** (a) archive oldest eligible unresolved/`review_queued` without active grounding; (b) never archive protected classes; (c) if still over cap, stop creating new provisionals and leave new mentions `review_queued` — do **not** delete protected history.  
+11. **Bulk import:** higher create caps (§18.2); archival still applies afterward; do not skip retention protections for user_confirmed.  
+12. **Metrics/audit codes:** `mention_archived_soft_cap`, `mention_archive_blocked_grounding`, `mention_archive_blocked_user_confirmation`, `mention_restored`, `mention_purged`.  
+13. **Stage 15 tests:** soft-cap never archives grounded/confirmed mentions; archived excluded from resolution; raw text null after archive; restore semantics; account purge.
+
+**Invariant:** claiming soft-cap archival without `retention_state` is forbidden — this subsection is normative for §18.2.
+
 ---
 
 ## 14. Stage 10 annotation handoff
@@ -675,7 +733,7 @@ Binding decisions:
 | Max new provisional entities per assertion (per resolve job for that revision) | **5** | Per `resolve_assertion_entities` execution |
 | Max new provisional entities per document / import batch | **50** (documents); **200** for user-initiated imports flagged `bulk_entity_import=true` | Per document_id or import_batch_id |
 | Max new provisional entities per worker job lease | **50** | Per durable job attempt |
-| Max unresolved mentions retained per user (active, non-deleted sources) | **5 000** (soft); oldest beyond soft cap eligible for archive of *mention rows* only | Per user |
+| Max unresolved mentions retained per user (`retention_state='active'`, non-protected) | **5 000** (soft); oldest **eligible** mentions archived per §13.4 | Per user |
 | Max resolution candidates retained per mention | **8** (already) | Per mention |
 | Max provisional creates per user per rolling 24h | **200** default; **1 000** when user explicitly starts bulk import | Per user window |
 
@@ -686,8 +744,9 @@ Binding decisions:
 3. Emit audit/metrics reason codes: `provisional_limit_assertion`, `provisional_limit_document`, `provisional_limit_job`, `provisional_limit_user_rate`, `mention_retain_soft_cap`.  
 4. Prefer review queue over silent mass creation — especially under prompt-injection / noisy PDF suspicion (`processingWarnings` / high mention density).  
 5. User-initiated imports with many names: require `bulk_entity_import` flag + higher caps; still never auto-merge persons; still apply ambiguity gates.  
-6. Orphan provisional archival: reconciliation job may archive provisionals with zero groundings/mentions older than N days (config; Stage 15), without deleting assertions.  
-7. Limits never grant or revoke assertion trust.
+6. Orphan provisional **entity** archival: reconciliation may archive entities with zero active groundings/mentions older than N days (config; Stage 15), without deleting assertions.  
+7. Soft-cap mention archival follows §13.4 only (schema-backed `retention_state`).  
+8. Limits never grant or revoke assertion trust.
 
 ---
 
@@ -785,18 +844,110 @@ Alternatives evaluated for repeated temporal periods:
 Selected structure:
 
 1. `memory_entity_relationship_series` — derived identity of `(user, source_entity, target_entity, relationship_type)`.  
-2. `memory_entity_relationship_episodes` — one row per temporal episode (e.g. 2018–2020 and 2024–2026 coexist).  
+2. `memory_entity_relationship_episodes` — one row per **exact temporal identity** episode (e.g. 2018–2020 and 2024–2026 coexist).  
 3. `memory_entity_relationship_support` — ties assertions/revisions to an **episode**.  
-4. Support cites assertion + revision + mentions.  
-5. Episode trust/temporal/modality/disclosure **cached from support** and reconciled.  
-6. Candidate supports → episode `authority_class='candidate'` only.  
-7. Trusted supports → trusted episodes (`temporal_class` current vs historical).  
-8. User “confirm relationship” confirms **display** of series/episode, not inventing trust beyond supports.  
-9. Manual edge creation → must create `relationship_fact` assertion first (user command).
+4. `memory_entity_relationship_user_decisions` — **canonical operational** user confirm/reject/suppress/restore (§23.1).  
+5. Support cites assertion + revision + mentions.  
+6. Episode trust/temporal/modality/disclosure **cached from support** and reconciled.  
+7. Candidate supports → episode `authority_class='candidate'` only.  
+8. Trusted supports → trusted episodes (`temporal_class` current vs historical).  
+9. User display confirm/reject writes the **user-decision table first**, then reconciles derived series/episode caches.  
+10. Manual edge creation → must create `relationship_fact` assertion first (user command).
 
 **Binding rule:** A relationship episode/series cannot be more authoritative than its supporting assertions.
 
 **Do not** collapse separate historical periods into one row.
+
+### 23.1 Canonical relationship user decisions
+
+User confirmations must survive complete series/episode rebuilds. Storing them only on derived rows is forbidden.
+
+#### Alternatives
+
+| Option | Summary | Verdict |
+| --- | --- | --- |
+| **A — `memory_entity_relationship_user_decisions`** | One table for confirm/reject/suppress/restore | **Selected** — simplest coherent model |
+| B — Separate confirm + reject tables | Split vocabulary | Rejected — needless duplication |
+| C — General preference bag | Free-form prefs | Rejected — too vague for RLS/idempotency |
+
+#### Decision vocabulary (closed)
+
+```text
+display_confirmed   — user wants this series shown as a confirmed connection in UX
+suggestion_rejected — user dismissed a candidate suggestion for this series identity or type hint
+display_suppressed  — user hid a series that still has supporting assertions
+display_restored    — user undid suppress/reject for display (does not grant assertion trust)
+```
+
+#### Target model
+
+Decisions target a **stable series identity**, not ephemeral episode UUIDs:
+
+```text
+series_identity_key = hash(
+  user_id,
+  min/max oriented source_entity_id,
+  target_entity_id,
+  relationship_type
+)
+```
+
+Optional fields:
+
+- `episode_key` — when the decision is about a specific temporal identity (rare; usually series-level)  
+- `suggestion_fingerprint` — when rejecting a typed suggestion before a series row exists (hash of source/target/type/candidate assertion ids)
+
+#### Table: `memory_entity_relationship_user_decisions` — **canonical operational**
+
+| Column | Type | Null | Default |
+| --- | --- | --- | --- |
+| `id` | uuid | NO | `gen_random_uuid()` |
+| `user_id` | uuid | NO | — |
+| `decision_type` | text | NO | CHECK IN vocabulary above |
+| `series_identity_key` | text | NO | — |
+| `source_entity_id` | uuid | YES | NULL — filled when entities known |
+| `target_entity_id` | uuid | YES | NULL |
+| `relationship_type` | memory_entity_relationship_type | NO | — |
+| `episode_key` | text | YES | NULL — exact temporal key when episode-scoped |
+| `suggestion_fingerprint` | text | YES | NULL |
+| `is_active` | boolean | NO | `true` |
+| `actor_kind` | actor_kind | NO | `'owner_user'` |
+| `actor_id` | uuid | NO | — must equal user_id for owner |
+| `authority` | text | NO | `'user_confirmed'` |
+| `evidence_assertion_id` | uuid | YES | NULL — optional pointer |
+| `command_idempotency_key` | text | NO | — |
+| `superseded_at` | timestamptz | YES | NULL |
+| `revoked_at` | timestamptz | YES | NULL |
+| `created_at` / `updated_at` | timestamptz | NO | `now()` |
+
+**Unique active:** `(user_id, decision_type, series_identity_key, COALESCE(episode_key,''), COALESCE(suggestion_fingerprint,''))` WHERE `is_active`.  
+**Unique:** `(user_id, command_idempotency_key)`.  
+**FK:** composite to entities when present; same-user only.  
+**Rebuildable:** **No**.
+
+#### Lifecycle
+
+| Event | Behaviour |
+| --- | --- |
+| Create confirm/reject/suppress | Insert active decision; deactivate conflicting prior active decision of incompatible type for same target (e.g. confirm supersedes suppress) |
+| Revoke / restore | `display_restored` or deactivate prior; idempotent |
+| Series/episode rebuild | **Leave decisions intact**; re-apply onto new derived rows via `series_identity_key` / `episode_key` |
+| Episode UUID change | Decisions keyed by `episode_key` (exact temporal identity), not episode row UUID |
+| Entity merge/split | Rewrite `source_entity_id`/`target_entity_id`/`series_identity_key` via merge/split reconcile; preserve decision_type history |
+| Assertion correction/deletion | Decisions remain; derived series may disappear if no supports — decision stays for explainability (“you confirmed this; currently no supporting assertions”) |
+| Account deletion | Purge with entity graph |
+| Rejected suggestion + new material evidence | May re-suggest only if `suggestion_fingerprint` changes (new assertion ids / new entities) or user restored; same fingerprint stays suppressed |
+
+#### Cache on derived series
+
+`memory_entity_relationship_series.user_display_confirmed` (and optional `user_display_suppressed`) are **synchronized caches** derived from active user decisions after each rebuild. They are **not** canonical. Writers of user commands:
+
+1. Write `memory_entity_relationship_user_decisions` in the Gateway TX.  
+2. Enqueue/reconcile derived series/episodes to refresh caches.
+
+#### Explainability
+
+Explainability must show: confirmed for display, rejected suggestion, suppressed/hidden, or restored — citing the decision row (`decision_type`, `created_at`, actor), independent of whether the derived series currently exists.
 
 ---
 
@@ -859,49 +1010,121 @@ Selected structure:
 
 ## 26. Temporal relationships and episodes
 
-### 26.1 Episode model
+### 26.0 Episode construction alternatives
 
-Each **episode** caches from its supporting assertions (derived, reconciled):
+| Option | Summary | Verdict |
+| --- | --- | --- |
+| **A — Exact normalized temporal identity** | Supports share an episode **only** when normalized temporal identity is **byte-identical** | **Selected** |
+| B — Deterministic clustering of overlapping intervals | Soft merge of partial overlaps | Rejected for v1 — “compatible” clustering risks merging distinct stints; harder to explain |
+| C — Episode identity + separate temporal observations | Richer model | Deferred — more machinery than needed before Stage 15 evidence |
 
-`temporal_phase`, `temporal_bounds_kind`, `valid_from`, `valid_to`, `event_at`, `claim_modality`, `temporal_class` ∈ {`current`,`historical`,`prospective`,`ended`,`unknown`}, plus `episode_key`.
+**Why A is safer:** it removes the contradiction between “episode_key = hash(exact bounds)” and “merge overlapping non-identical bounds.” Prefer **conservative separation** over incorrectly combining two periods. Overlaps are represented as **multiple episodes** plus per-episode `overlap_status` / conflict annotation, not silent merges.
 
-**`episode_key` (deterministic, rebuildable):** hash of normalized temporal bounds identity:
+### 26.1 Exact temporal identity (normative)
+
+Projector version: `relationship_projector_version` (string, e.g. `rel-epi-v1`).
+
+For each support, compute `temporal_identity` from the supporting assertion’s **current** temporal fields:
 
 ```text
-episode_key = hash(
-  bounds_kind,
-  valid_from_or_null,
-  valid_to_or_null,
-  event_at_or_null,
-  unbounded_token_if_any
+temporal_identity = {
+  bounds_kind,          # unbounded | interval_bounded | event_anchored | expiry_ruled
+  valid_from_norm,      # UTC timestamptz truncated to day OR null sentinel
+  valid_to_norm,        # UTC day OR null sentinel
+  event_at_norm,        # UTC day OR null sentinel
+  phase,                # prospective | current | historical | ended
+  open_start,           # true if interval with unknown start
+  open_end,             # true if interval with unknown end
+  undated_token         # 'undated_current' | 'undated_historical' | 'undated_prospective' | null
+}
+```
+
+Normalization rules:
+
+1. Timestamps truncate to **UTC calendar day** for identity (time-of-day does not split episodes in v1).  
+2. Null fields use explicit sentinel strings in the hash input (`∅`), never omitted keys.  
+3. `undated_token` applies when no `valid_from`/`valid_to`/`event_at` exist; it is taken from `temporal_phase` only — so undated **current** and undated **historical** are **different** identities.  
+4. Candidate vs trusted does **not** affect `temporal_identity` (authority is separate on the episode).
+
+```text
+episode_key = sha256(
+  relationship_projector_version || '|' ||
+  bounds_kind || '|' ||
+  valid_from_norm || '|' ||
+  valid_to_norm || '|' ||
+  event_at_norm || '|' ||
+  phase || '|' ||
+  open_start || '|' ||
+  open_end || '|' ||
+  undated_token
 )
 ```
 
-Supports that share the same series + compatible overlapping/identical bounds merge into one episode; **non-overlapping periods create distinct episodes** (worked at Company A 2018–2020 and 2024–2026 → two episodes).
+**Uniqueness:** `(user_id, series_id, episode_key)` unique among derived episode rows.
 
-| Case | Episodes |
+**Stability:** `episode_key` is stable across rebuilds for the same temporal identity + projector version. Episode **row UUIDs** may change on rebuild; user decisions and explainability that need temporal specificity use `episode_key`, not episode UUID.
+
+**Joining supports to episodes:** a support joins episode E iff its computed `episode_key` equals E.episode_key on the same series. **No other merge rule exists in v1.**
+
+### 26.2 Case matrix (exact behaviour)
+
+| Case | Behaviour |
 | --- | --- |
-| Current manager | One trusted episode `temporal_class=current` |
-| Former manager | Episode `historical`/`ended` |
-| Return to employer after gap | **New episode** on same series — do not overwrite the prior period |
+| Identical date ranges | Same `episode_key` → one episode; multiple supports allowed |
+| Partially overlapping ranges | **Separate episodes** (different keys); mark pairwise `overlap_status='overlapping'` on both |
+| One range contained in another | **Separate episodes**; `overlap_status='contained'` / `'contains'` |
+| Adjacent ranges (end=start next day) | **Separate episodes**; `overlap_status='adjacent'` (not merged) |
+| Open-ended range (`open_end=true`) | Identity includes `open_end`; distinct from closed end |
+| Unknown start / unknown end | Distinct identities via `open_start`/`open_end` flags |
+| Completely unknown dates | `undated_*` token from phase → one episode per phase bucket per series |
+| `event_at` relationships | `bounds_kind=event_anchored`; key uses `event_at_norm`; not merged with intervals |
+| Current assertion without dates | `undated_current` episode |
+| Historical without dates | `undated_historical` episode (**different** from undated_current) |
+| Prospective | `phase=prospective` (dated or `undated_prospective`) |
+| Conflicting supports **same** key | Same episode; `episode_state=conflict_open` if assertion-level conflict or contradictory polarity; **no auto-distrust** |
+| Candidate vs trusted supports same key | One episode; `authority_class=trusted` if any trusted support else `candidate` |
+| Assertion correction / new revision | Old revision supports inactive; rebuild; keys follow new revision temporal fields |
+| Support deleted/distrusted | Dropped from rebuild input; episode removed if no remaining supports for that key |
+| Leave then return to same org | Non-identical intervals → **two episodes** (e.g. 2018–2020 and 2024–2026) |
+| Multiple current episodes + single-current cardinality hint | Keep separate; set series `series_state=conflict_open`; do not auto-distrust |
+| Projector version change | New keys may differ; full rebuild; map user decisions by `series_identity_key` (and old→new episode_key table only if migration note exists — v1: series-level decisions preferred) |
+
+### 26.3 Overlap annotation (not merge)
+
+After episodes are built, the projector computes pairwise overlap among episodes of the same series using interval algebra on their **displayed** bounds (from supports). Results stored on episode rows:
+
+`overlap_status`: `none` | `overlapping` | `contained` | `contains` | `adjacent` | `unknown`
+
+Overlapping undated episodes (e.g. two `undated_current`) → treat as cardinality/conflict hint, still **separate** if keys differ (they should not if identical undated_current — same key).
+
+### 26.4 Conflict state calculation
+
+| Level | Rule |
+| --- | --- |
+| Episode | `conflict_open` if ≥1 active `conflicts_with` among member assertions, or contradictory trusted supports under same key |
+| Series | `conflict_open` if any episode conflict_open **or** >1 trusted `temporal_class=current` episode when type has single-current cardinality hint |
+
+Never auto-distrust assertions for graph cardinality.
+
+### 26.5 Stage 12 presentation
+
+1. List episodes separately with bounds + support counts.  
+2. Flag overlapping/uncertain/conflict explicitly.  
+3. Do not present historical/`ended` as current.  
+4. Show user decision badges from canonical decision table.  
+5. Evidence per period = that episode’s support assertions (explainability).
+
+### 26.6 Worked temporal patterns
+
+| Pattern | Episodes |
+| --- | --- |
+| Current manager | One trusted `current` (dated or `undated_current`) |
+| Former manager | `historical`/`ended` episode |
+| Return to employer after gap | Two interval episodes on same `works_at` series |
 | Future employer | `prospective` episode |
-| Friend without dates | Single soft `current`/`unbounded` episode |
-| Doctor ended | `ended` episode |
-| Company renamed | Entity alias change; series/episodes unchanged |
-| Project archived | Series remains; episodes reflect assertion phases |
-| Moved Athens→London | Two `located_in` episodes (or ended+current) via changed_over_time supports |
-| Correction / new revision | Old revision supports deactivate; episode set rebuilt from active supports — prior period rows removed only if no remaining support justifies them |
-
-### 26.2 Overlap and conflict
-
-| Situation | Behaviour |
-| --- | --- |
-| Non-overlapping periods same series | Multiple episodes OK |
-| Overlapping periods same series with compatible facts | Merge supports into one episode if bounds compatible; else `conflict_open` on series/episodes |
-| Two **current** episodes where cardinality hint is single-current (e.g. reports_to) | `conflict_open`; do **not** auto-distrust assertions |
-| Cardinality hints | Apply to **current** episodes only; historical multiples are normal for `works_at` |
-
-Historical episodes remain queryable; Stage 12 must filter `temporal_class` and must not present historical as current.
+| Friend without dates | One `undated_current` |
+| Office Athens→London | Two `located_in` episodes (different targets ⇒ different series; if same place with changed_over_time phases, distinct keys) |
+| Correction | Rebuild from new revision identities only |
 
 ---
 
@@ -913,9 +1136,9 @@ Support row identifies: series_id, **episode_id**, supporting assertion + revisi
 | --- | --- |
 | One candidate support | Episode active, `authority_class=candidate` |
 | One trusted support | `authority_class=trusted` |
-| Multiple agreeing supports same bounds | Same episode; keep all support rows |
-| Supports for disjoint periods | **Distinct episodes** on same series |
-| Disagreeing supports same period | Episode/series `conflict_open`; do **not** auto-distrust assertions |
+| Multiple agreeing supports **identical** temporal identity | Same episode; keep all support rows |
+| Supports with different temporal identities (incl. partial overlap) | **Distinct episodes**; overlap annotated, not merged |
+| Disagreeing supports same episode_key | Episode/series `conflict_open`; do **not** auto-distrust assertions |
 | All supports historical | Episodes historical; series may still be active identity |
 | Support repudiated/distrusted | Drop from trusted active episode; rebuild |
 | Assertion archived | Support inactive for current; historical ok if policy |
@@ -1127,10 +1350,15 @@ memory_entity_mention_role:
 memory_entity_mention_resolution_state:
   unresolved | proposed | linked | rejected | ambiguous | review_queued | source_unavailable
 memory_entity_relationship_type: <closed set from §24>
-memory_entity_projection_authority: candidate | trusted
-memory_entity_projection_state: active | inactive | conflict_open | rebuild_pending
-memory_entity_projection_temporal_class:
+memory_entity_relationship_authority: candidate | trusted
+memory_entity_relationship_graph_state: active | inactive | conflict_open | rebuild_pending
+memory_entity_relationship_temporal_class:
   current | historical | prospective | ended | unknown
+memory_entity_relationship_decision_type:
+  display_confirmed | suggestion_rejected | display_suppressed | display_restored
+memory_entity_mention_retention_state: active | archived | purge_pending | purged
+memory_entity_overlap_status:
+  none | overlapping | contained | contains | adjacent | unknown
 memory_entity_source_kind:
   assertion | assertion_revision | chat_message | document | document_chunk |
   user_manual | system | import_batch | none
@@ -1141,15 +1369,19 @@ Extend Stage 9:
 ```text
 durable_job_type += 
   resolve_assertion_entities | resolve_document_entity_mentions |
-  project_entity_relationships | rebuild_entity_projection |
+  project_entity_relationships | rebuild_entity_relationships |
   reconcile_entity_merge | reconcile_entity_split |
   rebuild_entity_search_index | delete_entity_derived_state |
   reconcile_self_entity_profile | reconcile_entity_primary_label |
-  reconcile_scope_label_candidates
+  reconcile_scope_label_candidates | archive_eligible_mentions |
+  reapply_relationship_user_decisions
 
-durable_job_subject_type += entity | entity_merge | entity_split
+# Stage 9 amendment: former draft job name rebuild_entity_projection is
+# RENAMED to rebuild_entity_relationships — do not register the old name.
 
-deletion_step_key += purge_entity_graph | purge_entity_search_index
+durable_job_subject_type += entity | entity_merge | entity_split | relationship_series
+
+deletion_step_key += purge_entity_graph | purge_entity_search_index | purge_relationship_user_decisions
 
 deletion_scope_type += entity   # optional single-entity deletion workflow
 ```
@@ -1249,14 +1481,20 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `resolution_confidence` | real | YES | CHECK 0..1 |
 | `user_confirmation` | text | NO | `'none'` CHECK IN (`none`,`confirmed`,`rejected`) |
 | `source_deletion_state` | text | NO | `'present'` CHECK IN (`present`,`deleted`,`never_linked`) |
+| `retention_state` | memory_entity_mention_retention_state | NO | `'active'` |
+| `archived_at` | timestamptz | YES | NULL |
+| `purged_at` | timestamptz | YES | NULL |
+| `archive_reason_code` | text | YES | NULL |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
 **Unique:** `(user_id, id)`; idempotency `(user_id, assertion_id, revision_id, span_fingerprint, mention_role)` WHERE assertion_id NOT NULL.  
 **FK:** composite assertion+revision; composite entity for `resolved_entity_id`.  
-**RLS:** SELECT own; RPC writes.  
-**Authoritative for:** span → entity resolution (`resolved_entity_id`).  
-**Rebuildable:** Span rows partially re-detectable; **resolution decisions are canonical operational**, not disposable cache.  
-**States:** include `review_queued` when provisional limits block creation.
+**Checks:** `retention_state='archived' ⇒ mention_text_raw IS NULL`; `archived ⇒ archived_at NOT NULL`.  
+**Indexes:** `(user_id, retention_state, created_at)` for soft-cap scans; resolution only considers `retention_state='active'`.  
+**RLS:** SELECT own (archived visible to owner); RPC writes.  
+**Authoritative for:** span → entity resolution (`resolved_entity_id`) while active.  
+**Rebuildable:** Span rows partially re-detectable; **resolution decisions + retention history are canonical operational**, not disposable cache.  
+**States:** `review_queued` when provisional limits block creation; archival per §13.4.
 
 ---
 
@@ -1321,18 +1559,22 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `target_entity_id` | uuid | NO | — |
 | `relationship_type` | memory_entity_relationship_type | NO | — |
 | `canonical_orientation` | boolean | NO | `true` |
-| `series_state` | memory_entity_projection_state | NO | `'active'` |
+| `series_identity_key` | text | NO | — stable hash for user-decision join (§23.1) |
+| `series_state` | memory_entity_relationship_graph_state | NO | `'active'` |
 | `sensitivity_floor` | text | NO | — |
-| `user_display_confirmed` | boolean | NO | `false` |
-| `projection_version` | text | NO | — |
+| `user_display_confirmed` | boolean | NO | `false` — **cache** from user decisions; not canonical |
+| `user_display_suppressed` | boolean | NO | `false` — **cache** from user decisions; not canonical |
+| `relationship_projector_version` | text | NO | — |
 | `last_reconciled_at` | timestamptz | NO | `now()` |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
 **Unique asymmetric:** `(user_id, source_entity_id, target_entity_id, relationship_type)`.  
+**Unique:** `(user_id, series_identity_key)`.  
 **Unique symmetric:** enforce `source_entity_id < target_entity_id` for symmetric types + same unique tuple.  
 **FK:** composite both entities.  
-**Rebuildable:** **Yes**.  
-**Note:** Uniqueness is on the **series identity**, not on a single temporal period.
+**Rebuildable:** **Yes** (re-apply user decisions after rebuild).  
+**Note:** Uniqueness is on the **series identity**, not on a single temporal period.  
+**Canonical user decisions:** `memory_entity_relationship_user_decisions` only.
 
 ### 38.7b `memory_entity_relationship_episodes` — **derived temporal periods**
 
@@ -1341,21 +1583,26 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 | `id` | uuid | NO | `gen_random_uuid()` |
 | `user_id` | uuid | NO | — |
 | `series_id` | uuid | NO | — |
-| `episode_key` | text | NO | — deterministic hash of bounds identity (§26) |
-| `authority_class` | memory_entity_projection_authority | NO | `'candidate'` |
-| `episode_state` | memory_entity_projection_state | NO | `'active'` |
-| `temporal_class` | memory_entity_projection_temporal_class | NO | `'unknown'` |
+| `episode_key` | text | NO | — sha256 exact temporal identity (§26.1) |
+| `authority_class` | memory_entity_relationship_authority | NO | `'candidate'` |
+| `episode_state` | memory_entity_relationship_graph_state | NO | `'active'` |
+| `temporal_class` | memory_entity_relationship_temporal_class | NO | `'unknown'` |
 | `temporal_phase` | text | YES | NULL |
 | `temporal_bounds_kind` | text | YES | NULL |
 | `valid_from` / `valid_to` / `event_at` | timestamptz | YES | NULL |
+| `open_start` / `open_end` | boolean | NO | `false` |
+| `undated_token` | text | YES | NULL |
+| `overlap_status` | memory_entity_overlap_status | NO | `'none'` |
 | `claim_modality` | text | YES | NULL |
+| `relationship_projector_version` | text | NO | — |
 | `last_reconciled_at` | timestamptz | NO | `now()` |
 | `created_at` / `updated_at` | timestamptz | NO | `now()` |
 
 **Unique:** `(user_id, series_id, episode_key)`.  
 **FK:** `(user_id, series_id) → memory_entity_relationship_series(user_id, id)`.  
-**Rebuildable:** **Yes**.  
+**Rebuildable:** **Yes** (row UUIDs may change; `episode_key` stable for same identity+projector version).  
 **Writers:** EntityRelationshipProjector only.  
+**Join rule:** supports attach only when their computed `episode_key` matches — **no soft overlap merge**.  
 **Allows:** multiple episodes per series (e.g. works_at 2018–2020 and 2024–2026).
 
 ---
@@ -1382,6 +1629,18 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 **Unique:** `(user_id, episode_id, assertion_id, revision_id)` WHERE `is_active`.  
 **FK:** composite series, episode, assertion, revision.  
 **Rebuildable:** Yes.
+
+---
+
+### 38.8b `memory_entity_relationship_user_decisions` — **canonical operational**
+
+See §23.1 for full column catalogue and vocabulary.
+
+**Purpose:** Persist user confirm/reject/suppress/restore so rebuilds cannot erase UX decisions.  
+**Classification:** Canonical operational (not derived).  
+**RLS:** SELECT own; user RPC writes only (`actor_kind=owner_user`). Workers may **re-apply** caches but never invent decisions.  
+**Survives:** series/episode rebuild, episode UUID churn, assertion deletion (row retained for explainability until account purge).  
+**TX owner:** relationship user commands write this table **before** derived reconcile.
 
 ---
 
@@ -1485,6 +1744,8 @@ Reuse Stage 9 `deletion_workflows` / steps; add steps in §56. Optional `memory_
 8. No workspace_id column on any entity table.  
 9. Active grounding.entity_id must equal mention.resolved_entity_id.  
 10. `primary_label` may only change via primary-alias sync TX.  
+11. Relationship user decisions are same-user only; workers cannot insert owner decisions.  
+12. Mention archive/purge commands enforce eligibility (§13.4).  
 9. CHECK `source_entity_id <> target_entity_id` for nonsensical self-loops except allowed types none in v1 for person-self loops on reports_to etc. Self may appear as source of reports_to.
 
 ---
@@ -1498,9 +1759,10 @@ Reuse Stage 9 `deletion_workflows` / steps; add steps in §56. Optional `memory_
 | mentions | own | no | yes | yes | via RPC | | raw text may be withheld by view later |
 | resolution_candidates | own | no | yes | yes | via RPC | | |
 | assertion_entities | own | no | yes | yes | via RPC | | |
-| relationship_series | own | no | confirm/reject display | rebuild | via RPC | | |
+| relationship_series | own | no | no direct (cache only) | rebuild + reapply decisions | via RPC | | |
 | relationship_episodes | own | no | no direct | rebuild | via RPC | | |
 | relationship_support | own | no | no direct | rebuild | via RPC | | |
+| relationship_user_decisions | own | no | confirm/reject/suppress/restore | reapply cache only | via RPC | | |
 | merge/split events | own | no | merge/split cmds | reconcile | via RPC | | |
 | external_refs | own | no | yes | limited | via RPC | | |
 | scope_label_candidates | own | no | no direct | rebuild | via RPC | | |
@@ -1531,7 +1793,14 @@ EntityAliasStore
 
 EntityRelationshipProjector
   → reads grounding + assertions + disclosure
-  → writes series + episodes + support (rebuildable)
+  → writes series + episodes + support (rebuildable; exact episode_key)
+  → reapplies memory_entity_relationship_user_decisions onto caches
+
+RelationshipUserDecisionStore
+  → canonical confirm/reject/suppress/restore
+
+EntityMentionRetentionService
+  → archive_eligible_mentions / restore per §13.4
 
 EntityMergeService / EntitySplitService
   → user-confirmed only for commit; workers reconcile derived
@@ -1613,8 +1882,21 @@ interface AssertionEntityGroundingStore {
 interface EntityRelationshipProjector {
   reconcileForAssertion(userId: string, assertionId: string, revisionId: string): Promise<void>;
   rebuildForEntity(userId: string, entityId: string): Promise<void>;
-  // Writes series + episodes + support; authority_class <= support trusts;
-  // never collapses disjoint temporal periods into one episode
+  // Writes series + episodes + support using exact temporal identity (§26);
+  // never merges non-identical episode_keys; then reapplies user decisions to caches
+}
+
+interface RelationshipUserDecisionStore {
+  upsertDecision(input: RelationshipUserDecisionInput): Promise<Decision>;
+  revokeDecision(input: RevokeDecisionInput): Promise<void>;
+  listForSeriesIdentity(userId: string, seriesIdentityKey: string): Promise<Decision[]>;
+  // Canonical; survives rebuilds; workers cannot create owner decisions
+}
+
+interface EntityMentionRetentionService {
+  archiveEligibleMentions(userId: string, opts: SoftCapOpts): Promise<ArchiveResult>;
+  restoreMention(userId: string, mentionId: string): Promise<Mention>;
+  // Never archives grounded or user_confirmation != none
 }
 
 interface EntityMergeService {
@@ -1638,9 +1920,12 @@ interface EntityDeletionService {
 }
 
 interface EntityExplainabilityStore {
-  explainRelationship(userId: string, projectionId: string): Promise<RelationshipExplanation>;
+  explainRelationshipSeries(userId: string, seriesId: string): Promise<RelationshipSeriesExplanation>;
+  explainRelationshipEpisode(userId: string, episodeId: string): Promise<RelationshipEpisodeExplanation>;
+  explainRelationshipUserDecision(userId: string, decisionId: string): Promise<DecisionExplanation>;
   explainEntityLink(userId: string, mentionId: string): Promise<MentionExplanation>;
   explainMerge(userId: string, mergeEventId: string): Promise<MergeExplanation>;
+  // Series vs episode must never be confused; include user decision badges
 }
 ```
 
@@ -1652,17 +1937,17 @@ Extends Stage 9 Gateway pattern; does not replace assertion services.
 
 ### User commands (owner RPC; `auth.uid()=p_user_id`)
 
-`entity_create_manual`, `entity_rename` (non-self: set primary alias; self: rejected — use profile), `entity_alias_add`, `entity_alias_remove`, `entity_set_primary_alias`, `mention_resolve`, `mention_reject_resolution`, `mention_mark_ambiguous`, `entity_create_from_mention`, `entity_confirm_provisional`, `entity_merge_confirm`, `entity_split_confirm`, `entity_archive`, `entity_restore`, `entity_delete`, `assertion_entity_link_manual`, `assertion_entity_unlink`, `scope_label_bind` (context-specific), `scope_label_unbind`, `relationship_series_confirm_display`, `relationship_suggestion_reject`, `relationship_manual_create` (**creates relationship_fact assertion** then enqueue resolve+project), `entity_merge_rollback`, `profile_self_sync` (normally invoked from profile update).
+`entity_create_manual`, `entity_rename` (non-self: set primary alias; self: rejected — use profile), `entity_alias_add`, `entity_alias_remove`, `entity_set_primary_alias`, `mention_resolve`, `mention_reject_resolution`, `mention_mark_ambiguous`, `mention_restore`, `entity_create_from_mention`, `entity_confirm_provisional`, `entity_merge_confirm`, `entity_split_confirm`, `entity_archive`, `entity_restore`, `entity_delete`, `assertion_entity_link_manual`, `assertion_entity_unlink`, `scope_label_bind` (context-specific), `scope_label_unbind`, `relationship_display_confirm` (writes user_decisions `display_confirmed` then reconcile), `relationship_suggestion_reject` (writes `suggestion_rejected` then reconcile), `relationship_display_suppress`, `relationship_display_restore`, `relationship_manual_create` (**creates relationship_fact assertion** then enqueue resolve+project), `entity_merge_rollback`, `profile_self_sync` (normally invoked from profile update).
 
 ### Worker commands (service_role + lease)
 
-`resolve_assertion_entities`, `resolve_document_entity_mentions`, `project_entity_relationships`, `rebuild_entity_projection`, `rebuild_entity_search_index`, `delete_entity_derived_state`, `reconcile_entity_merge_derived`, `reconcile_entity_split_derived`, `reconcile_scope_label_candidates`.
+`resolve_assertion_entities`, `resolve_document_entity_mentions`, `project_entity_relationships`, `rebuild_entity_relationships`, `rebuild_entity_search_index`, `delete_entity_derived_state`, `reconcile_entity_merge_derived`, `reconcile_entity_split_derived`, `reconcile_scope_label_candidates`, `archive_eligible_mentions`, `reapply_relationship_user_decisions`.
 
-Workers **must not** set `user_confirmed` / confirm merge/split / invent trusted episodes without trusted supports / confirm scope bindings as user.
+Workers **must not** set `user_confirmed` / confirm merge/split / invent trusted episodes without trusted supports / write relationship user decisions / confirm scope bindings as user.
 
 ### System reconciliation
 
-`ensure_self_entity`, `reconcile_self_entity_profile`, `reconcile_entity_primary_label`, `invalidate_stale_groundings`, `rebuild_episodes_after_assertion_change`, `orphan_entity_archive_scan`, `enforce_provisional_rate_window` (metrics + reject further creates).
+`ensure_self_entity`, `reconcile_self_entity_profile`, `reconcile_entity_primary_label`, `invalidate_stale_groundings`, `rebuild_episodes_after_assertion_change`, `orphan_entity_archive_scan`, `archive_eligible_mentions` (soft-cap), `enforce_provisional_rate_window` (metrics + reject further creates), `reapply_relationship_user_decisions`.
 
 ---
 
@@ -1672,8 +1957,10 @@ Workers **must not** set `user_confirmed` / confirm merge/split / invent trusted
 | --- | --- | --- | --- | --- |
 | `resolve_assertion_entities` | assertion | assertion_id, revision_id, resolver_version | per revision+version | stale revision abort |
 | `resolve_document_entity_mentions` | document | document_id, content_sha256 | per fingerprint | cancel on delete |
-| `project_entity_relationships` | assertion | assertion_id, revision_id, projection_version | per revision | rebuilds series/episodes |
-| `rebuild_entity_projection` | entity | entity_id, reason | per entity+version | rebuilds series/episodes for entity |
+| `project_entity_relationships` | assertion | assertion_id, revision_id, relationship_projector_version | per revision | rebuilds series/episodes + reapply decisions |
+| `rebuild_entity_relationships` | entity | entity_id, reason | per entity+version | replaces former name `rebuild_entity_relationships` |
+| `reapply_relationship_user_decisions` | relationship_series or user | series_identity_key | per key+updated_at | cache only |
+| `archive_eligible_mentions` | user | soft_cap, as_of | per user+day | §13.4 |
 | `reconcile_self_entity_profile` | user | profile_updated_at | per profile version | |
 | `reconcile_entity_primary_label` | entity | entity_id | per entity | alias wins |
 | `reconcile_scope_label_candidates` | user or document | label/doc ids | per label version | |
@@ -1691,8 +1978,9 @@ Retry: exponential; terminal dead_letter after N. Privacy: ids/hashes/codes only
 1. Command results keyed by `(user_id, command_idempotency_key)`.  
 2. Retry after success returns stored result.  
 3. Resolver version bumps may re-score **non-user_confirmed** links; never silently change user_confirmed without `needs_review` flag.  
-4. Projection version independent of resolver version.  
-5. Mention upsert unique on span fingerprint + role + revision.
+4. `relationship_projector_version` independent of entity resolver version.  
+5. Mention upsert unique on span fingerprint + role + revision.  
+6. Relationship user-decision commands are idempotent on `(user_id, command_idempotency_key)` and survive derived rebuilds.
 
 ---
 
@@ -1709,9 +1997,11 @@ Evidence required for user questions:
 | Which document? | provenance source_kind/ids (if not deleted) or “source deleted” |
 | Why same entity? | mention resolutions, alias matches, scores, user confirmation |
 | Why merged? | merge_event |
-| After correction? | assertion links changed_over_time/corrects_false + projection rebuild timestamp |
-| Project memories? | groundings + scope projections |
+| After correction? | assertion links changed_over_time/corrects_false + relationship rebuild timestamp |
+| Project memories? | groundings + scope candidates/bindings |
 | Hidden from provider? | disclosure policy on supporting assertions / sensitivity_floor |
+| Why hidden / rejected / confirmed in UX? | `memory_entity_relationship_user_decisions` row (survives rebuild) |
+| Why was this mention archived? | `retention_state` + `archive_reason_code` |
 
 ---
 
@@ -1728,8 +2018,10 @@ Evidence required for user questions:
 9. **Historical vs current** — timeline.  
 10. **Sensitive** — lock/privacy indicator.  
 11. **Explore / constellation** — future calm graph; **first release:** entity pages + assertion links sufficient.  
-12. Avoid exposing “projection”, “episode_key”, “grounding” jargon; use “connection”, “time period”, “mentioned as”.  
-13. Relationship timelines must show **multiple periods** when present (e.g. two stints at one company).
+12. Avoid exposing “episode_key”, “grounding”, “series_identity_key” jargon; use “connection”, “time period”, “mentioned as”.  
+13. Relationship timelines must show **multiple periods** when present (e.g. two stints at one company).  
+14. Show confirmed / hidden / rejected-suggestion states from user decisions, including after rebuilds.  
+15. Overlapping periods should be labeled carefully without implying a single merged job.
 
 ---
 
@@ -1789,7 +2081,9 @@ interface EntityQueryPort {
 
   listAssertionsForEntities(userId, entityIds: string[], mode: 'any'|'all'): AssertionRef[];
 
-  explainRelationshipSupport(userId, episodeId): SupportExplanation;
+  explainRelationshipEpisode(userId, episodeId): RelationshipEpisodeExplanation;
+  explainRelationshipSeries(userId, seriesId): RelationshipSeriesExplanation;
+  listRelationshipUserDecisions(userId, seriesIdentityKey): DecisionRef[];
 
   resolveEntityId(userId, entityId): { entityId: string; redirectedFrom?: string[]; primaryLabel: string };
   // primaryLabel is cache; prefer primary alias for audits
@@ -1802,7 +2096,10 @@ interface EntityQueryPort {
   // - not treat association as trust
   // - not present historical episodes as current
   // - not collapse multiple episodes into one fact
+  // - not merge overlapping non-identical temporal identities
   // - not pick an arbitrary project when scope label is ambiguous
+  // - surface user decision badges (confirm/reject/suppress) from canonical decisions
+  // - ignore mentions with retention_state != active for live retrieval
 }
 ```
 
@@ -1819,11 +2116,14 @@ Filters allowed: entity_id, kind, relationship_type, series_id, episode_id, temp
 | Stale revision | Abort retryable; succeed no-op if current already resolved |
 | Deleted source mid-job | Mark source_deletion_state; continue on assertion |
 | Duplicate retry | Idempotent command_results |
-| Episode/series drift | rebuild_entity_projection |
+| Episode/series drift | rebuild_entity_relationships |
+| User decision cache drift | reapply_relationship_user_decisions (decisions win) |
 | Primary label drift | reconcile_entity_primary_label (alias wins) |
 | Self/profile drift | reconcile_self_entity_profile (profile wins primary) |
 | Provisional limit hit | unresolved / review_queued; no more creates |
+| Soft-cap pressure | archive_eligible_mentions (§13.4); never archive protected |
 | Ambiguous project label | return ambiguous_project_scope; no silent pick |
+| Overlapping non-identical intervals | separate episodes + overlap_status; no silent merge |
 | Merge cycle attempt | Reject RPC |
 | Orphan episodes | delete_entity_derived_state / rebuild |
 | Partial merge | reconcile_entity_merge job to completion |
@@ -1870,6 +2170,10 @@ Filters allowed: entity_id, kind, relationship_type, series_id, episode_id, temp
 | 33 | primary_label / alias divergence | Same-TX sync; drift repair alias-wins | EntityAliasStore owns write | Race without TX | Drift repair test | 15 |
 | 34 | Self entity second profile store | Thin fields; profile owns display_name | SelfEntitySyncService | Future column creep | Schema lint / service reject | 15 |
 | 35 | Unlimited provisional spam | §18.2 caps + reason codes | Resolver budget checks | Tunable caps too high | Limit exceed tests | 15 |
+| 36 | Rebuild erases user hide/confirm | Canonical user_decisions table | Commands write decisions first | Cache bug | Rebuild preserves decisions test | 15 |
+| 37 | Soft-overlap merges distinct jobs | Exact episode_key only | Projector v1 algorithm | Future clustering misuse | Partial-overlap → two episodes test | 15 |
+| 38 | Soft-cap archives grounded mentions | §13.4 eligibility checks | Retention service | Race with grounding | Archive blocked_grounding test | 15 |
+| 39 | Archived mentions re-enter resolution | retention_state filter | Resolver queries active only | Missing filter | Archived excluded test | 15 |
 
 ---
 
@@ -1885,20 +2189,20 @@ Format: compact decision records. All users same-owner; cross-user N/A.
 5. Lifecycle: Tasos provisional→resolved on confirm.  
 6. Aliases: primary alias canonical; `primary_label` synced.  
 7. Grounding: subject self, object Tasos; matches mention.resolved_entity_id.  
-8. Series/episode: self reports_to Tasos, one **current** episode.  
+8. Series/episode: self reports_to Tasos, one **current** episode (`undated_current` or dated key).  
 9. Support trust=assertion trust; temporal current.  
 10. Disclosure: third_party_personal floor.  
-11. UX: “Tasos — manager (current)”.  
-12. Retry: idempotent.
+11. UX: “Tasos — manager (current)”; optional `display_confirmed` decision is separate.  
+12. Retry: idempotent; rebuild preserves any user decision.
 
 ### E2 — “Tasos approved the budget.”
 relationship_fact/event; Tasos subject person; may link same entity; projection optional `related_to` weak or no typed edge if predicate not in vocabulary — **prefer no false reports_to**. Grounding only.
 
 ### E3 — “My former manager was Tasos.”
-historical/ended phase; **episode** temporal_class=historical/ended on same series; does not delete prior episode rows if a later current episode also exists.
+historical/ended phase → distinct `episode_key` from undated_current; **episode** temporal_class=historical/ended on same series; does not delete other episode keys.
 
 ### E4 — “My new manager is Kathryn.”
-changed_over_time vs prior manager assertion (Stage 10); Tasos **episode** → historical; Kathryn new series/episode current reports_to; entities distinct.
+changed_over_time vs prior manager assertion (Stage 10); Tasos series episode becomes historical key; Kathryn **new series** (different target) with current episode; entities distinct; user decisions stay on each series_identity_key.
 
 ### E5 — Two Sarahs
 Two person entities; identical aliases; mentions ambiguous until user picks; no auto-merge; **no** provisional-name auto-absorb.
@@ -1934,7 +2238,7 @@ May be one `project` entity with concept alias, or project+concept linked `relat
 Entity retained; former_name alias; scope projection updates; assertions unchanged.
 
 ### E16 — “Project Atlas is finished.”
-Project entity archived or assertions historical; projections ended/historical.
+Project entity archived or assertions historical; relationship episodes ended/historical.
 
 ### E17 — Scope label `Cortaix`
 If one project candidate after context → may bind; if multiple → ambiguous candidates; labels remain on assertions; Stage 12 uses project_entity_id.
@@ -1943,7 +2247,7 @@ If one project candidate after context → may bind; if multiple → ambiguous c
 Place Athens; located_in/based_in from self; office contextual not separate entity unless named building.
 
 ### E19 — Office Athens → London
-changed_over_time assertions; two **located_in episodes** (Athens historical, London current) on appropriate series; not one overwritten row.
+changed_over_time assertions; two **located_in series** (different place targets) or two episodes if modeled same-target with distinct temporal keys; never one overwritten row; exact keys differ.
 
 ### E20 — “My friend Sarah lives in Berlin.”
 friend_of projection; Sarah person; Berlin place; lives → located_in; third_party floor.
@@ -2033,7 +2337,7 @@ Same command key → same result.
 Job sees revision ≠ current → abort retryable or no-op if superseded by newer successful job.
 
 ### E49 — Repeated employment periods at Company A
-Assertions: worked at A 2018–2020; later returned 2024–2026. Same series `self works_at CompanyA`; **two episodes** with distinct episode_keys/bounds; neither collapsed; Stage 12 can list both.
+Assertions: worked at A 2018–2020; later returned 2024–2026. Same series `self works_at CompanyA`; **two episodes** with distinct exact `episode_key`s; partial-overlap rules do not apply (disjoint). Stage 12 lists both with separate evidence.
 
 ### E50 — Second “John” after provisional John
 First doc creates provisional person John. Later unrelated chat “John called” without continuity → **unresolved / user choice**, not auto-link to the provisional. Continuity in same doc may link.
@@ -2046,6 +2350,15 @@ Two Atlas projects under different orgs; scope candidates both present; no singl
 
 ### E53 — Noisy document hits provisional cap
 PDF yields >50 name-like mentions; after document cap, further mentions `review_queued`/`unresolved`; no silent mass entity create.
+
+### E54 — User rejects candidate relationship suggestion then rebuild
+User `relationship_suggestion_reject` writes canonical decision; later `rebuild_entity_relationships` recreates series/episodes; rejection remains; cache shows suppressed; explainability cites decision row.
+
+### E55 — Partially overlapping employment dates
+Supports 2018–2021 and 2020–2022 → **two episodes** (different exact keys) with `overlap_status=overlapping`; not merged; series may be conflict_open if cardinality requires; no auto-distrust.
+
+### E56 — Soft-cap archives old unresolved mention
+Eligible unresolved mention archived: `retention_state=archived`, `mention_text_raw` null, fingerprint retained; excluded from resolution; still explainable to owner; grounded/confirmed mentions untouched.
 
 ---
 
@@ -2062,6 +2375,7 @@ flowchart TB
   Ser[relationship series derived]
   Ep[relationship episodes derived]
   S[relationship support derived]
+  D[user decisions canonical]
   A --> M
   M --> E
   M --> G
@@ -2070,6 +2384,7 @@ flowchart TB
   Ser --> Ep
   A --> S
   S --> Ep
+  D -.->|reapplied after rebuild| Ser
 ```
 
 ### 53.2 Canonical vs operational vs derived
@@ -2085,6 +2400,10 @@ flowchart LR
   subgraph candidate [Candidate]
     C[Resolution candidates]
   end
+  subgraph canonical_ops2 [Canonical operational decisions]
+    UD[Relationship user decisions]
+    MR[Mention retention lifecycle]
+  end
   subgraph derived [Derived rebuildable]
     P[Series + episodes + support / search / scope candidates]
   end
@@ -2092,6 +2411,7 @@ flowchart LR
   E --> C
   A --> P
   E --> P
+  UD -.-> P
 ```
 
 ### 53.3 Entity-resolution pipeline
@@ -2134,8 +2454,9 @@ flowchart TB
   Ass --> Sup[support row]
   G1 --> Ser[series]
   G2 --> Ser
-  Ser --> Ep[episode by temporal bounds]
+  Ser --> Ep[episode by exact episode_key]
   Sup --> Ep
+  Dec[user decisions] -.-> Ser
 ```
 
 ### 53.6 Candidate vs trusted relationship flow
@@ -2146,6 +2467,7 @@ flowchart LR
   TA[Trusted assertion] --> TP[Trusted episode]
   DA[Distrusted assertion] --> X[No active trusted support]
   TA2[Second period assertion] --> TP2[Second episode same series]
+  Over[Partial overlap different bounds] --> Sep[Two episodes + overlap_status]
 ```
 
 ### 53.7 Ambiguity flow
@@ -2335,6 +2657,14 @@ flowchart LR
 65. Provisional entity creation must respect explicit per-assertion, per-document, per-job, and per-user rate limits.  
 66. Stage 12 must not silently pick a project entity from an ambiguous scope label.  
 67. Grounding history and user resolution confirmations are not disposable search indexes (even though active joins may be re-emitted after revision change).  
+68. Relationship user confirm/reject/suppress/restore decisions are canonical operational data and survive full series/episode rebuilds.  
+69. `user_display_confirmed` / suppressed flags on series rows are caches only; `memory_entity_relationship_user_decisions` is authoritative.  
+70. Supports share an episode only when exact normalized temporal identities (and thus `episode_key`) are identical.  
+71. Partially overlapping, nested, or adjacent non-identical intervals produce distinct episodes; they are never silently merged.  
+72. Mention archival requires `retention_state` and must not archive mentions with active grounding or user confirmation.  
+73. Archived mentions are excluded from active resolution and Stage 12 live retrieval.  
+74. Explainability APIs distinguish relationship **series** from relationship **episodes**.  
+75. Job name `rebuild_entity_relationships` is normative; legacy alias `rebuild_entity_relationships` must not be dual-registered.  
 
 ---
 
@@ -2382,10 +2712,14 @@ flowchart LR
 | 9E | Worker/user command unions | Commands not listed | Extend Gateway catalogs incl. alias primary sync + scope bind | Design yes | Authz split | Stage 9 |
 | 9F | Optional deletion_scope `entity` | Single-entity delete workflow | Add scope or fold into assertion-preserving soft delete command | Proceed with command-only | — | Stage 9 |
 | 9G | Processing-evidence link optional FK | mention.processing_claim_id | Nullable FK to processing claims if table exists | Yes | No raw content | Stage 9/10 |
-| 9H | Series/episode reconciliation state | Single projection uniqueness insufficient for repeated periods | Add `memory_entity_relationship_series` + `episodes` + support→episode | Design yes; **required for correct temporal model** | Rebuildable only | Stage 9 |
+| 9H | Series/episode reconciliation state | Single edge uniqueness insufficient for repeated periods | Add `memory_entity_relationship_series` + `episodes` + support→episode with **exact episode_key** | Design yes; **required** | Rebuildable only | Stage 9 |
 | 9I | One-to-many scope mappings | Single unique label→entity unsafe | Replace with candidates + context bindings tables | Design yes; **required for Atlas ambiguity** | No ACL semantics | Stage 9 |
 | 9J | Profile→self sync hook | Profile updates today do not notify entity layer | Gateway profile update calls `SelfEntitySyncService` / enqueues job | Design yes | Profile remains source | Stage 9 / profile owners |
 | 9K | Provisional limit counters | No operational counters in Stage 9 | Add per-user rate window table or reuse usage counters with reason codes | Design yes | Abuse control | Stage 9 |
+| 9L | Relationship user decisions | Derived rows cannot hold durable UX decisions | Add `memory_entity_relationship_user_decisions` + reapply job | Design yes; **required** | Survive rebuild | Stage 9 |
+| 9M | Mention retention lifecycle | Soft-cap archive claimed without schema | Add `retention_state`/`archived_at`/`purged_at` on mentions + archive job | Design yes; **required** | Privacy + history | Stage 9 |
+| 9N | Job rename | `rebuild_entity_relationships` ambiguous | Rename to `rebuild_entity_relationships`; do not dual-register | Design yes | Clarity | Stage 9 |
+| 9O | Deletion purge of decisions | Account purge incomplete | `purge_relationship_user_decisions` step | **No** for account safety | Privacy | Stage 9 |
 
 Do **not** amend `memory_assertion_links` link_type for domain relationships.
 
@@ -2425,6 +2759,8 @@ Stage 11 does **not** edit Stage 10. Freeze/authority/disclosure unchanged.
 14. Public-figure knowledge-base auto-enrichment (likely never).  
 15. Exact numeric tuning of resolution weights (Stage 15).  
 16. Whether `primary_alias_id` FK is enforced DEFERRABLE within insert TX only (implementation detail).  
+17. Whether Option B temporal clustering is ever adopted after Stage 15 evidence (v1 stays exact-key).  
+18. Soft-cap N and archive age thresholds for resolved-but-inactive mentions.  
 
 ---
 
@@ -2441,6 +2777,8 @@ Stage 11 does **not** edit Stage 10. Freeze/authority/disclosure unchanged.
 7. Optimal first-release UX subset.  
 8. Exact `context_fingerprint` composition for scope bindings in multi-device clients.  
 9. Whether bulk import UX should require an explicit confirmation gate before raising caps.  
+10. How aggressively overlapping episodes should be visually grouped in UX without merging keys.  
+11. Whether episode-scoped user decisions are needed beyond series-level in first release.  
 
 ---
 
@@ -2492,6 +2830,10 @@ Stage 11 does **not** edit Stage 10. Freeze/authority/disclosure unchanged.
 | 44 | Provisional person auto-link safety | **Met** — §18.1 |
 | 45 | Profile↔self sync contract | **Met** — §9.1 |
 | 46 | Explicit provisional creation limits | **Met** — §18.2 |
+| 47 | Canonical relationship user decisions survive rebuild | **Met** — §23.1 |
+| 48 | Exact deterministic episode construction | **Met** — §26 Option A |
+| 49 | Mention archival schema-backed | **Met** — §13.4 / §38.4 |
+| 50 | Series vs episode APIs unambiguous | **Met** — §42 / §49 |
 
 ---
 
@@ -2533,6 +2875,10 @@ Do not redefine entity canonicity, relationship projection authority, or success
 | Earlier Stage 11 draft: single active projection per endpoints+type | **Superseded** — series + episodes for repeated periods |
 | Earlier Stage 11 draft: unique scope_label → one project | **Superseded** — one-to-many candidates + context bindings |
 | Earlier Stage 11 draft: primary_label and primary alias both unspecified | **Superseded** — primary alias canonical; label is cache |
+| Earlier Stage 11 draft: soft overlap merge of “compatible” bounds | **Superseded** — exact temporal identity only |
+| Earlier Stage 11 draft: `user_display_confirmed` only on derived series | **Superseded** — canonical user_decisions table |
+| Earlier Stage 11 draft: soft-cap archive without mention retention schema | **Superseded** — `retention_state` on mentions |
+| Earlier Stage 11 draft: job `rebuild_entity_projection` and `explainRelationship(projectionId)` | **Superseded** — `rebuild_entity_relationships` + series/episode explain APIs |
 
 No disagreement that assertions are canonical or that Stage 10 annotations are non-entities.
 
@@ -2558,9 +2904,14 @@ No disagreement that assertions are canonical or that Stage 10 annotations are n
 - [x] Third-party floors  
 - [x] Deletion does not silently drop assertions when deleting entities  
 - [x] Stage 12 contracts without ranking; multi-episode + ambiguous project aware  
+- [x] Relationship user decisions canonical; series flags are caches  
+- [x] Exact episode_key; no silent merge of different bounds  
+- [x] Mention retention_state enables soft-cap archival safely  
+- [x] Interfaces/jobs use series/episode terminology (not projectionId)  
 - [x] Amendments listed, docs 9/10 not edited  
 - [x] Production behaviour unchanged  
-- [x] Only Stage 11 document modified
+- [x] Only Stage 11 document modified  
+- [x] PR remains draft; Stage 12 not started
 
 ---
 
@@ -2604,6 +2955,9 @@ No disagreement that assertions are canonical or that Stage 10 annotations are n
 | Split | User confirm | High impact |
 | Profile display_name → self primary alias | Yes (sync) | Profile is account source |
 | Scope label → single project | Only if unambiguous after context | Else ambiguous candidates |
+| Relationship display confirm/reject | Writes user_decisions first | Survives rebuild |
+| Soft-cap mention archive | Eligible unresolved only | §13.4 protections |
+| Partial-overlap intervals | Separate episodes | Conservative separation |
 
 ---
 
