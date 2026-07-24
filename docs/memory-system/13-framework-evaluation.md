@@ -1467,9 +1467,7 @@ Mapping Cortaix turns → SM tokens requires content-length assumptions **not fi
 - **Unresolved:** usage cost at S/M/L.  
 - Do **not** treat plan price alone as scenario TCO.
 
-### 12.6 Native-only monthly buckets
-
-### 12.6 Separated monthly cost buckets (native-only, 0% external memory calls)
+### 12.6 Native-only monthly cost buckets
 
 | Bucket | S | M | L | Confidence |
 | --- | --- | --- | --- | --- |
@@ -1844,24 +1842,26 @@ Corrected scoring does not override hard-gate failures.
 
 ### 21.1 Candidate matrix
 
-| Candidate | Core hard gates | Core weighted | Evidence completeness | Implementation/deployment relevance | Best permitted role | Role-specific score | Role-specific gates | Lock-in | TCO status | PoC requirement | Verdict |
-| --- | --- | ---: | ---: | --- | --- | --- | --- | ---: | --- | --- | --- |
-| Native Cortaix | pass (target) | 91.4 | 100% | Partial impl; Stage 8–12 mostly designed_not_implemented | Core platform | 91.4 | target pass | 0 | Eng-heavy; vendor $0 | none for core | `adopt_as_core_dependency` |
-| Mem0 OSS | fail | 43.6 | 80% | Current hybrid exists; unsafe remote-text | ExternalMemoryIndexPort | 63.6 | conditional | 1–2 | Ops+model; no SaaS | **PoC-A** | `proof_of_concept_before_decision` |
-| Mem0 managed | fail | 45.2 | 60% | Optional SaaS | ExternalMemoryIndexPort | 58.2 | conditional | 3 | S@100% search > Starter; M/L often > Pro; overage unknown | none (watchlist) | `watchlist` |
-| Graphiti OSS | fail | 43.8 | 90% | Not integrated | Relationship/EntityProjection | 63.8 | conditional | 2–3 | Infra+LLM | **PoC-B** | `proof_of_concept_before_decision` |
-| Zep managed | fail | 45.0 | 70% | Not integrated | none required | not_scored as core substitute | fail prompt-context core | 4 | credits_per_episode unknown | none | `reject_for_cortaix` as core |
-| Cognee OSS | fail | 40.8 | 80% | Not integrated | watchlist derived | 60.8 proj card | conditional | 2 | Self-host | none until port named | `watchlist` |
-| Cognee managed | fail | 37.4 | 50% | Not integrated | none now | not_scored_for_this_role | fail core | 3 | tokens_per_write unknown | none | `watchlist` |
-| Letta OSS | fail | 19.8 | 75% | Not integrated | none | not_scored_for_this_role | fail | 5 | Product fork | none | `reject_for_cortaix` |
-| Letta managed | fail | 20.8 | 50% | Not integrated | none | not_scored_for_this_role | fail | 5 | Product fork; price unknown | none | `reject_for_cortaix` |
-| LangGraph/LangMem | fail | 33.8 | 88% | Not integrated | inspiration only | 44.6 extract card | fail core | 2 | Python tax | none | `reject_for_cortaix` as core |
-| Supermemory OSS | fail | 47.4 | 64% | Not integrated | watchlist engine | not_scored_for_connectors | fail core | 2 | Self-host ops | none | `watchlist` |
-| Supermemory managed | fail | 43.0 | 73% | Not integrated | ConnectorIngestionPort | 54.2 | conditional | 3–4 | Plan prices known; SM-token map unknown | **PoC-D** if pursued | `watchlist` |
-| LlamaIndex | fail | 44.0 | 100% | Not a dependency today | doc tooling watchlist | 66.4 | fail memory core | 1 | OSS | none (no package selected) | `watchlist` |
-| Memobase | fail | 38.4 | 70% | Not integrated | none | not_scored_for_this_role | fail | 2 | unknown | none | `watchlist` |
-| HippoRAG | fail | 44.6 | 100% | Research only | research ideas | not_scored_for_this_role | fail | 0–1 | eng | none | `watchlist` |
-| Reranker APIs | fail as store | 35.0 | 75% | Not integrated | RetrievalReranker | 63.8 | conditional | 1 | unknown until vendor pin | **PoC-C** | `proof_of_concept_before_decision` |
+Role gate fields use the declared enum only: applicability = `applicable | not_applicable`; outcome = `pass | conditional_pass | fail | unknown` (or `—` when not applicable). Architectural verdicts match §7.1 / §7.2.
+
+| Candidate | Core hard gates | Core weighted | Evidence completeness | Implementation/deployment relevance | Best permitted role | Role-specific score | Role gate applicability | Role gate outcome | Lock-in | TCO status | PoC requirement | Verdict |
+| --- | --- | ---: | ---: | --- | --- | --- | --- | --- | ---: | --- | --- | --- |
+| Native Cortaix | pass | 91.4 | 100% | Partial impl; Stage 8–12 mostly designed_not_implemented | Core platform | 91.4 | applicable | pass (target architecture) | 0 | Eng-heavy; vendor $0 | none for core | `adopt_as_core_dependency` |
+| Mem0 OSS | fail | 43.6 | 80% | Current hybrid exists; unsafe remote-text | ExternalMemoryIndexPort | 63.6 | applicable | conditional_pass | 1–2 | Ops+model; no SaaS | **PoC-A** | `proof_of_concept_before_decision` |
+| Mem0 managed | fail | 45.2 | 60% | Optional SaaS | ExternalMemoryIndexPort | 58.2 | applicable | conditional_pass | 3 | S@100% search > Starter; M/L often > Pro; overage unknown | none (watchlist) | `watchlist` |
+| Graphiti OSS | fail | 43.8 | 90% | Not integrated | Relationship/EntityProjection | 63.8 | applicable | conditional_pass | 2–3 | Infra+LLM | **PoC-B** | `proof_of_concept_before_decision` |
+| Zep managed | fail | 45.0 | 70% | Not integrated | none required | not_scored as core substitute | not_applicable | — | 4 | credits_per_episode unknown | none | `reject_for_cortaix` as core |
+| Cognee OSS | fail | 40.8 | 80% | Not integrated | watchlist derived | 60.8 proj card | applicable | conditional_pass | 2 | Self-host | none until port named | `watchlist` |
+| Cognee managed | fail | 37.4 | 50% | Not integrated | none now | not_scored_for_this_role | not_applicable | — | 3 | tokens_per_write unknown | none | `watchlist` |
+| Letta OSS | fail | 19.8 | 75% | Not integrated | none | not_scored_for_this_role | not_applicable | — | 5 | Product fork | none | `reject_for_cortaix` |
+| Letta managed | fail | 20.8 | 50% | Not integrated | none | not_scored_for_this_role | not_applicable | — | 5 | Product fork; price unknown | none | `reject_for_cortaix` |
+| LangGraph/LangMem | fail | 33.8 | 88% | Not integrated | inspiration only | 44.6 extract card | applicable | fail | 2 | Python tax | none | `reject_for_cortaix` as core |
+| Supermemory OSS | fail | 47.4 | 64% | Not integrated | watchlist engine | not_scored_for_connectors | applicable | fail | 2 | Self-host ops | none | `watchlist` |
+| Supermemory managed | fail | 43.0 | 73% | Not integrated | ConnectorIngestionPort | 54.2 | applicable | conditional_pass | 3–4 | Plan prices known; SM-token map unknown | **PoC-D** if pursued | `watchlist` |
+| LlamaIndex | fail | 44.0 | 100% | Not a dependency today | doc tooling watchlist | 66.4 | applicable | fail | 1 | OSS | none (no package selected) | `watchlist` |
+| Memobase | fail | 38.4 | 70% | Not integrated | none | not_scored_for_this_role | not_applicable | — | 2 | unknown | none | `watchlist` |
+| HippoRAG | fail | 44.6 | 100% | Research only | research ideas | not_scored_for_this_role | not_applicable | — | 0–1 | eng | none | `watchlist` |
+| Reranker APIs | fail | 35.0 | 75% | Not integrated | RetrievalReranker | 63.8 | applicable | conditional_pass | 1 | unknown until vendor pin | **PoC-C** | `proof_of_concept_before_decision` |
 
 ### 21.2 Component matrix
 
@@ -1869,16 +1869,39 @@ See §15 (22-component build-versus-reuse matrix) for native/reuse/decision/PoC 
 
 ## 22. Invariants
 
-Prior invariants 1–25 retained, plus:
-
-26. Evidence completeness uses one stable adjudicated-claim formula.  
-27. Supported negatives count as evidence-complete, not as implemented capabilities.  
-28. Implementation readiness stays in the status matrix.  
-29. `independently_corroborated` is not set from reading one’s own repo or vendor marketing alone.  
-30. Benchmark `actually_reproduced = no` unless Stage 13 ran it.  
-31. Zep fees unresolved without `credits_per_episode`.  
-32. Supermemory plan price ≠ scenario TCO without SM-token mapping.  
-33. PoC-B/C/D field lists are explicit; “same as PoC-A” is insufficient.
+1. Framework evaluation cannot redefine Stages 7–12.
+2. PostgreSQL remains canonical regardless of the recommendation.
+3. A weighted score cannot override a failed applicable hard gate.
+4. Vendor benchmark claims remain clearly labelled.
+5. Unknown pricing remains unknown.
+6. Managed-service isolation is not assumed without evidence.
+7. External text never bypasses canonical reconciliation.
+8. External framework IDs never replace canonical assertion IDs.
+9. Optional external outages do not prevent safe native retrieval.
+10. User deletion propagates to every derived system.
+11. Query and evidence disclosure remain Cortaix-owned.
+12. Trust and conflict decisions remain Cortaix-owned.
+13. Final context packing remains Cortaix-owned.
+14. Agent-autonomous writes remain subject to validation and Gateway controls.
+15. Every adopted framework or adapter requires an exit strategy.
+16. Self-hosting does not automatically imply low operational risk.
+17. Open source does not automatically imply portability.
+18. Managed service does not automatically imply production safety.
+19. A candidate may be accepted for one port and rejected for another.
+20. Stage 13 does not authorize implementation.
+21. Every displayed weighted total reproduces from the displayed scores and weights.
+22. Core-role and adapter-role scores are not interchangeable.
+23. Gate outcomes use only `pass | conditional_pass | fail | unknown`; applicability remains separate.
+24. Native target-architecture compatibility does not equal implementation verification.
+25. `adopt_as_optional_adapter` requires a successful PoC whenever the evaluation marks a PoC as required.
+26. Evidence completeness uses one stable adjudicated-claim formula.
+27. Supported negative facts count as evidence-complete, not as implemented capabilities.
+28. Implementation readiness remains separate in the status matrix.
+29. Reading first-party or vendor material does not count as independent corroboration.
+30. A benchmark has `actually_reproduced = no` unless Stage 13 actually executed it.
+31. Zep fees remain unresolved without a verified `credits_per_episode` calculation.
+32. Supermemory plan price does not equal scenario TCO without an SM-token mapping.
+33. PoC-B, PoC-C, and PoC-D must contain explicit fields; references such as “same as PoC-A” are insufficient.
 
 ---
 
@@ -1992,7 +2015,8 @@ Prior invariants 1–25 retained, plus:
 14. Recommendation B remains supported; no provider selected now.  
 15. Safe to merge as draft docs after architecture review.  
 16. Stage 14 may begin after review (red-team only).  
-17. No implementation authorized.
+17. No implementation authorized.  
+18. 33 explicit invariants are present.
 
 ## 26. Document control
 
@@ -2007,5 +2031,5 @@ Prior invariants 1–25 retained, plus:
 
 ## 27. Document history (non-normative)
 
-Earlier PR draft revisions (including `496569da…`) were used only as **donors** to restore substantive sections omitted by summarization. **Only this file is normative for merge.** Phrases such as “unchanged from prior revision” are not used for required content.
+This Stage 13 document is self-contained. Only this file is normative for merge. No required content depends on an earlier draft, prior invariant list, or deleted revision.
 
