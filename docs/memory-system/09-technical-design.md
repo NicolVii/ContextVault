@@ -7,7 +7,7 @@
 
 Stages 1–8 are treated as **complete** even if `00-roadmap.md` status text lags. Prior reports are **not** edited. Disagreements with Stages 7–8 are recorded in §45 rather than silently changed.
 
-This document is **self-contained**. Required design content is stated here directly. It incorporates the security and schema corrections for Gateway-only mutation, backend-only turn completion, same-assertion revision binding, purge/tombstones, blocked intake, provenance source-deletion, turn-message idempotency, non-inventive legacy mapping, deletion survivability, actor identity, semantic link uniqueness, constrained jobs, embedding-space registry, worker ingestion, forbidden-secret non-storage, intake-to-assertion link table, namespaced idempotency, and honest 1536-d embedding rules.
+This document is **self-contained**. Required design content is stated here directly. It incorporates the security and schema corrections for Gateway-only mutation, backend-only turn completion, same-assertion revision binding, purge/tombstones, blocked intake, provenance source-deletion, turn-message idempotency, non-inventive legacy mapping, deletion survivability, actor identity, semantic link uniqueness, constrained jobs, embedding-space registry, worker ingestion, forbidden-secret non-storage, intake-to-assertion link table, namespaced idempotency, honest 1536-d embedding rules, distinct `extract_document_candidates` jobs, and split assertion vs document-chunk embedding result commands.
 
 ---
 
@@ -385,7 +385,8 @@ conversation_turn_state:
   replied | failed | cancelled
 
 durable_job_type:
-  extract_turn_candidates | embed_assertion | embed_document_chunk |
+  extract_turn_candidates | extract_document_candidates |
+  embed_assertion | embed_document_chunk |
   sync_external_index | delete_step | usage_repair | rebuild_fts |
   reconcile_external_index | transition_temporal | compat_projection_sync |
   quarantine_forbidden_secret
@@ -412,7 +413,8 @@ source_unavailable_reason: deleted | missing | never_linked
 
 worker_command_type:
   conversational_candidate | inference_candidate | document_candidate |
-  transition_temporal | mark_embedding_metadata
+  transition_temporal |
+  mark_assertion_embedding_result | mark_document_chunk_embedding_result
 ```
 
 **Constraints:**
@@ -466,27 +468,82 @@ Compatibility writes go through Gateway adapter RPCs only.
 
 1. Job exists.  
 2. `job.state = 'leased'` and `job.lease_owner = p_worker_id` and `lease_expires_at > now()`.  
-3. `job.user_id = p_user_id` (or account-scoped subject_ref rules when applicable — not for candidate creation).  
+3. `job.user_id = p_user_id` (candidate/extract/embed jobs always require non-null job.user_id matching the target owner).  
 4. `job.job_type` is allowed to emit `p_command.type` (matrix below).  
-5. Job subject matches command source (e.g. extract job subject_type=turn and command.turnId = subject_id).  
-6. Job has not already produced a terminal command result for this idempotency key; if `memory_command_results` exists, return it.  
+5. Job subject matches command source per command-specific rules below.  
+6. Job has not already produced a terminal command result for this idempotency key; if `memory_command_results` exists, return it (replay).  
 
 **Allowlisted worker commands → job types:**
 
 | worker_command_type | Allowed job_type |
 | --- | --- |
-| conversational_candidate / inference_candidate | extract_turn_candidates |
-| document_candidate | extract_turn_candidates or document-derived extract job |
-| transition_temporal | transition_temporal |
-| mark_embedding_metadata | embed_assertion / embed_document_chunk |
+| conversational_candidate / inference_candidate | `extract_turn_candidates` only |
+| document_candidate | `extract_document_candidates` only |
+| transition_temporal | `transition_temporal` |
+| mark_assertion_embedding_result | `embed_assertion` only |
+| mark_document_chunk_embedding_result | `embed_document_chunk` only |
+
+**Command-specific subject verification:**
+
+##### `conversational_candidate` / `inference_candidate`
+
+1. `job_type = 'extract_turn_candidates'`.  
+2. `subject_type = 'turn'` and `subject_id = command.turnId = job.turn_id`.  
+3. `sourceMessageId` belongs to the same user and turn.  
+4. Creates only candidate assertions with chat/turn provenance.  
+5. Cannot create document-derived candidates.
+
+##### `document_candidate`
+
+1. `job_type = 'extract_document_candidates'`.  
+2. Job subject is either:
+   - **document-scoped (default for whole-document extraction):** `subject_type='document'`, `subject_id=document_id`; command.`documentId` must equal `subject_id`; optional `chunkId` must belong to that document and user; or  
+   - **chunk-scoped (when extraction is registered per chunk):** `subject_type='document_chunk'`, `subject_id=chunk_id`; command.`chunkId` must equal `subject_id`; command.`documentId` must equal the chunk’s parent document.  
+3. Job user matches document and chunk owner.  
+4. Document (and chunk, if supplied) is not deleted and is not in a deletion workflow that forbids processing (`deletion_workflows` for that document/account in `running|waiting_*` with a soft-deleted or purge-pending document blocks processing).  
+5. Creates only candidate assertions (`trust='candidate'`, `authority_source='none'`) with document/chunk provenance and `origin_class='document_candidate'`.  
+6. Cannot create `user_asserted`, `user_confirmed`, trusted memory, or conversational/inference candidates.  
+7. Replay returns the prior command result.
+
+##### `mark_assertion_embedding_result`
+
+1. `job_type = 'embed_assertion'`.  
+2. `subject_type='assertion'` and `subject_id = command.assertionId`.  
+3. `revisionId` belongs to that assertion (`(user_id, assertion_id, revision_id)`).  
+4. When `state='ready'`, `revisionId` must equal the assertion’s `current_revision_id`.  
+5. `embeddingSpace` matches the job payload and an active `embedding_spaces` row.  
+6. Mutates only `memory_embeddings` for that assertion/space — never document-chunk embedding rows.
+
+##### `mark_document_chunk_embedding_result`
+
+1. `job_type = 'embed_document_chunk'`.  
+2. `subject_type='document_chunk'` and `subject_id = command.chunkId`.  
+3. Chunk belongs to `command.documentId` and `p_user_id`.  
+4. `contentSha256` matches the current chunk content fingerprint.  
+5. `embeddingSpace` matches the job payload and registry.  
+6. Stale, missing, or deleted chunks (or documents in a forbidding deletion workflow) cannot be marked `ready`.  
+7. Mutates only `document_chunk_embeddings` — never assertion embedding rows.
+
+##### `transition_temporal`
+
+1. `job_type = 'transition_temporal'`.  
+2. Subject assertion matches `command.assertionId` and user.  
+3. Updates temporal fields only; does not alter trust/authority.
 
 **Authority rules:**
 
-- Worker path **cannot** set `authority_source='user_asserted'`.  
-- Model/system-generated assertions always enter as `trust='candidate'`, `authority_source='none'`, unless a separately recorded user approval decision already exists for that assertion.  
+- Worker path **cannot** set `authority_source` to `user_asserted` or `user_confirmed`, and cannot create `trust='trusted'` memory.  
+- Model/system-generated assertions always enter as `trust='candidate'`, `authority_source='none'`, unless a separately recorded user approval decision already exists for that assertion (approval is a user RPC, not a worker command).  
 - Actor recorded as `actor_kind='worker'`.  
 
-**Atomicity:** intake decision (if any), assertion/revision/provenance/disclosure/link rows, `memory_intake_decision_assertions`, `memory_command_results`, and follow-up job registration commit in one transaction. Replay returns the existing command result.
+**Atomicity:** intake decision (if any), assertion/revision/provenance/disclosure/link rows, `memory_intake_decision_assertions`, embedding result rows, `memory_command_results`, and follow-up job registration commit in one transaction. Replay returns the existing command result.
+
+**Cross-domain isolation:**
+
+1. A turn-extraction job cannot create a document-derived candidate.  
+2. A document-extraction job cannot create a conversational or inference candidate.  
+3. An assertion embedding job cannot mutate a document-chunk embedding.  
+4. A document-chunk embedding job cannot mutate an assertion embedding.
 
 ---
 
@@ -864,7 +921,9 @@ Physical column remains `vector(1536)`. Seed includes `legacy-unlabeled-1536` an
 **Unique:** `(user_id, assertion_id, embedding_space)`  
 **FK:** `(user_id, assertion_id, revision_id) → memory_assertion_revisions(user_id, assertion_id, id)` ON DELETE CASCADE  
 **Index:** ivfflat WHERE `state='ready'`  
-**RLS:** SELECT own; worker writes via SR.  
+**RLS:** SELECT own; no client writes.  
+**Writers:** EmbeddingService via `gateway_execute_worker_command` sole mutator of `state` / `embedding` / `error_code` through leased `mark_assertion_embedding_result` (`job_type='embed_assertion'` only). Deletion purge steps delete rows.  
+**TX owner:** worker command TX verifying lease + assertion subject + current revision (when ready) before upsert. Document-chunk embedding jobs must never write this table.  
 **Stale rule:** revision advance marks ready→stale and enqueues rebuild for current revision only.  
 **Retrieval join:** `revision_id = current_revision_id AND state='ready' AND embedding_space = :pinned_space`.
 
@@ -925,9 +984,10 @@ Physical column remains `vector(1536)`. Seed includes `legacy-unlabeled-1536` an
 **Unique:** `(user_id, chunk_id, embedding_space)`  
 **FKs:** `(user_id, document_id) → documents(user_id,id) ON DELETE CASCADE`; `(user_id, chunk_id) → document_chunks(user_id,id) ON DELETE CASCADE`  
 **Indexes:** ivfflat WHERE ready; `(user_id, document_id)`  
-**RLS:** SELECT own; worker writes.  
-**Writers/readers:** document pipeline / retrieval.  
-**TX owner:** embed job handler.
+**RLS:** SELECT own; no client writes.  
+**Writers:** DocumentService + MemoryIngestionGateway register `embed_document_chunk` jobs only (no embedding write). EmbeddingService via `gateway_execute_worker_command` sole mutator of `state` / `embedding` / `error_code` through leased `mark_document_chunk_embedding_result`. DeletionWorkflowService soft-deletes / purges during document deletion.  
+**TX owner:** worker command TX verifying lease + chunk subject + content fingerprint before upserting ready/failed. Assertion-embedding jobs must never write this table.  
+**Readers:** document retrieval / Stage 12 ports.
 
 ---
 
@@ -1050,9 +1110,11 @@ Physical column remains `vector(1536)`. Seed includes `legacy-unlabeled-1536` an
 
 | job_type | required subject |
 | --- | --- |
-| extract_turn_candidates | subject_type=turn; subject_id NOT NULL; turn_id = subject_id |
-| embed_assertion / sync_external_index / reconcile_external_index / rebuild_fts / transition_temporal / quarantine_forbidden_secret | subject_type=assertion; subject_id NOT NULL |
-| embed_document_chunk | subject_type=document_chunk; subject_id NOT NULL |
+| extract_turn_candidates | subject_type=turn; subject_id NOT NULL; turn_id = subject_id; conversational/inference candidates only |
+| extract_document_candidates | subject_type=document (whole-document after chunking) OR subject_type=document_chunk (re-extract one chunk after content change); subject_id NOT NULL; payload may include document_id, optional chunk_id, content fingerprint |
+| embed_assertion | subject_type=assertion; subject_id NOT NULL; payload includes revision_id, embedding_space; mutations only via mark_assertion_embedding_result |
+| embed_document_chunk | subject_type=document_chunk; subject_id NOT NULL; payload includes document_id, content_sha256, embedding_space; mutations only via mark_document_chunk_embedding_result |
+| sync_external_index / reconcile_external_index / rebuild_fts / transition_temporal / quarantine_forbidden_secret | subject_type=assertion; subject_id NOT NULL |
 | delete_step | subject_type=deletion_workflow; subject_id NOT NULL |
 | usage_repair | subject_type=usage_repair |
 | compat_projection_sync | subject_type=assertion |
@@ -1304,7 +1366,16 @@ Forbidden-secret intake → `memory_intake_decisions` only. Later reclassificati
 
 ## 19. Document provenance model
 
-Documents/chunks remain sources. Upload does not create trusted memories. Document-derived candidates use provenance document/chunk, `origin_class='document_candidate'`, `trust='candidate'`, created via worker or user Gateway. Document deletion nullifies provenance ids with markers; confirmed memories remain. **Assumption:** orphaned document candidates remain pending with “source missing” UX rather than auto-reject.
+Documents/chunks remain sources. Upload does not create trusted memories. Document-derived candidates use provenance document/chunk, `origin_class='document_candidate'`, `trust='candidate'`.
+
+**Worker ownership (normative):**
+
+1. After chunking (or whole-document reprocess), producers register `extract_document_candidates` with `subject_type='document'`, `subject_id=document_id`.  
+2. After a single chunk’s content changes, producers may register a chunk-scoped job with `subject_type='document_chunk'`, `subject_id=chunk_id` (payload still carries parent `document_id`).  
+3. Workers emit only `document_candidate` commands under that leased job (§8.1.1). Turn-extraction jobs cannot create document candidates.  
+4. User Gateway import/integration commands may also create document-sourced candidates when the user explicitly submits them; async document pipeline uses the worker path above.
+
+Document deletion nullifies provenance ids with markers; confirmed memories remain. **Assumption:** orphaned document candidates remain pending with “source missing” UX rather than auto-reject.
 
 ---
 
@@ -1349,7 +1420,8 @@ sequenceDiagram
     SR-->>TO: committed
     TO-->>C: success
     W->>W: claim_durable_jobs
-    W->>WG: extract candidates under lease
+    Note over W,WG: extract_turn_candidates → conversational/inference only
+    W->>WG: executeWorker under lease
     WG-->>W: command result
   end
 ```
@@ -1372,7 +1444,16 @@ Reuse `usage_events`, `credit_*`, `plan_usage_periods`.
 
 ### Job types
 
-`extract_turn_candidates`, `embed_assertion`, `embed_document_chunk`, `sync_external_index`, `delete_step`, `usage_repair`, `rebuild_fts`, `reconcile_external_index`, `transition_temporal`, `compat_projection_sync`, `quarantine_forbidden_secret`
+`extract_turn_candidates`, `extract_document_candidates`, `embed_assertion`, `embed_document_chunk`, `sync_external_index`, `delete_step`, `usage_repair`, `rebuild_fts`, `reconcile_external_index`, `transition_temporal`, `compat_projection_sync`, `quarantine_forbidden_secret`
+
+### Job → worker command ownership (summary)
+
+| job_type | Allowed worker commands | Forbidden |
+| --- | --- | --- |
+| `extract_turn_candidates` | `conversational_candidate`, `inference_candidate` | `document_candidate`; any embedding result command |
+| `extract_document_candidates` | `document_candidate` | conversational/inference candidates; any embedding result command |
+| `embed_assertion` | `mark_assertion_embedding_result` | `mark_document_chunk_embedding_result`; candidate creation |
+| `embed_document_chunk` | `mark_document_chunk_embedding_result` | `mark_assertion_embedding_result`; candidate creation |
 
 ### Claim semantics
 
@@ -1509,7 +1590,25 @@ type WorkerIngestionCommand =
   | { type: "inference_candidate"; content: string; sourceMessageId: string; turnId: string; confidence?: number; commandIdempotencyKey: string }
   | { type: "document_candidate"; content: string; documentId: string; chunkId?: string; commandIdempotencyKey: string }
   | { type: "transition_temporal"; assertionId: string; phase: string; commandIdempotencyKey: string }
-  | { type: "mark_embedding_metadata"; assertionId: string; revisionId: string; space: string; state: "ready" | "failed"; errorCode?: string; commandIdempotencyKey: string };
+  | {
+      type: "mark_assertion_embedding_result";
+      assertionId: string;
+      revisionId: string;
+      embeddingSpace: string;
+      state: "ready" | "failed";
+      errorCode?: string;
+      commandIdempotencyKey: string;
+    }
+  | {
+      type: "mark_document_chunk_embedding_result";
+      documentId: string;
+      chunkId: string;
+      contentSha256: string;
+      embeddingSpace: string;
+      state: "ready" | "failed";
+      errorCode?: string;
+      commandIdempotencyKey: string;
+    };
 
 type IngestionResult = {
   intakeDecisionId?: string;
@@ -1572,8 +1671,31 @@ interface DerivedIndexPort {
   enqueueRebuild(tx: Tx, input: { userId: UserId; assertionId: string; reason: string }): Promise<void>;
 }
 interface EmbeddingIndexPort {
-  upsert(input: { userId: UserId; assertionId: string; revisionId: string; space: string; vector: number[] }): Promise<void>;
-  markStale(input: { userId: UserId; assertionId: string }): Promise<void>;
+  /** Assertion embeddings only — called only from leased embed_assertion → mark_assertion_embedding_result. */
+  upsertAssertion(input: {
+    userId: UserId;
+    assertionId: string;
+    revisionId: string;
+    embeddingSpace: string;
+    vector: number[];
+  }): Promise<void>;
+  markAssertionStale(input: { userId: UserId; assertionId: string }): Promise<void>;
+  /** Document-chunk embeddings only — called only from leased embed_document_chunk → mark_document_chunk_embedding_result. */
+  upsertDocumentChunk(input: {
+    userId: UserId;
+    documentId: string;
+    chunkId: string;
+    contentSha256: string;
+    embeddingSpace: string;
+    vector: number[];
+  }): Promise<void>;
+  markDocumentChunkFailed(input: {
+    userId: UserId;
+    documentId: string;
+    chunkId: string;
+    embeddingSpace: string;
+    errorCode: string;
+  }): Promise<void>;
 }
 interface ExternalMemoryIndexPort {
   sync(input: { userId: UserId; assertionId: string }): Promise<void>;
@@ -1637,7 +1759,7 @@ interface AuditExplainabilityStore {
 | AssertionReviewService | User JWT via Gateway | Review RPC TX | — | Replaces review PATCH status flips |
 | AssertionProvenanceStore | Inside Gateway TX | Same TX as assertion write | raw bodies | New |
 | Retrieval persistence | User RLS SELECT / INVOKER RPC | Read-only | ranking constants | Ports for Stage 12 |
-| EmbeddingIndexPort | Worker SR | Job TX | cross-space compare; naive pad/truncate | Splits `reembed` |
+| EmbeddingIndexPort | Worker SR via split embedding commands | Job TX bound to embed_assertion or embed_document_chunk | cross-space compare; naive pad/truncate; cross-table writes | Splits `reembed` into assertion vs chunk paths |
 | ExternalMemoryIndexPort | Worker SR | Job TX | remote text as authority | Wraps Mem0 |
 | ConversationStore | User/server RPCs | Idempotent user message | — | Extended with turn_id |
 | TurnStore | User JWT DEFINER for begin/append | Fingerprint conflict detection | — | New |
@@ -1663,7 +1785,17 @@ Gateway does not invent the split algorithm; Processing Pipeline (Stage 10) supp
 
 ### Worker commands
 
-Listed as `WorkerIngestionCommand`. Always produce candidates (or metadata/temporal updates). Never `user_asserted`.
+Listed as `WorkerIngestionCommand`. Always produce candidates or embedding/temporal result updates. Never `user_asserted`, `user_confirmed`, or trusted memory.
+
+| Command | Job type | Effect domain |
+| --- | --- | --- |
+| `conversational_candidate` / `inference_candidate` | `extract_turn_candidates` | candidate assertions with chat/turn provenance only |
+| `document_candidate` | `extract_document_candidates` | candidate assertions with document/chunk provenance only |
+| `mark_assertion_embedding_result` | `embed_assertion` | `memory_embeddings` only |
+| `mark_document_chunk_embedding_result` | `embed_document_chunk` | `document_chunk_embeddings` only |
+| `transition_temporal` | `transition_temporal` | temporal fields only |
+
+There is no shared `mark_embedding_metadata` command; assertion and chunk embedding results are distinct types so a leased job cannot update the wrong derived table.
 
 ### Results and errors
 
@@ -1677,8 +1809,10 @@ Listed as `WorkerIngestionCommand`. Always produce candidates (or metadata/tempo
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Explicit remember one clear | Gateway | user JWT DEFINER | intake, intake_assertion links, assertions, revisions, provenance, disclosure, jobs, command_results | `(user_id, command_key)` | command key | after all | error | same key |
 | Remember + extras | Gateway | user JWT DEFINER | multiple assertions + links | same | command key | same | partial codes | same key |
-| Chat candidate registration | Worker → worker Gateway | service_role | intake, links, candidate assertions… | job lease + `(user_id, command_key)` | job/command key | job TX | retry/DLQ | replay |
-| Document candidate | Worker Gateway | service_role | same pattern | lease | command key | job TX | retry | replay |
+| Chat candidate registration | Worker → worker Gateway | service_role | intake, links, conversational/inference candidate assertions… | leased `extract_turn_candidates` + turn subject | job/command key | job TX | retry/DLQ | replay |
+| Document candidate registration | Worker → worker Gateway | service_role | intake, links, document_candidate assertions + provenance | leased `extract_document_candidates` + document or chunk subject | job/command key | job TX | retry/DLQ | replay |
+| Assertion embedding result | Worker → worker Gateway | service_role | `memory_embeddings` (+ command_results) | leased `embed_assertion` + assertion/revision/space checks | command key | job TX | retry/DLQ | replay |
+| Document-chunk embedding result | Worker → worker Gateway | service_role | `document_chunk_embeddings` (+ command_results) | leased `embed_document_chunk` + chunk/document/fingerprint/space checks | command key | job TX | retry/DLQ | replay |
 | Approve/reject/defer | Review RPC | user JWT DEFINER | assertion, decision | pending check | `(user_id, assertion_id, key)` | RPC | conflict | same key |
 | Correction | Gateway | user JWT DEFINER | assertions, links, revisions | active link unique | command key | RPC | conflict | same key |
 | Mark historical / repudiate / archive | Gateway | user JWT DEFINER | assertion (+decision) | row lock | command key | TX | error | same key |
@@ -1701,7 +1835,7 @@ Listed as `WorkerIngestionCommand`. Always produce candidates (or metadata/tempo
 | `append_turn_user_message` | TurnStore | authenticated EXECUTE | DEFINER | `auth.uid()=p_user_id` | Idempotent per turn |
 | `begin_or_get_turn` | TurnStore | authenticated EXECUTE | DEFINER | uid | Fingerprint conflict → raise |
 | `gateway_execute_command` | Gateway user path | authenticated EXECUTE | DEFINER | uid | Dispatches UserIngestionCommand |
-| `gateway_execute_worker_command` | Worker | **EXECUTE service_role only** | DEFINER | leased job + user/subject/type matrix | Cannot create user_asserted; allowlisted commands |
+| `gateway_execute_worker_command` | Worker | **EXECUTE service_role only** | DEFINER | leased job + user/subject/type matrix (§8.1.1) | Cannot create user_asserted/trusted; turn extract ≠ document extract; assertion embed ≠ chunk embed |
 | `approve_memory_candidate` | Review | authenticated EXECUTE | DEFINER | uid + row owner | pending only |
 | `reject_memory_candidate` / `defer_memory_candidate` | Review | authenticated | DEFINER | uid | |
 | `correct_memory_assertion` | Gateway | authenticated | DEFINER | uid | |
@@ -1738,7 +1872,7 @@ Browser may only call HTTP `runTurn` with message + clientTurnKey + session + se
 | `p_command` | Allowlisted worker command only |
 | `p_command_idempotency_key` | Under `(user_id, key)` |
 
-Arbitrary commercial payloads, trust upgrades to `user_asserted`, or unrelated job types are rejected.
+Arbitrary commercial payloads, trust upgrades to `user_asserted`/`user_confirmed`, document candidates under turn jobs, conversational candidates under document jobs, assertion-embedding results under chunk jobs (or vice versa), or unrelated job types are rejected.
 
 ---
 
@@ -1758,10 +1892,10 @@ Legend: ✓ allowed for own rows via `auth.uid() = user_id`; ✗ denied; SR = se
 | memory_intake_decision_assertions | ✓ | own | ✗ | ✓ | own | composite FKs both ends | RPC-only |
 | memory_command_results | ✓ | own | ✗ | ✓ | own | `(user_id, key)` | RPC-only |
 | embedding_spaces | ✓ | active | ✗ | ✓ | active flag | N/A | SR mutate |
-| memory_embeddings | ✓ | own | ✗ | ✓ W | own | revision triple | no client writes |
+| memory_embeddings | ✓ | own | ✗ | ✓ W via `mark_assertion_embedding_result` only | own | revision triple | no client writes; not writable by chunk-embed jobs |
 | memory_fts_documents | ✓ | own | ✗ | ✓ W | own | revision triple | no client writes |
 | external_memory_index_entries | ✓ | own | ✗ | ✓ W | own | revision triple | no client writes |
-| document_chunk_embeddings | ✓ | own | ✗ | ✓ W | own | composite FKs | no client writes |
+| document_chunk_embeddings | ✓ | own | ✗ | ✓ W via `mark_document_chunk_embedding_result` only | own | composite FKs | no client writes; not writable by assertion-embed jobs |
 | conversation_turns | ✓ | own | ✗ | ✓ | own | session composite | RPC/completion |
 | turn_inference_attempts | ✓ | own | ✗ | ✓ | own | turn composite | backend |
 | usage_repair_obligations | ✓ | own | ✗ | ✓ | own | turn composite | completion/W |
@@ -1942,6 +2076,11 @@ flowchart LR
 | 2 | Direct trust grant via PostgREST | No INS/UPD grants; DEFINER RPCs | Gateway | Grant drift | Ops review |
 | 3 | Fabricated complete_replied_turn | service_role only | Server-derived payloads | SR exfiltration | Stage 15 |
 | 4 | Worker forging user_asserted | Worker RPC authority ban + CHECKs | Allowlisted commands | Bug in allowlist | Stage 15 |
+| 4a | Turn extract forging document candidate | job_type→command allowlist; provenance checks | Worker Gateway | Mis-typed job registration | Stage 15 |
+| 4b | Document extract forging conversational candidate | job_type→command allowlist; turn subject required for chat cmds | Worker Gateway | Mis-typed job registration | Stage 15 |
+| 4c | Assertion embed mutating chunk embedding | split embedding commands + subject checks | Worker Gateway | Shared helper bug | Stage 15 |
+| 4d | Chunk embed mutating assertion embedding | split embedding commands + subject checks | Worker Gateway | Shared helper bug | Stage 15 |
+| 4e | Ready embed for stale revision/fingerprint | current_revision_id / contentSha256 checks on ready | Worker Gateway | Race vs content change | tests |
 | 5 | Worker using unleased job | Lease verification | claim/execute coupling | Clock skew on lease | Ops |
 | 6 | Forged actor UUID | actor_kind + owner equality CHECKs | RPC sets actor | — | tests |
 | 7 | Secret stored on block | intake_decisions; no forbidden_secret on disclosure enum | Gateway | Detector misses | Stage 10 |
@@ -2089,10 +2228,20 @@ sequenceDiagram
   P->>P: commit
   W->>J: claim FOR UPDATE SKIP LOCKED
   W->>WG: execute allowlisted command under lease
+  Note over WG: job_type gates command type + subject
   alt command result exists
     WG-->>W: prior result
-  else apply
-    WG->>H: candidates/metadata atomically
+  else extract_turn_candidates
+    WG->>H: conversational/inference candidates only
+    WG-->>W: new result
+  else extract_document_candidates
+    WG->>H: document_candidate only
+    WG-->>W: new result
+  else embed_assertion
+    WG->>H: mark_assertion_embedding_result → memory_embeddings
+    WG-->>W: new result
+  else embed_document_chunk
+    WG->>H: mark_document_chunk_embedding_result → document_chunk_embeddings
     WG-->>W: new result
   end
   alt success
@@ -2214,7 +2363,13 @@ stateDiagram-v2
 51. User-owned idempotency keys are unique per `(user_id, key)`; durable post-Auth keys use `(subject_ref, key)`.  
 52. Two different users may reuse the same client idempotency key without collision.  
 53. Forbidden-secret intake creates only blocked intake decisions.  
-54. Later forbidden-secret reclassification quarantines and starts deletion without copying raw content.
+54. Later forbidden-secret reclassification quarantines and starts deletion without copying raw content.  
+55. `extract_turn_candidates` may create only conversational/inference candidates sourced from its own turn/messages.  
+56. `extract_document_candidates` may create only document-derived candidates tied to the subject document or chunk owned by the same user.  
+57. A document candidate is always tied to a document or chunk owned by the same user as the job.  
+58. `mark_assertion_embedding_result` is allowed only from `embed_assertion` and mutates only `memory_embeddings`.  
+59. `mark_document_chunk_embedding_result` is allowed only from `embed_document_chunk` and mutates only `document_chunk_embeddings`.  
+60. Ready assertion embeddings always bind the assertion’s current revision; ready chunk embeddings always match the current chunk content fingerprint.
 
 ---
 
@@ -2232,6 +2387,12 @@ stateDiagram-v2
 | Fingerprint conflict | conflict | no mutation | new key if intentional new turn |
 | Async job fail | turn still success | job retry/DLQ | worker replay |
 | Worker lease invalid | job error | no canonical write | reclaim/retry claim |
+| Wrong command for job type | command rejected | no write | fix worker / requeue correct command |
+| Document candidate under turn job | rejected | no write | register `extract_document_candidates` |
+| Conversational candidate under document job | rejected | no write | register `extract_turn_candidates` |
+| Assertion embed cmd on chunk job | rejected | no chunk/assertion cross-write | use matching embedding command |
+| Chunk embed cmd on assertion job | rejected | no cross-write | use matching embedding command |
+| Ready embed stale revision/fingerprint | rejected | remains pending/stale | enqueue new embed job for current content |
 | Duplicate Keep | same result | one decision | idempotency key |
 | Forbidden secret block | policy_blocked | intake decision only | user revises content |
 | Forbidden reclassify | assertion hidden | quarantine + deletion workflow | resume deletion |
@@ -2335,6 +2496,9 @@ Admin repudiation path not enabled. Offline legacy kind classification optional 
 | 30 | Intake-to-assertion structural links | **Met** — §8.9 |
 | 31 | No cross-user idempotency collisions | **Met** — §8.20 / §8.21 |
 | 32 | Honest embedding dimensionality rules | **Met** — §8.11 / §17 |
+| 33 | Document extract job distinct from turn extract | **Met** — `extract_document_candidates` + allowlist |
+| 34 | Assertion vs chunk embedding commands split | **Met** — `mark_*_embedding_result` pair |
+| 35 | Cross-domain worker isolation | **Met** — §8.1.1 / invariants 55–60 |
 
 ---
 
@@ -2359,9 +2523,12 @@ Admin repudiation path not enabled. Offline legacy kind classification optional 
 5. Correction vs changed-over-time classification into link types?  
 6. Conflict detection producing `conflicts_with` without auto-distrust?  
 7. Confidence formulas that never grant trust?  
-8. Which worker commands the Processing Pipeline may emit after a turn extract job?  
+8. Which worker commands the Processing Pipeline may emit after an `extract_turn_candidates` job (conversational/inference only — never `document_candidate`)?  
 9. How intake_decisions reason codes map from detectors?  
-10. Whether offline legacy kind classification should rewrite `legacy_unknown` under migration notes without inventing authority?
+10. Whether offline legacy kind classification should rewrite `legacy_unknown` under migration notes without inventing authority?  
+11. When should document extraction register document-scoped vs chunk-scoped `extract_document_candidates` jobs after re-chunking?  
+12. What content fingerprint algorithm feeds `contentSha256` for `mark_document_chunk_embedding_result` readiness checks?  
+13. How should document-pipeline Stage 10 outputs map exclusively onto `document_candidate` under `extract_document_candidates`?
 
 ### Non-goals for Stage 10
 
@@ -2391,6 +2558,8 @@ Physical schema redesign; entity graphs; ranking weights; framework selection; m
 | Global idempotency key uniqueness | Corrected — per-user and subject_ref namespaces |
 | Naive pad/truncate to 1536 | Corrected — forbidden; named transform spaces only |
 | Missing worker ingestion path under service_role | Corrected — `gateway_execute_worker_command` |
+| document_candidate allowed from extract_turn_candidates or undefined document extract job | Corrected — `extract_document_candidates` only |
+| Shared mark_embedding_metadata for assertion and chunk embeds | Corrected — split `mark_assertion_embedding_result` / `mark_document_chunk_embedding_result` |
 | Stage 7/8 binding architecture | Preserved |
 
 No binding disagreement requiring Stage 7/8 revision was found beyond clarifications already recorded (direct_answer usage exception; purged tombstones; worker path).
@@ -2403,6 +2572,12 @@ No binding disagreement requiring Stage 7/8 revision was found beyond clarificat
 - [x] No browser client can directly grant trusted memory  
 - [x] Commercial completion not callable with fabricated browser payloads  
 - [x] Worker ingestion is service_role + lease-bound and cannot create `user_asserted`  
+- [x] Turn extract cannot create document-derived candidates  
+- [x] Document extract cannot create conversational/inference candidates  
+- [x] Document candidates are always same-user document/chunk-bound  
+- [x] Assertion embedding jobs cannot mutate document-chunk embeddings  
+- [x] Document-chunk embedding jobs cannot mutate assertion embeddings  
+- [x] Ready embeddings require current revision or current chunk fingerprint  
 - [x] Current revision always same assertion  
 - [x] Purged tombstone has no private revision text  
 - [x] Blocking a secret does not store the secret  
@@ -2496,7 +2671,17 @@ No binding disagreement requiring Stage 7/8 revision was found beyond clarificat
 22. Embedding space with dimensions≠1536 rejected.  
 23. Adapter attempting naive pad/truncate is out of policy (Stage 13/15 eval).  
 24. Mirror trigger rejects content_text drift.  
-25. Worker replay returns prior command_results without duplicate candidates.
+25. Worker replay returns prior command_results without duplicate candidates.  
+26. `document_candidate` under leased `extract_turn_candidates` is rejected.  
+27. `conversational_candidate` / `inference_candidate` under leased `extract_document_candidates` is rejected.  
+28. `extract_document_candidates` with document subject rejects command.documentId ≠ subject_id.  
+29. Chunk-scoped `extract_document_candidates` rejects command.chunkId ≠ subject_id or parent document mismatch.  
+30. Document/chunk not owned by job.user_id rejects document_candidate.  
+31. Deleted / forbidding-deletion document rejects document_candidate and ready chunk embedding.  
+32. `mark_assertion_embedding_result` under `embed_document_chunk` is rejected (and vice versa).  
+33. `mark_assertion_embedding_result` ready with non-current revision_id is rejected.  
+34. `mark_document_chunk_embedding_result` ready with mismatched contentSha256 is rejected.  
+35. Assertion-embed job does not mutate `document_chunk_embeddings`; chunk-embed job does not mutate `memory_embeddings`.
 
 ---
 
