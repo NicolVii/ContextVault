@@ -79,7 +79,7 @@ rawQuery + turnId + userId + model/selection hints
  Per-provider candidate plans
    (query-compatible ∧ model-capable hard filters;
     per-finalist sendable/withheld subsets;
-    requiredEvidenceSatisfied + attainableUtility)
+    exact projected packing → requiredEvidenceSatisfied + attainableUtility)
         │
         ▼
  Choose one DisclosureProviderPlanResult
@@ -102,7 +102,7 @@ rawQuery + turnId + userId + model/selection hints
 3. **Query plan:** `primaryIntentMode` + deterministic `intentFacets`; optional structured model assistance cannot grant trust, widen ownership, bypass disclosure, or silently pick ambiguous entities/projects.  
 4. **Query disclosure preflight:** Local scan produces purpose-specific `QueryDisclosureDecision` **before** any external embedding, external-index, planner-model, reranker, or **final inference** call. Permission for one purpose never implies another.  
 5. **Graph expansion v1:** **Zero-hop default**; **one bounded hop** only for `entity_focused` / `relationship_focused` via Stage 11 contracts to supporting assertions — never friend-of-friend.  
-6. **Provider selection:** Hard-filter query-compatible ∧ model-capable classes; for each, compute per-finalist sendable/withheld subsets and required-evidence satisfaction; choose the deterministic highest-utility valid plan; pack **once**. Optional incompatible evidence is withheld, not a hard elimination. Missing required evidence → explicit safe fallback (not silent omission).  
+6. **Provider selection:** Hard-filter query-compatible ∧ model-capable classes; build exact lightweight projections (`projectedUtility` / `attainableUtility` under `rp-v1.0`); require disclosure∧projected-fit for required evidence; choose highest attainableUtility; pack normally once with bounded exact-pack fallback. Optional incompatible evidence is withheld, not a hard elimination.  
 7. **Packing:** Hierarchical reserve-then-fill; `reservedCurrentUserTokens` uses the exact user-message representation that will be sent (raw / redacted / none). Document diversity caps are **scope-specific** (`targeted_passage` only for 4/2 chunk limits).  
 8. **History:** Complete eligible turns with reserved recent-turn budget; no orphan/failed turns; optional derived summaries never become trusted memory.  
 9. **Identity:** Not unconditional inject-everything; deterministic short-circuit only after a complete canonical identity consistency check (not lexical absence-of-conflict).  
@@ -1138,6 +1138,10 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 | `whole_document_coverage_policy` | see §19.3 | Coverage/token/disclosure bounded; may exceed Q&A chunk caps when complete coverage fits |
 | `partial_summary_max_sections_packed` | Stage 15 calibration | Cap on **excerpts packed beside** a partial summary for citation — **not** a limit on sections used to *produce* a complete derived summary |
 | `near_paraphrase_similarity` | 0.92 | Calibration; Stage 15 |
+| `gamma_essential` | 0.10 | Shared by ContextPacker and provider pre-pack projected utility |
+| `req_multiplier_required` | 1.00 | Provider-plan projectedUtility multiplier (hard validity still separate) |
+| `req_multiplier_preferred` | 0.60 | Provider-plan projectedUtility multiplier |
+| `req_multiplier_optional` | 0.20 | Provider-plan projectedUtility multiplier |
 
 ### 13.3 Policy boosts / penalties (additive before clip)
 
@@ -1159,7 +1163,7 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 
 ### 13.4 What Stage 15 must calibrate
 
-Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ_policy` (keep ±15% bound unless version bump), pin boost, targeted-passage Q&A chunk maxima, `partial_summary_max_sections_packed` (citation packing only), and latency deadlines. Stage 15 must include regressions that additive policy domination cannot reappear, that blocked queries never reach final inference, and that 4/2 chunk caps are not treated as section/document completeness.
+Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ_policy` (keep ±15% bound unless version bump), pin boost, targeted-passage Q&A chunk maxima, `partial_summary_max_sections_packed`, `gamma_essential`, and requirement multipliers (`1.00` / `0.60` / `0.20`). Stage 15 may calibrate these **only** via a `retrieval_policy_version` change or an explicitly documented compatible calibration revision. Regressions must cover: additive policy domination cannot reappear; blocked queries never reach final inference; 4/2 caps ≠ completeness; attainableUtility uses only projected packed IDs; optional flooding cannot dominate preferred; disclosable-but-unfittable required evidence invalidates a plan; router preference changes require `router_policy_version` change; exact-pack fallback is bounded and deterministic.
 
 ---
 
@@ -1515,26 +1519,7 @@ Classification comes from the **query plan and evidence role**, never from which
 | **preferred** | Highly relevant personal assertions that improve the answer but are not indispensable; direct supporting conversation turns; useful relationship support |
 | **optional** | Secondary historical context; style/persona; additional corroborating chunks; low-ranked graph expansion |
 
-### 22.5 Provider candidate plans (hard vs per-evidence)
-
-```ts
-type ProviderCandidatePlan = {
-  providerClass: string;
-
-  queryCompatible: boolean;
-  modelCapable: boolean;
-
-  sendableCandidateIds: string[];
-  withheldCandidateIds: string[];
-
-  requiredEvidenceSatisfied: boolean;
-
-  attainableUtility: number;
-  attainableTokensEstimate: number;
-
-  withholdReasonCodes: Record<string, string[]>; // candidateId → reason codes
-};
-```
+### 22.5 Provider candidate plans and exact pre-pack projection
 
 **Hard provider eligibility** (class is a candidate only when both hold):
 
@@ -1547,56 +1532,198 @@ model capabilities satisfy the request
 Query incompatibility → hard exclusion.  
 Model-capability incompatibility → hard exclusion.
 
-**Evidence compatibility is evaluated per finalist**, not as a single global “evidence-compatible class list”:
+Evidence compatibility is evaluated **per finalist**. One incompatible optional finalist does **not** eliminate the provider.
 
-1. For each query-compatible ∧ model-capable provider class, evaluate every finalist’s evidence-disclosure policy.  
-2. Partition into `sendable` vs `withheld`.  
-3. Compute attainable retrieval/context utility from sendable finalists (using Final scores + requirement weights; calibration Stage 15).  
-4. Record withhold reason codes per incompatible finalist.  
-5. **One incompatible optional finalist does not eliminate the provider.**
+#### 22.5.1 Types
+
+```ts
+type ProviderPrepackProjection = {
+  providerClass: string;
+
+  estimatedAvailableContextTokens: number;
+
+  requiredCandidateIds: string[];
+  preferredCandidateIds: string[];
+  optionalCandidateIds: string[];
+
+  projectedPackedCandidateIds: string[];
+  projectedWithheldCandidateIds: string[]; // disclosure-incompatible
+  projectedBudgetDroppedCandidateIds: string[];
+
+  estimatedTokensByGroup: Record<string, number>;
+  estimatedTotalPackedTokens: number;
+
+  requiredEvidenceDisclosureSatisfied: boolean;
+  requiredEvidenceProjectedToFit: boolean;
+  requiredEvidenceSatisfied: boolean;
+
+  attainableUtility: number;
+
+  retrievalPolicyVersion: string;
+  routerPolicyVersion?: string;
+};
+
+type ProviderCandidatePlan = {
+  providerClass: string;
+
+  queryCompatible: boolean;
+  modelCapable: boolean;
+
+  sendableCandidateIds: string[];
+  withheldCandidateIds: string[];
+
+  requiredEvidenceDisclosureSatisfied: boolean;
+  requiredEvidenceProjectedToFit: boolean;
+  requiredEvidenceSatisfied: boolean;
+
+  projectedPackedCandidateIds: string[];
+  projectedBudgetDroppedCandidateIds: string[];
+
+  estimatedAvailableContextTokens: number;
+  estimatedTotalPackedTokens: number;
+
+  attainableUtility: number;
+
+  withholdReasonCodes: Record<string, string[]>;
+
+  retrievalPolicyVersion: string;
+  routerPolicyVersion?: string;
+  providerPreferenceRank?: number;
+};
+```
+
+Normative:
+
+```text
+requiredEvidenceSatisfied =
+  requiredEvidenceDisclosureSatisfied
+  AND
+  requiredEvidenceProjectedToFit
+```
+
+Disclosure compatibility alone is **insufficient**. A plan with `requiredEvidenceSatisfied = false` is **invalid** regardless of `attainableUtility`.
+
+#### 22.5.2 Exact projected candidate utility (`rp-v1.0`)
+
+Same conceptual family as ContextPacker utility (§24.3):
+
+\[
+\mathrm{projectedBaseUtility}(c)
+=
+\frac{\mathrm{Final}(c) + \gamma_{\mathrm{essential}}\cdot \mathbf{1}_{essential}(c)}{1 + \mathrm{estimatedTokens}(c)}
+\]
+
+with \(\gamma_{\mathrm{essential}} = 0.10\).
+
+Requirement multipliers (ranking only; do **not** override hard required validity):
+
+| Requirement | Multiplier |
+| --- | --- |
+| `required` | `1.00` |
+| `preferred` | `0.60` |
+| `optional` | `0.20` |
+
+\[
+\mathrm{projectedUtility}(c)
+=
+\mathrm{projectedBaseUtility}(c)
+\times
+\mathrm{requirementMultiplier}(\mathrm{requirement}(c))
+\]
+
+A required multiplier of `1.00` does **not** allow one required item to compensate for another missing required item.
+
+#### 22.5.3 Lightweight projected packing procedure
+
+For every query-compatible ∧ model-capable provider:
+
+1. Partition finalists into sendable vs disclosure-withheld; record withhold reason codes.  
+2. Separate sendable candidates by `EvidenceRequirement`.  
+3. Estimate tokens using selected provider/model capability metadata and the **exact** raw or redacted user-message representation (§23). Compute `estimatedAvailableContextTokens`.  
+4. Apply the same group minima/maxima, atomicity, conflict-notice protection, diversity, and document-scope rules as the final packer (§14, §19, §24).  
+5. Place **all required** evidence first (including conflict/ambiguity notices classified required for safe presentation).  
+6. If all required evidence cannot fit the estimated budget:
+
+```text
+requiredEvidenceProjectedToFit = false
+requiredEvidenceSatisfied = false
+```
+
+7. Fill remaining estimated budget by descending `projectedUtility`.  
+8. Use the same deterministic candidate tie-breakers as final packing (§24.5): higher `Final`, then higher WRRF, then exact match, then newer `last_confirmed_at`, then stable `candidateId`.  
+9. Set `projectedPackedCandidateIds`, `projectedBudgetDroppedCandidateIds`, `estimatedTokensByGroup`, `estimatedTotalPackedTokens`.  
+10. Calculate `attainableUtility` **only** from candidates projected to be packed — never from every sendable ID that cannot fit.
+
+#### 22.5.4 Exact attainable-utility formula
+
+\[
+\mathrm{attainableUtility}(\mathrm{plan})
+=
+\sum_{c \in \mathrm{projectedPackedCandidateIds}}
+\mathrm{projectedUtility}(c)
+\]
 
 ### 22.6 Provider-selection algorithm
 
-Deterministic sequence (reproducible under `retrieval_policy_version`):
+Exact deterministic sequence (reproducible under pinned `retrieval_policy_version`, and `router_policy_version` when router rank is used):
 
 ```text
-1. Produce query-compatible provider classes (from inferenceDisposition).
-2. Remove model-incapable classes.
-3. For each remaining provider class:
-     partition finalists into sendable / withheld
-     test required-evidence satisfaction
-     estimate attainable utility and token fit (lightweight pre-pack projection:
-       ids, disclosure decisions, requirement levels, estimated tokens,
-       Final scores, group constraints — NOT full rendering)
-4. Prefer plans satisfying all required evidence.
-5. Among valid plans, choose the highest attainableUtility.
-6. Apply deterministic tie-breakers.
-7. Build one final context pack for the chosen provider/model.
-8. Persist withholding records for incompatible finalists.
+1. Hard-filter query-incompatible providers.
+2. Hard-filter model-incapable providers.
+3. Build one lightweight ProviderPrepackProjection / ProviderCandidatePlan
+   per remaining provider (§22.5).
+4. Remove plans where requiredEvidenceSatisfied = false.
+5. Choose the valid plan with highest attainableUtility.
+6. Apply deterministic tie-breakers among remaining equals.
+7. Run the full ContextPacker for the chosen plan
+   (normally once for the highest-ranked valid plan).
+8. If exact packing loses required evidence:
+     reject the plan (reason: required_evidence_lost_on_exact_pack)
+     evaluate the next ordered valid projection
+9. If no valid plan remains:
+     use Case C
 ```
 
-**Tie-breakers (in order):**
+Fallback ordering is calculated **once** from the deterministic projection ranking before full packs begin. The number of full-pack attempts is **bounded by the number of valid provider projections**.
+
+Record (no raw text): `chosen_projection_rank`, `full_pack_attempt_count`, and when applicable `rejected_plan_reason = required_evidence_lost_on_exact_pack`.
+
+**“ContextPacker runs once”** means: normally once for the highest-ranked valid plan; bounded retries are allowed only when exact tokenization contradicts the lightweight projection.
+
+#### 22.6.1 Tie-breakers (valid plans only)
+
+All compared plans already have `requiredEvidenceSatisfied = true`, so “fewer required withheld” is **not** a tie-breaker (valid plans withhold **zero** required evidence).
 
 ```text
-1. requiredEvidenceSatisfied
-2. higher attainableUtility
-3. fewer required/preferred records withheld
-4. lower predicted latency/cost class according to existing router policy
-5. stable provider-class identifier
+1. higher attainableUtility
+2. fewer preferred candidates withheld
+3. fewer optional candidates withheld
+4. lower estimatedTotalPackedTokens when utility is equal
+5. existing router preference rank (lower/better per router convention)
+6. stable provider-class identifier
 ```
 
-Stage 12 does **not** select a commercial vendor. The router may supply latency/cost metadata; disclosure and required-evidence correctness come first.
+#### 22.6.2 Router-policy reproducibility
 
-**Avoid multiple full packs:** do not fully render/pack for every provider class. Use the lightweight pre-pack projection above; run `ContextPacker` exactly once for the chosen plan. If exact tokenization then drops required evidence, reject that plan and deterministically evaluate the next valid candidate or the no-compatible-provider path.
+If router preference rank contributes to the decision, snapshot for the turn:
+
+```text
+router_policy_version
+provider_preference_rank
+```
+
+The retrieval plan must not depend on an unversioned mutable router order. Stage 12 does **not** define commercial provider preferences; it only requires that any router-provided preference metadata used as a tie-breaker is **stable and versioned** for that turn. Router preference may break a true tie but **cannot** override disclosure, required-evidence satisfaction, or attainable utility.
+
+Stage 12 does **not** select a commercial vendor. Disclosure and required-evidence correctness come first.
 
 ### 22.7 Empty and partial compatibility outcomes
 
 | Case | Situation | Outcome |
 | --- | --- | --- |
 | **A** | All required evidence fits one provider | Select that provider; withhold only incompatible preferred/optional evidence |
-| **B** | Several providers satisfy required evidence | Choose deterministic highest-utility plan |
+| **B** | Several providers satisfy required evidence | Choose deterministic highest `attainableUtility` among valid projections (§22.5–22.6) |
 | **C** | No provider satisfies all required evidence | **Do not** silently answer as though fully grounded. Use deterministic local answer, local-only inference where available, clarification, privacy limitation notice, request to use a compatible model/provider, and/or refusal to make an unsupported claim. Persist `no_provider_satisfies_required_evidence` |
-| **D** | No evidence is strictly required | Select provider using best compatible (preferred/optional) sendable subset |
+| **D** | No evidence is strictly required | Select provider using highest attainableUtility over projected packed preferred/optional subsets |
 | **E** | Incompatible optional evidence exists | Withhold it, record it, continue — **must not** force the entire turn to `local_only` |
 | **F** | Query itself is `local_only` | No external provider plan is evaluated |
 
@@ -1608,7 +1735,7 @@ Evidence 2 → only B
 Evidence 3 → A and B
 ```
 
-- If only Evidence 3 is required → both A and B may be valid; choose by attainableUtility (each sees {1,3} or {2,3} sendable).  
+- If only Evidence 3 is required → both A and B may be valid; choose by **projected packed** attainableUtility (each plan’s sendable set is {1,3} or {2,3}, then projected packing may drop low-utility optionals).  
 - If Evidence 1 is required → only A can satisfy; B is invalid for required evidence.  
 - If Evidence 1 **and** Evidence 2 are required → Case C (no provider accepts both).  
 - If Evidence 1 is optional and Evidence 3 preferred → A or B may win; the incompatible optional is withheld without blocking.
@@ -1722,10 +1849,10 @@ Unused reserve rolls into global fill by Final utility per token.
 ### 24.3 Utility per token
 
 \[
-U(c) = \frac{\mathrm{Final}(c) + \gamma \cdot \mathbf{1}_{essential}}{1 + tokens(c)}
+U(c) = \frac{\mathrm{Final}(c) + \gamma_{\mathrm{essential}} \cdot \mathbf{1}_{essential}}{1 + tokens(c)}
 \]
 
-\(\gamma=0.1\) for items marked essential by plan (explicit doc request, conflict notice, etc.).
+\(\gamma_{\mathrm{essential}}=0.10\) (`rp-v1.0`) for items marked essential by plan (explicit doc request, conflict notice, etc.). The provider pre-pack projection uses the same family (§22.5.2), then applies requirement multipliers for plan ranking only.
 
 ### 24.4 Truncation rules
 
@@ -1822,10 +1949,10 @@ type ContextPackage = {
 
 1. Query disclosure constrained embedding / index / planner / reranker **and** produced `inferenceDisposition`.  
 2. Assign `EvidenceRequirement` and build per-provider `ProviderCandidatePlan`s (§22).  
-3. Select one `DisclosureProviderPlanResult` by required-evidence satisfaction + attainableUtility + tie-breakers.  
+3. Build exact `ProviderPrepackProjection`s; select one `DisclosureProviderPlanResult` by `requiredEvidenceSatisfied` + `attainableUtility` (§22.5 formula) + tie-breakers.  
 4. If `query_local_only` or `no_compatible_provider` → no external inference (explicit fallback).  
-5. ContextPacker runs **once** for the chosen plan’s sendable subset and transmitted user-message representation; withheld finalists are not sent.  
-6. If exact pack drops required evidence → reject plan and try next valid plan or no-compatible-provider path.  
+5. ContextPacker runs **normally once** for the highest-ranked valid plan; withheld finalists are not sent.  
+6. If exact pack drops required evidence → reject (`required_evidence_lost_on_exact_pack`), try next ordered valid projection (bounded by valid plan count), else Case C.  
 7. ContextRenderer adapts `ContextPackage` (raw or redacted user message).  
 8. Inference runs, or deterministic/refusal local answer.  
 9. InfluenceRecorder persists chosen plan snapshot, sent IDs, withheld IDs with requirement levels, and query disposition (§27).
@@ -1848,9 +1975,16 @@ Starting from Stage 9 `response_influence_records`.
 4. Every rendered conflict or ambiguity notice.  
 5. Every identity field used in a deterministic direct answer (`used_in_deterministic_local_answer`).  
 6. Aggregated counts for lower-ranked candidates that never became finalists (no raw text).  
-7. For the **chosen** provider plan (compact, no raw text): chosen provider class, `requiredEvidenceSatisfied`, sendable finalist IDs, withheld finalist IDs, withhold reason codes, attainable utility snapshot, final packed IDs.  
-8. If no provider satisfied required evidence: reason code `no_provider_satisfies_required_evidence`.  
-9. Fallback plan metadata need not be persisted after success unless audit policy requires it.
+7. For the **chosen** projection (compact, no raw text):  
+   `chosen_provider_class`, `chosen_projection_rank`,  
+   `required_evidence_disclosure_satisfied`, `required_evidence_projected_to_fit`, `required_evidence_satisfied`,  
+   `projected_packed_candidate_ids`, `projected_budget_dropped_candidate_ids`,  
+   `estimated_total_packed_tokens`, `attainable_utility`,  
+   `retrieval_policy_version`, and when used `router_policy_version` + `provider_preference_rank`,  
+   `full_pack_attempt_count`, plus final packed IDs and withhold reason codes.  
+8. For a projection rejected after exact packing: compact IDs, codes, numeric metadata only (`rejected_plan_reason = required_evidence_lost_on_exact_pack`).  
+9. If no provider satisfied required evidence: `no_provider_satisfies_required_evidence`.  
+10. Compact fallback plan metadata need not be persisted after success unless audit policy requires it.
 
 Do **not** store raw provider prompts, raw private evidence text, or secret raw query content for debugging by default.
 
@@ -2012,6 +2146,7 @@ Reusable query embedding: one per space per turn; never duplicate for memory+doc
 | 17a | Secret query→external embed/index | Purpose-specific QueryDisclosureDecision | Deny those purposes; continue local retrieval | Detector miss | Forbidden-secret query never leaves those channels | No |
 | 17a2 | Secret/provider-restricted **current user message** sent to final inference | `inferenceDisposition` + hard query filter | Block external inference; local refuse/clarify | Detector miss / fail-open | Query blocked for inference never appears in any external provider request | No |
 | 17a3 | One incompatible **optional** finalist incorrectly forces local-only, **or** incompatible **required** evidence is silently omitted | Required vs optional classification + per-provider plans | Case E withhold-continue; Case C explicit fallback | Mis-classify requirement / omit required | Optional-withhold continues; required-missing never silent | No |
+| 17a4 | Undefined/unbounded attainableUtility causes inconsistent selection, rewards candidate flooding, or selects a provider whose required evidence cannot fit | Exact §22.5 formulas + packed-subset-only utility + fit bit | Version pin rp-v1.0 | Formula drift / implementer shortcut | Same inputs⇒same order; flooding test; unfittable required invalid | No |
 | 17b | allow_embedding on assertion misused as query auth | Explicit separation in §7.0 / §22 | Preflight ignores stored allow_embedding for live query | Confusion | Query embed denied while assertion embed allowed | No |
 | 17c | External index search with raw secret query despite ID-only hits | Rule: query disclosure required | Block channel | Implementer shortcut | Index search denied for secret query | No |
 | 17d | Withhold UI without influence row | Persist withheld finalists | Integrity check | Bug | Withhold notice⇔influence | No |
@@ -2264,15 +2399,15 @@ type InfluenceRecord = {
 | | |
 | --- | --- |
 | Input | finalists (with EvidenceRequirement) + available provider classes + model capabilities + queryDisclosure |
-| Output | `DisclosureProviderPlanResult` (`external_provider_selected` with chosenPlan + compact fallbackPlans, or `no_compatible_provider`, or `query_local_only`) + influence stubs for withheld |
+| Output | `DisclosureProviderPlanResult` (`external_provider_selected` with chosenPlan + ordered compact fallbackPlans, or `no_compatible_provider`, or `query_local_only`) + influence stubs for withheld |
 | Owner | Disclosure + Routing |
 | Credential | user / service orchestration |
 | TX | read-only planning; influence write later in turn completion |
-| Allowed | ids, disclosure codes, requirement levels, estimated tokens, Final scores |
-| Forbidden | raw private text in plans/logs; downgrading required→optional to force a plan; selecting commercial vendors here |
+| Allowed | ids, disclosure codes, requirement levels, estimated tokens, Final scores, attainableUtility from packed subset |
+| Forbidden | raw private text; undefined utility; counting all sendable IDs as utility; downgrading required→optional; unversioned router order; selecting commercial vendors here |
 | Failure | Case C / F explicit safe fallback; never fail-open; never silently omit required evidence |
-| Reproducibility | deterministic under `retrieval_policy_version` + pinned tie-breakers |
-| Note | Lightweight pre-pack projections only; full `ContextPacker` runs once after choice |
+| Reproducibility | deterministic under `retrieval_policy_version` (+ `router_policy_version` when used) and exact §22.5 formulas |
+| Note | Lightweight projections for all candidates; full `ContextPacker` normally once; bounded exact-pack retries follow precomputed order |
 
 #### `ContextPacker`
 
@@ -2281,8 +2416,8 @@ type InfluenceRecord = {
 | Input | **chosen** plan’s sendable candidates, conflicts, budget inputs, user-message representation |
 | Output | `ContextPackingDecision` + ordered records content refs |
 | Owner | Retrieval |
-| Failure | if required evidence cannot fit after exact tokenization → signal plan rejection to planner; else empty pack + notice |
-| Note | Normally invoked **once** per turn for the chosen provider |
+| Failure | if required evidence cannot fit after exact tokenization → signal `required_evidence_lost_on_exact_pack`; else empty pack + notice |
+| Note | Normally invoked once for highest-ranked valid plan; retries bounded by valid projection count |
 
 #### `ContextRenderer`
 
@@ -2629,13 +2764,13 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 
 - **Setup:** Query → A or B. Evidence1→A only (preferred); Evidence2→B only (preferred); Evidence3→both (preferred).  
 - **Plans:** A sendable={1,3}, withheld={2}; B sendable={2,3}, withheld={1}; both `requiredEvidenceSatisfied=true` (no required).  
-- **Choose:** higher attainableUtility (e.g. if Final(1)>Final(2) prefer A); withhold the other preferred; influence records withheld rows.  
+- **Choose:** higher attainableUtility from **projected packed** subsets (e.g. if packing both prefers Evidence1’s Final under §22.5, choose A); withhold the other preferred; influence records withheld rows.  
 - **Not** Case C / not forced local_only.
 
 ### 32.48 Required evidence only on Provider A
 
 - **Setup:** Evidence1 **required**, only A; Evidence2 optional, only B; Evidence3 both.  
-- **Plans:** A requiredEvidenceSatisfied=true; B false.  
+- **Plans:** A `requiredEvidenceDisclosureSatisfied`∧`requiredEvidenceProjectedToFit` ⇒ `requiredEvidenceSatisfied=true`; B false.  
 - **Choose:** A; withhold Evidence2; pack required Evidence1 + sendable others.
 
 ### 32.49 Two required evidence items no single provider accepts both
@@ -2664,6 +2799,31 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 ### 32.53 Query itself is `local_only`
 
 - **Outcome:** Case F — provider planning skipped; no `ProviderCandidatePlan` evaluation; deterministic/refusal path; `externalInferenceBlocked=true`.
+
+### 32.54 Optional flooding vs fewer high-value preferred
+
+- **Setup:** Provider A can receive 20 low-Final optional candidates; Provider B can receive 3 high-Final preferred candidates; no required evidence.  
+- **Projection:** A’s packed subset may include many optionals but each has multiplier `0.20`; B packs preferred at `0.60` with higher Final.  
+- **Expect:** `attainableUtility` can select B; A is not rewarded merely for more sendable IDs. Utility counts only `projectedPackedCandidateIds`.
+
+### 32.55 Sendable candidates exceed token budget
+
+- **Setup:** Provider can disclose all finalists; estimated budget fits only a subset.  
+- **Projection:** `projectedPackedCandidateIds` = subset after required-first then descending projectedUtility; remainder → `projectedBudgetDroppedCandidateIds`.  
+- **`attainableUtility`:** Σ projectedUtility over packed subset only — **not** all sendable IDs.
+
+### 32.56 Required evidence disclosable but does not fit
+
+- **Setup:** Required assertion disclosure-OK for Provider A; estimated tokens exceed available context even alone/with protected notices.  
+- **Flags:** `requiredEvidenceDisclosureSatisfied=true`, `requiredEvidenceProjectedToFit=false`, `requiredEvidenceSatisfied=false`.  
+- **Outcome:** Plan **invalid**; remove before utility ranking.
+
+### 32.57 Exact tokenizer invalidates highest-ranked projection
+
+- **Projection order:** A (highest attainableUtility), then B.  
+- **Full pack A:** exact tokenization drops a required record → reject A with `required_evidence_lost_on_exact_pack`.  
+- **Retry:** full pack B (next ordered valid projection); `full_pack_attempt_count=2`; bounded by valid plan count.  
+- **Influence:** compact rejection metadata for A; chosen plan snapshot for B.
 
 ---
 
@@ -2707,9 +2867,14 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 36. Fixed 4/2 chunk counts are `targeted_passage` diversity caps only; section and whole-document completeness are coverage-based.  
 37. A derived summary labelled complete must have complete section/chunk provenance for the current document fingerprint; packed citation caps must not limit production coverage.  
 38. An optional evidence-disclosure restriction does not automatically eliminate an otherwise query-compatible provider.  
-39. A provider plan is valid only if every required provider-bound evidence record is disclosure-compatible and fits the final pack.  
+39. A provider plan is valid only if every required provider-bound evidence record is disclosure-compatible and fits the final pack (projected, then exact).  
 40. Required evidence is never silently downgraded or withheld to make a provider plan appear valid.  
-41. Provider selection uses per-provider evidence subsets and deterministic utility; final rendering occurs only after one provider plan is chosen (except deterministic rejection/retry when exact packing drops required evidence).
+41. Provider selection uses per-provider evidence subsets and deterministic utility; final rendering occurs only after one provider plan is chosen (except deterministic rejection/retry when exact packing drops required evidence).  
+42. Attainable utility is calculated only from the token-projected packed subset, never from every sendable finalist.  
+43. A provider projection is valid only when all required evidence is both disclosure-compatible and projected to fit (`requiredEvidenceSatisfied = disclosure ∧ projectedToFit`).  
+44. All provider-plan utility constants (`gamma_essential`, requirement multipliers) and tie-break inputs are versioned under `retrieval_policy_version` (and `router_policy_version` when router rank is used).  
+45. Router preference may break a true tie but cannot override disclosure, required-evidence satisfaction, or attainable utility.  
+46. Exact-pack fallback follows the precomputed deterministic provider-plan order and is bounded by the number of valid projections.
 
 ---
 
@@ -2831,14 +2996,15 @@ Evaluate at least:
 
 1. All §29 threats with automated/adversarial tests (including 17a–17g, 15a).  
 2. Calibration of §13 constants on labeled personal-query sets.  
-3. Scenarios §32.1–§32.53 as golden decision traces with valid `primaryIntentMode`/`intentFacets`.  
+3. Scenarios §32.1–§32.57 as golden decision traces with valid `primaryIntentMode`/`intentFacets`.  
 4. Determinism under `rp-v1.0`.  
 5. **Math regression:** multiplicative policy cannot dominate (rank-1 exact ±Policy examples); additive domination must fail the test.  
 6. Injection suites (PDF, memory, filename).  
 7. Query disclosure preflight: forbidden-secret query never reaches external embed/index/planner/reranker; `allow_embedding` on assertions ≠ query auth.  
 7b. **Final inference:** a query blocked for inference (`local_only`) never appears in any external provider request; embedding permission ≠ inference permission; BYOK does not bypass.  
 7c. Redaction separation: `safeSemanticQueryText` vs `safeInferenceUserMessage` tested independently.  
-7d. Per-provider plans: optional withhold continues; required-missing → Case C explicit fallback; never silent omit required; exact-pack rejection retries next plan.  
+7d. Per-provider plans: optional withhold continues; required-missing → Case C; never silent omit required; exact-pack rejection retries next ordered plan (bounded).  
+7e. AttainableUtility: same inputs + `rp-v1.0` (+ router version when used) ⇒ same provider order; utility only over projected packed IDs; optional flooding cannot dominate preferred; disclosable-but-unfittable required ⇒ invalid; router preference changes require `router_policy_version` change.  
 8. Evidence disclosure routing + withheld influence rows ↔ user notices.  
 9. History eligibility (orphans excluded).  
 10. Influence `sent_to_provider` ≡ actually sent; withhold explanations require rows.  
@@ -2907,6 +3073,9 @@ Evaluate at least:
 | Earlier Stage 12 draft: universal max 4/2 document chunk diversity | **Superseded** — targeted_passage-only; section/whole-document coverage trees |
 | Earlier Stage 12 draft: `whole_document_summary_max_source_sections` as completeness | **Superseded** — `partial_summary_max_sections_packed` for packed citations only |
 | Earlier Stage 12 draft: global “evidence-compatible provider classes” / empty intersection ⇒ local_only | **Superseded** — per-provider sendable subsets; Case E vs Case C |
+| Earlier Stage 12 draft: attainableUtility = Final + unspecified Stage 15 requirement weights over all sendable | **Superseded** — exact §22.5 packed-subset formula + versioned multipliers |
+| Earlier Stage 12 draft: tie-break “fewer required withheld” among valid plans | **Superseded** — valid plans withhold zero required |
+| Earlier Stage 12 draft: ContextPacker exactly once with unbounded wording | **Superseded** — normally once; bounded exact-pack retries on precomputed order |
 
 No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/graph rules bind.
 
@@ -2927,8 +3096,8 @@ No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/g
 - [x] Influence finalState incl. disclosure-withheld + query_inference_disposition + plan snapshots  
 - [x] Eligibility/disclosure/packing/graph/history/rendering specified  
 - [x] Amendments recorded  
-- [x] 53 scenarios traced with valid plans  
-- [x] 41 invariants listed  
+- [x] 57 scenarios traced with valid plans  
+- [x] 46 invariants listed  
 - [x] Acceptance criteria assessed  
 
 ---
