@@ -2497,7 +2497,7 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 25. Failure of an optional channel causes explicit degradation, not a policy fail-open.  
 26. Provider/framework choice cannot redefine retrieval semantics.  
 27. `Final(c) = WRRF(c) × (1 + λ_policy × Policy(c))` with `λ_policy = 0.15`; policy adjusts fusion by at most ±15% and cannot dominate or invent candidates (`WRRF=0` ⇒ `Final=0`).  
-28. Query disclosure preflight completes before any external embedding, external-index, planner-model, or reranker call; stored `allow_embedding` does not authorize embedding the live query.  
+28. Query disclosure preflight completes before any external embedding, external-index, planner-model, reranker, or final-inference call; stored `allow_embedding` does not authorize embedding the live query and does not authorize final inference.  
 29. A prior assertion revision is provenance, not automatically a historical fact.  
 30. Whole-document and section summarisation must not claim complete coverage from ordinary targeted-passage Q&A chunk caps.  
 31. Identity short-circuit requires a complete canonical consistency check; `memory_exact` miss is not proof of non-conflict.  
