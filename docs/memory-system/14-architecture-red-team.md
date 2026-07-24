@@ -36,7 +36,7 @@ This review finds:
 | Rejected attacks | **3** |
 | Unresolved attacks | **1** |
 | True cross-stage contradictions | **8** |
-| Resolvable tensions (matrix) | **12** |
+| Resolvable tensions (matrix) | **8** |
 | Correction backlog items | **17** |
 | Risk-acceptance register entries | **8** |
 
