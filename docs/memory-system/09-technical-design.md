@@ -1386,6 +1386,9 @@ Forbidden-secret intake → `memory_intake_decisions` only. Later reclassificati
 | States | pending/ready/stale/failed |
 | Multi-space | Multiple rows; queries pin one space |
 | Chunk embeddings | `document_chunk_embeddings` |
+| Worker write path | `mark_*_embedding_result` carries `embedding?: number[]` in service-role command; RPC validates 1536 finite values and converts JSON → `vector(1536)` atomically with state |
+| Job payload | ids / hashes / space / expected revision or fingerprint only — **never** the vector |
+| Replay / results | ids and state only — **never** the vector |
 | FTS | `memory_fts_documents` |
 | Deletion | Workflow steps delete derived rows |
 
