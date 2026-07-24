@@ -266,9 +266,9 @@ Normalize per-feature scores into `[0,1]` and compute `Σ w_i · f_i`.
 | Over-engineering | Medium calibration burden |
 | Suitability | Acceptable but weaker than rank fusion for heterogeneous channels |
 
-### 5.2 Option B — Rank fusion + deterministic policy rescoring (**selected**)
+### 5.2 Option B — Rank fusion + bounded multiplicative policy (**selected**)
 
-Each channel produces an independent ranked list. Fuse with **weighted reciprocal-rank fusion**, then apply deterministic boosts/penalties, diversity, conflict grouping.
+Each channel produces an independent ranked list. Fuse with **weighted reciprocal-rank fusion**, then apply a **bounded multiplicative** policy adjustment (`Final = WRRF × (1 + λ_policy × Policy)`, `λ_policy = 0.15`), then diversity and conflict grouping.
 
 | Criterion | Assessment |
 | --- | --- |
