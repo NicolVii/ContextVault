@@ -73,23 +73,26 @@ rawQuery + turnId + userId + model/selection hints
  CandidateFusionService (WRRF × bounded policy) → optional rerank → Deduplicator → ConflictContextService
         │
         ▼
- Evidence disclosure summary
+ Evidence disclosure summary + EvidenceRequirement per finalist
         │
         ▼
- Provider selection = intersection of
-   query-compatible ∩ evidence-compatible ∩ model capabilities
+ Per-provider candidate plans
+   (query-compatible ∧ model-capable hard filters;
+    per-finalist sendable/withheld subsets;
+    requiredEvidenceSatisfied + attainableUtility)
         │
         ▼
- Provider-specific evidence filtering
+ Choose one DisclosureProviderPlanResult
         │
         ▼
- ContextPacker (budget uses raw / safeInferenceUserMessage / or no external user msg)
+ Full ContextPacker once for chosen provider
+   (budget uses raw / safeInferenceUserMessage / or no external user msg)
         │
         ▼
- Inference: raw_allowed | redacted_allowed | local_only (no external call)
+ Inference: raw_allowed | redacted_allowed | local_only / no_compatible_provider
         │
         ▼
- InfluenceRecorder (sent + withheld + budget-drop + query_inference_disposition + coverage labels)
+ InfluenceRecorder (sent + withheld + required-evidence outcome + plan snapshot)
 ```
 
 ### Headline Stage 12 decisions
@@ -99,7 +102,7 @@ rawQuery + turnId + userId + model/selection hints
 3. **Query plan:** `primaryIntentMode` + deterministic `intentFacets`; optional structured model assistance cannot grant trust, widen ownership, bypass disclosure, or silently pick ambiguous entities/projects.  
 4. **Query disclosure preflight:** Local scan produces purpose-specific `QueryDisclosureDecision` **before** any external embedding, external-index, planner-model, reranker, or **final inference** call. Permission for one purpose never implies another.  
 5. **Graph expansion v1:** **Zero-hop default**; **one bounded hop** only for `entity_focused` / `relationship_focused` via Stage 11 contracts to supporting assertions — never friend-of-friend.  
-6. **Provider selection:** Intersect query-compatible providers, evidence-compatible providers, and model capabilities; then filter evidence and pack. Local-only inference disposition never fail-opens to an unauthorized external model.  
+6. **Provider selection:** Hard-filter query-compatible ∧ model-capable classes; for each, compute per-finalist sendable/withheld subsets and required-evidence satisfaction; choose the deterministic highest-utility valid plan; pack **once**. Optional incompatible evidence is withheld, not a hard elimination. Missing required evidence → explicit safe fallback (not silent omission).  
 7. **Packing:** Hierarchical reserve-then-fill; `reservedCurrentUserTokens` uses the exact user-message representation that will be sent (raw / redacted / none). Document diversity caps are **scope-specific** (`targeted_passage` only for 4/2 chunk limits).  
 8. **History:** Complete eligible turns with reserved recent-turn budget; no orphan/failed turns; optional derived summaries never become trusted memory.  
 9. **Identity:** Not unconditional inject-everything; deterministic short-circuit only after a complete canonical identity consistency check (not lexical absence-of-conflict).  
@@ -336,7 +339,7 @@ Broad deterministic recall, then expensive semantic rerank.
 | `CandidateDeduplicator` | Retrieval | Multi-level dedupe |
 | `ConflictContextService` | Retrieval + Memory model | Groups + presentation |
 | `ConversationHistorySelector` | Conversation | Complete turns |
-| `DisclosureContextPlanner` | Disclosure + Routing | Provider class + filter |
+| `DisclosureContextPlanner` | Disclosure + Routing | Per-provider plans + choose one |
 | `ContextPacker` | Retrieval | Token budget packing |
 | `ContextRenderer` | Inference adapters | Structured → provider messages |
 | `InfluenceRecorder` | Explainability | Persist influence |
@@ -426,14 +429,11 @@ Raw user query
   → local query planning
   → permitted retrieval channels
   → canonical reconciliation
-  → evidence disclosure summary
-  → intersection of:
-       query-compatible providers
-       evidence-compatible providers
-       model capabilities
-  → provider selection
-  → provider-specific evidence filtering
-  → context packing
+  → evidence disclosure summary + EvidenceRequirement labels
+  → build ProviderCandidatePlan per query-compatible ∧ model-capable class
+       (sendable / withheld finalists; requiredEvidenceSatisfied; attainableUtility)
+  → select one DisclosureProviderPlanResult
+  → full context packing once for the chosen plan
   → inference using raw, safely redacted, or no external user message
 ```
 
@@ -441,20 +441,23 @@ Raw user query
 
 1. Classify the current user message locally.  
 2. Determine whether the raw message may be sent for inference (`raw_allowed` / `redacted_allowed` / `local_only`).  
-3. Determine compatible provider classes for the **query itself**.  
-4. Combine query-provider compatibility with evidence-provider compatibility.  
-5. Select only a provider compatible with **both** (and model capabilities).  
-6. Pack evidence only after this combined provider constraint is known.
+3. Determine **query-compatible** provider classes for the query itself (hard filter).  
+4. Remove **model-incapable** classes (hard filter).  
+5. For each remaining class, partition finalists into sendable/withheld by **per-evidence** disclosure (§22.5).  
+6. Select a plan that satisfies all **required** evidence (when any is required), then highest attainable utility (§22.6).  
+7. Perform full packing **once** for the chosen plan.
 
-Selected inference provider must satisfy:
+The chosen external provider must accept:
 
 ```text
-query disclosure compatibility
+the current user-message representation
 AND
-evidence disclosure compatibility
+all evidence marked required (when the plan claims requiredEvidenceSatisfied)
 AND
-model capability requirements
+every evidence record actually sent
 ```
+
+It does **not** need to accept every optional/preferred finalist.
 
 **Inference disposition rules:**
 
@@ -1463,23 +1466,23 @@ Approaches:
 | Option | Idea | Verdict |
 | --- | --- | --- |
 | A | Select provider first, discard denied context | Rejected — may pick incompatible provider and drop best evidence |
-| **B** | Sensitivity/disclosure summary → compatible provider → pack | **Selected** |
-| C | Multiple full context plans per provider class | Deferred — costly; B sufficient for v1 |
+| **B** | Build per-provider sendable subsets from finalists, choose one required-evidence-satisfying plan, pack once | **Selected** (refines earlier “summary → provider → pack”) |
+| C | Multiple full context packs per provider class | Rejected for v1 — over-costly; use lightweight pre-pack projections instead |
+
+Ambiguous earlier wording such as “evidence-compatible provider classes” or “intersection-selected provider” is **superseded** by per-provider sendable subsets (§22.5–22.7).
 
 ### 22.2 Order of operations
 
-1. **Query disclosure preflight** (§7.0) — purpose-specific decisions for embedding, index search, planner, reranker, **and final inference**.  
-2. Candidate retrieval on **permitted** channels only. Stored `allow_embedding` does **not** authorize embedding the live query and does **not** authorize final inference.  
-3. Local eligibility (including evidence `local_only`).  
-4. **Evidence disclosure summary:** sensitivity classes + flags among finalists → evidence-compatible provider classes.  
-5. **Provider selection** = intersection of:
-   - `inferenceDisposition.allowedProviderClasses` (empty when `local_only`),
-   - evidence-compatible provider classes,
-   - model capability requirements.  
-6. If intersection is empty → treat as query/evidence `local_only` path (deterministic/refusal); **do not** fail-open.  
-7. Provider-specific evidence filtering (withheld finalists recorded — §27).  
-8. Context packing using the user-message representation that will actually be sent (§23).  
-9. Inference: raw message, `safeInferenceUserMessage`, or **no** external inference call.
+1. **Query disclosure preflight** (§7.0).  
+2. Candidate retrieval on permitted channels only.  
+3. Local eligibility.  
+4. **Evidence disclosure summary** for finalists + assign `EvidenceRequirement` (§22.4) from the query plan and evidence role — **not** from provider availability.  
+5. If `inferenceDisposition.kind = 'local_only'` → **Case F**: skip external provider planning.  
+6. Else build `ProviderCandidatePlan`s for each query-compatible ∧ model-capable class (§22.5–22.6).  
+7. Select one `DisclosureProviderPlanResult`.  
+8. Run **full** `ContextPacker` **once** for the chosen plan (user-message representation per §23).  
+9. If exact packing unexpectedly drops required evidence → reject plan, try next valid plan or no-compatible-provider path.  
+10. Inference: raw / redacted / or no external call.
 
 ### 22.3 Flags and purposes
 
@@ -1493,21 +1496,154 @@ Approaches:
 | `plannerModelAllowed` | Live query may be sent to planner-model assist |
 | `rerankerModelAllowed` | Approved query representation may be sent to reranker |
 | `inferenceDisposition` | Whether/how the **current user message** may be sent to final inference |
-| BYOK | Does **not** automatically bypass query or evidence disclosure (**Assumption** aligned with Stage 7/9) |
+| BYOK | Does **not** automatically bypass query or evidence disclosure |
 
-### 22.4 Outcomes
+### 22.4 Required vs preferred vs optional evidence
+
+```ts
+type EvidenceRequirement =
+  | 'required'
+  | 'preferred'
+  | 'optional';
+```
+
+Classification comes from the **query plan and evidence role**, never from which providers are available. Provider compatibility must **never** downgrade required evidence to optional merely to enable inference.
+
+| Level | Examples |
+| --- | --- |
+| **required** | Targeted document evidence for “What does this contract say about cancellation?”; Project Atlas evidence when the answer cannot honestly be grounded without it; a conflict notice required to avoid presenting contradictions as settled; evidence explicitly necessary to answer a personal-recall question safely |
+| **preferred** | Highly relevant personal assertions that improve the answer but are not indispensable; direct supporting conversation turns; useful relationship support |
+| **optional** | Secondary historical context; style/persona; additional corroborating chunks; low-ranked graph expansion |
+
+### 22.5 Provider candidate plans (hard vs per-evidence)
+
+```ts
+type ProviderCandidatePlan = {
+  providerClass: string;
+
+  queryCompatible: boolean;
+  modelCapable: boolean;
+
+  sendableCandidateIds: string[];
+  withheldCandidateIds: string[];
+
+  requiredEvidenceSatisfied: boolean;
+
+  attainableUtility: number;
+  attainableTokensEstimate: number;
+
+  withholdReasonCodes: Record<string, string[]>; // candidateId → reason codes
+};
+```
+
+**Hard provider eligibility** (class is a candidate only when both hold):
+
+```text
+query disclosure allows that provider class
+AND
+model capabilities satisfy the request
+```
+
+Query incompatibility → hard exclusion.  
+Model-capability incompatibility → hard exclusion.
+
+**Evidence compatibility is evaluated per finalist**, not as a single global “evidence-compatible class list”:
+
+1. For each query-compatible ∧ model-capable provider class, evaluate every finalist’s evidence-disclosure policy.  
+2. Partition into `sendable` vs `withheld`.  
+3. Compute attainable retrieval/context utility from sendable finalists (using Final scores + requirement weights; calibration Stage 15).  
+4. Record withhold reason codes per incompatible finalist.  
+5. **One incompatible optional finalist does not eliminate the provider.**
+
+### 22.6 Provider-selection algorithm
+
+Deterministic sequence (reproducible under `retrieval_policy_version`):
+
+```text
+1. Produce query-compatible provider classes (from inferenceDisposition).
+2. Remove model-incapable classes.
+3. For each remaining provider class:
+     partition finalists into sendable / withheld
+     test required-evidence satisfaction
+     estimate attainable utility and token fit (lightweight pre-pack projection:
+       ids, disclosure decisions, requirement levels, estimated tokens,
+       Final scores, group constraints — NOT full rendering)
+4. Prefer plans satisfying all required evidence.
+5. Among valid plans, choose the highest attainableUtility.
+6. Apply deterministic tie-breakers.
+7. Build one final context pack for the chosen provider/model.
+8. Persist withholding records for incompatible finalists.
+```
+
+**Tie-breakers (in order):**
+
+```text
+1. requiredEvidenceSatisfied
+2. higher attainableUtility
+3. fewer required/preferred records withheld
+4. lower predicted latency/cost class according to existing router policy
+5. stable provider-class identifier
+```
+
+Stage 12 does **not** select a commercial vendor. The router may supply latency/cost metadata; disclosure and required-evidence correctness come first.
+
+**Avoid multiple full packs:** do not fully render/pack for every provider class. Use the lightweight pre-pack projection above; run `ContextPacker` exactly once for the chosen plan. If exact tokenization then drops required evidence, reject that plan and deterministically evaluate the next valid candidate or the no-compatible-provider path.
+
+### 22.7 Empty and partial compatibility outcomes
+
+| Case | Situation | Outcome |
+| --- | --- | --- |
+| **A** | All required evidence fits one provider | Select that provider; withhold only incompatible preferred/optional evidence |
+| **B** | Several providers satisfy required evidence | Choose deterministic highest-utility plan |
+| **C** | No provider satisfies all required evidence | **Do not** silently answer as though fully grounded. Use deterministic local answer, local-only inference where available, clarification, privacy limitation notice, request to use a compatible model/provider, and/or refusal to make an unsupported claim. Persist `no_provider_satisfies_required_evidence` |
+| **D** | No evidence is strictly required | Select provider using best compatible (preferred/optional) sendable subset |
+| **E** | Incompatible optional evidence exists | Withhold it, record it, continue — **must not** force the entire turn to `local_only` |
+| **F** | Query itself is `local_only` | No external provider plan is evaluated |
+
+Worked partition example (query may go to A or B):
+
+```text
+Evidence 1 → only A
+Evidence 2 → only B
+Evidence 3 → A and B
+```
+
+- If only Evidence 3 is required → both A and B may be valid; choose by attainableUtility (each sees {1,3} or {2,3} sendable).  
+- If Evidence 1 is required → only A can satisfy; B is invalid for required evidence.  
+- If Evidence 1 **and** Evidence 2 are required → Case C (no provider accepts both).  
+- If Evidence 1 is optional and Evidence 3 preferred → A or B may win; the incompatible optional is withheld without blocking.
+
+### 22.8 Result type
+
+```ts
+type DisclosureProviderPlanResult =
+  | {
+      kind: 'external_provider_selected';
+      chosenPlan: ProviderCandidatePlan;
+      fallbackPlans: ProviderCandidatePlan[]; // compact metadata; persist only if audit requires
+    }
+  | {
+      kind: 'no_compatible_provider';
+      reasonCodes: string[]; // e.g. no_provider_satisfies_required_evidence
+    }
+  | {
+      kind: 'query_local_only';
+      reasonCodes: string[];
+    };
+```
+
+### 22.9 Outcomes (summary)
 
 | Situation | Behaviour |
 | --- | --- |
-| `inferenceDisposition.kind = 'local_only'` | No external inference; deterministic/refusal/clarify; record blocked inference; never claim external model answered |
-| Raw allowed + evidence compatible | Send raw user message + filtered evidence to intersected provider |
-| Redacted allowed | Send only `safeInferenceUserMessage` + filtered evidence; record redaction without secret |
-| Semantic redaction OK but inference redaction not | May run local/FTS retrieval with `safeSemanticQueryText` while inference stays `local_only` or refuses |
-| Best evidence cannot disclose to any available provider | Prefer local-only / direct deterministic answer if possible; else reduced context + withhold notice |
-| Compatible alternative provider exists | Router may prefer intersection-compatible provider |
-| Query disclosure denies retrieval externals only | Local FTS/exact/entity/history; inference still follows `inferenceDisposition` independently |
-| User told of withhold? | **Yes** — backed by influence/snapshot; no raw secret content |
-| No-context / blocked-query fallback | Clarify / refuse / ask to remove secret and retry; never fail-open secrets |
+| Case F query `local_only` | No external inference; deterministic/refusal/clarify |
+| Case A/B external selected | Send user-message representation + **sendable** subset; withhold preferred/optional incompatibles with notices |
+| Case C | Explicit safe fallback; never silent full-grounding claim |
+| Case D | Best sendable subset |
+| Case E | Withhold optional; continue |
+| Semantic redaction OK, inference not | Retrieval may use `safeSemanticQueryText`; inference follows disposition independently |
+| User told of withhold? | **Yes** — each claim backed by withheld influence rows |
+| Fail-open | **Forbidden** |
 
 ---
 
@@ -1684,16 +1820,17 @@ type ContextPackage = {
 
 ## 26. Provider / model interaction
 
-1. Query disclosure already constrained embedding / index / planner / reranker **and** produced `inferenceDisposition`.  
-2. Evidence disclosure summary yields evidence-compatible provider classes.  
-3. Select provider from **intersection** of query-compatible classes, evidence-compatible classes, and model capabilities.  
-4. If `inferenceDisposition.kind = 'local_only'` or intersection empty → no external inference.  
-5. ContextPacker packs to the selected window using the actual transmitted user-message representation; disclosure-withheld finalists are not sent.  
-6. ContextRenderer adapts `ContextPackage` to provider message schema (raw or redacted user message).  
-7. Inference runs, or deterministic/refusal local answer.  
-8. InfluenceRecorder persists sent, withheld, budget-dropped, notices, direct-answer fields, and query inference disposition (§27).
+1. Query disclosure constrained embedding / index / planner / reranker **and** produced `inferenceDisposition`.  
+2. Assign `EvidenceRequirement` and build per-provider `ProviderCandidatePlan`s (§22).  
+3. Select one `DisclosureProviderPlanResult` by required-evidence satisfaction + attainableUtility + tie-breakers.  
+4. If `query_local_only` or `no_compatible_provider` → no external inference (explicit fallback).  
+5. ContextPacker runs **once** for the chosen plan’s sendable subset and transmitted user-message representation; withheld finalists are not sent.  
+6. If exact pack drops required evidence → reject plan and try next valid plan or no-compatible-provider path.  
+7. ContextRenderer adapts `ContextPackage` (raw or redacted user message).  
+8. Inference runs, or deterministic/refusal local answer.  
+9. InfluenceRecorder persists chosen plan snapshot, sent IDs, withheld IDs with requirement levels, and query disposition (§27).
 
-Routing may prefer intersection-compatible providers. Framework/provider choice cannot redefine retrieval semantics (Invariant 26). Optional rerankers receive only disclosure-approved query representation and candidate text. BYOK does not bypass query-inference disclosure.
+Framework/provider choice cannot redefine retrieval semantics (Invariant 26). Optional rerankers receive only disclosure-approved query representation and candidate text. BYOK does not bypass query-inference disclosure.
 
 ---
 
@@ -1707,12 +1844,17 @@ Starting from Stage 9 `response_influence_records`.
 
 1. Every record **actually sent** to a provider (`sent_to_provider`).  
 2. Every finalist dropped because of token budget (`dropped_for_budget`).  
-3. Every finalist withheld because of provider disclosure incompatibility (`withheld_before_pack`).  
+3. Every finalist withheld because of provider disclosure incompatibility (`withheld_before_pack`), including `evidence_requirement`.  
 4. Every rendered conflict or ambiguity notice.  
 5. Every identity field used in a deterministic direct answer (`used_in_deterministic_local_answer`).  
-6. Aggregated counts for lower-ranked candidates that never became finalists (no raw text).
+6. Aggregated counts for lower-ranked candidates that never became finalists (no raw text).  
+7. For the **chosen** provider plan (compact, no raw text): chosen provider class, `requiredEvidenceSatisfied`, sendable finalist IDs, withheld finalist IDs, withhold reason codes, attainable utility snapshot, final packed IDs.  
+8. If no provider satisfied required evidence: reason code `no_provider_satisfies_required_evidence`.  
+9. Fallback plan metadata need not be persisted after success unless audit policy requires it.
 
 Do **not** store raw provider prompts, raw private evidence text, or secret raw query content for debugging by default.
+
+User-facing claims such as “Some private context was withheld from this model.” **must** correspond to withheld influence records.
 
 ### 27.2 Final-state vocabulary (required in JSONB snapshot)
 
@@ -1730,15 +1872,18 @@ For disclosure-withheld finalists:
 
 ```text
 selected = false
+final_state = withheld_before_pack
 drop_reason ∈ {
   disclosure_denied,
   provider_restricted,
   no_compatible_provider,
   query_disclosure_denied
 }
+provider_class_considered
+evidence_requirement ∈ { required, preferred, optional }
 ```
 
-Also record: canonical IDs only; eligibility/disclosure codes; provider class considered; `retrieval_policy_version`; whether a user-visible withholding notice was shown. **A user-facing claim that context was withheld must have a corresponding influence/snapshot record.**
+Also record: canonical IDs only; eligibility/disclosure codes; `retrieval_policy_version`; whether a user-visible withholding notice was shown. **Required** evidence must never appear as silently omitted while claiming a fully grounded external answer.
 
 ### 27.3 Fields per influence row / snapshot
 
@@ -1766,6 +1911,8 @@ Also record: canonical IDs only; eligibility/disclosure codes; provider class co
 | citation label | Yes when sent |
 | conflict group id | When applicable |
 | user_visible_withhold_notice | Boolean when withheld |
+| evidence_requirement | When finalist |
+| chosen provider plan snapshot | Yes when external selected or Case C |
 | document coverage label | `targeted_passage` / `complete_section` / `partial_section` / `complete_document` / `partial_document` / `derived_complete_section` / `derived_complete_document` |
 
 ### 27.4 User-facing explanations (conceptual)
@@ -1776,6 +1923,7 @@ Also record: canonical IDs only; eligibility/disclosure codes; provider class co
 - “This was true in 2024.”  
 - “Two saved facts conflict.”  
 - “This context stayed private and was not sent to this model.” ← requires withheld influence row  
+- “Some private context was withheld from this model.” ← one or more withheld influence rows  
 - “This older conversation was not included because of the context limit.” ← requires budget-drop row  
 - “This is a partial summary of the document; full coverage did not fit.” ← `partial_document`  
 - “Your message was not sent to this model because it contained restricted material.” ← local_only inference disposition  
@@ -1789,7 +1937,8 @@ Correction entry points: Vault assertion, conflict decision, document open — U
 - No influence record claims `sent_to_provider` for evidence that was not sent.  
 - Every privacy-withholding explanation has a withheld influence/snapshot record.  
 - Direct identity answers record `used_in_deterministic_local_answer` for fields used.  
-- Local-only / blocked external inference records `whether_external_inference_was_blocked` and disposition — never claim an external model answered.  
+- Local-only / blocked external inference / `no_provider_satisfies_required_evidence` records disposition and reason codes — never claim an external model answered with full grounding.
+- Optional withheld evidence does not force `local_only`; required evidence omitted only via explicit Case C fallback.  
 - Thinking UI must be able to consume influence records (closes Stage 5 gap; UI implementation Deferred).
 
 ---
@@ -1861,7 +2010,8 @@ Reusable query embedding: one per space per turn; never duplicate for memory+doc
 | 16 | Uncertain as fact | Modality gate + labels | — | Classifier error | Plan uncertainty test | No |
 | 17 | Sensitive→wrong provider | Evidence disclosure planner Option B | Filter before pack; influence withheld rows | Router bug | Sensitive withhold test | No |
 | 17a | Secret query→external embed/index | Purpose-specific QueryDisclosureDecision | Deny those purposes; continue local retrieval | Detector miss | Forbidden-secret query never leaves those channels | No |
-| 17a2 | Secret/provider-restricted **current user message** sent to final inference | `inferenceDisposition` + provider intersection | Block external inference; local refuse/clarify | Detector miss / fail-open | Query blocked for inference never appears in any external provider request | No |
+| 17a2 | Secret/provider-restricted **current user message** sent to final inference | `inferenceDisposition` + hard query filter | Block external inference; local refuse/clarify | Detector miss / fail-open | Query blocked for inference never appears in any external provider request | No |
+| 17a3 | One incompatible **optional** finalist incorrectly forces local-only, **or** incompatible **required** evidence is silently omitted | Required vs optional classification + per-provider plans | Case E withhold-continue; Case C explicit fallback | Mis-classify requirement / omit required | Optional-withhold continues; required-missing never silent | No |
 | 17b | allow_embedding on assertion misused as query auth | Explicit separation in §7.0 / §22 | Preflight ignores stored allow_embedding for live query | Confusion | Query embed denied while assertion embed allowed | No |
 | 17c | External index search with raw secret query despite ID-only hits | Rule: query disclosure required | Block channel | Implementer shortcut | Index search denied for secret query | No |
 | 17d | Withhold UI without influence row | Persist withheld finalists | Integrity check | Bug | Withhold notice⇔influence | No |
@@ -1969,11 +2119,13 @@ type InfluenceRecord = {
   /** Stage 9 column; interpret with finalState. */
   selected: boolean;
   finalState: InfluenceFinalState;
+  evidenceRequirement?: 'required' | 'preferred' | 'optional';
   dropReason?:
     | 'disclosure_denied'
     | 'provider_restricted'
     | 'no_compatible_provider'
     | 'query_disclosure_denied'
+    | 'no_provider_satisfies_required_evidence'
     | 'budget_exceeded_atomic'
     | 'budget_dropped'
     | 'deduped'
@@ -2111,19 +2263,26 @@ type InfluenceRecord = {
 
 | | |
 | --- | --- |
-| Input | finalists + available provider classes + model capabilities + queryDisclosure (incl. inferenceDisposition) |
-| Output | intersection-selected provider + filtered candidates + withhold notices + influence stubs for withheld |
+| Input | finalists (with EvidenceRequirement) + available provider classes + model capabilities + queryDisclosure |
+| Output | `DisclosureProviderPlanResult` (`external_provider_selected` with chosenPlan + compact fallbackPlans, or `no_compatible_provider`, or `query_local_only`) + influence stubs for withheld |
 | Owner | Disclosure + Routing |
-| Failure | empty intersection → local_only / reduced context; never fail-open; persist withhold reasons |
+| Credential | user / service orchestration |
+| TX | read-only planning; influence write later in turn completion |
+| Allowed | ids, disclosure codes, requirement levels, estimated tokens, Final scores |
+| Forbidden | raw private text in plans/logs; downgrading required→optional to force a plan; selecting commercial vendors here |
+| Failure | Case C / F explicit safe fallback; never fail-open; never silently omit required evidence |
+| Reproducibility | deterministic under `retrieval_policy_version` + pinned tie-breakers |
+| Note | Lightweight pre-pack projections only; full `ContextPacker` runs once after choice |
 
 #### `ContextPacker`
 
 | | |
 | --- | --- |
-| Input | filtered candidates, conflicts, budget inputs |
+| Input | **chosen** plan’s sendable candidates, conflicts, budget inputs, user-message representation |
 | Output | `ContextPackingDecision` + ordered records content refs |
 | Owner | Retrieval |
-| Failure | empty pack + notice |
+| Failure | if required evidence cannot fit after exact tokenization → signal plan rejection to planner; else empty pack + notice |
+| Note | Normally invoked **once** per turn for the chosen provider |
 
 #### `ContextRenderer`
 
@@ -2261,8 +2420,8 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 - **Plan:** `primaryIntentMode='current_state'`, `intentFacets=['personal_recall']`; highly_sensitive likely.  
 - **Query disclosure:** purpose-specific — may allow inference only for compatible provider classes (`raw_allowed` or `redacted_allowed`) while denying external semantic/index, or may set inference `local_only`.  
 - **Evidence disclosure:** may be `local_only` / provider_restricted.  
-- **Provider selection:** intersection of query-compatible ∩ evidence-compatible ∩ capabilities.  
-- **Withhold path:** influence `withheld_before_pack` + drop_reason + user notice; if inference blocked, `externalInferenceBlocked=true`.  
+- **Provider selection:** per-provider sendable subsets; required med evidence must be satisfied by chosen plan or Case C.  
+- **Withhold path:** optional/preferred incompatibles → `withheld_before_pack` + requirement level; if inference blocked or Case C, record reason codes (never silent omit required).  
 - **Pack:** trusted current meds only when disclosable to selected provider; uncertain plans labeled.
 
 ### 32.5 “What projects am I currently working on?”
@@ -2421,7 +2580,7 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 ### 32.39 Ordinary query allowed for inference
 
 - **Query disclosure:** `inferenceDisposition.kind='raw_allowed'` with broad provider classes; semantic/index/planner/reranker independently allowed or not.  
-- **Sequence:** retrieve → evidence summary → intersection → pack with **raw** user message tokens → external inference.  
+- **Sequence:** retrieve → evidence summary → per-provider plans → choose → pack once with **raw** user message tokens → external inference.  
 - **Influence:** disposition `raw_allowed`; `externalInferenceBlocked=false`.
 
 ### 32.40 Query contains an API key
@@ -2434,9 +2593,9 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 
 ### 32.41 Highly sensitive query allowed only for a compatible provider
 
-- **Inference:** `raw_allowed` or `redacted_allowed` with **restricted** `allowedProviderClasses`.  
-- **Evidence:** may further restrict classes.  
-- **Selection:** intersection only; if evidence needs a class outside query allow-list → local_only or withhold evidence + notice.
+- **Inference:** `raw_allowed` or `redacted_allowed` with **restricted** query-compatible classes.  
+- **Hard filter:** drop model-incapable / query-incompatible classes.  
+- **Per-provider:** partition finalists; if required evidence only sendable on a query-compatible class → that plan; if required cannot be sent anywhere → Case C.
 
 ### 32.42 Safe semantic redaction but not inference-safe redaction
 
@@ -2452,8 +2611,8 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 
 ### 32.44 No compatible inference provider exists
 
-- Query and/or evidence allow-lists yield empty intersection with available models.  
-- **Behaviour:** `local_only` path; refuse/clarify; `externalInferenceBlocked=true`; no fail-open.
+- No query-compatible ∧ model-capable class, **or** Case C (required evidence unsatisfiable).  
+- **Behaviour:** `query_local_only` or `no_compatible_provider` with reason codes (e.g. `no_provider_satisfies_required_evidence`); refuse/clarify/limitation; no fail-open; no silent full-grounding claim.
 
 ### 32.45 BYOK exists but user policy denies external inference
 
@@ -2465,6 +2624,46 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 - **Plan:** `documentRetrievalScope='section'`.  
 - **Tree §19.2:** complete ordered section → `complete_section`; else derived-complete → `derived_complete_section`; else `partial_section` / targeted passage / limitation.  
 - **Forbidden:** treating two Q&A-cap chunks as a complete section summary by default.
+
+### 32.47 Split evidence across Provider A and Provider B
+
+- **Setup:** Query → A or B. Evidence1→A only (preferred); Evidence2→B only (preferred); Evidence3→both (preferred).  
+- **Plans:** A sendable={1,3}, withheld={2}; B sendable={2,3}, withheld={1}; both `requiredEvidenceSatisfied=true` (no required).  
+- **Choose:** higher attainableUtility (e.g. if Final(1)>Final(2) prefer A); withhold the other preferred; influence records withheld rows.  
+- **Not** Case C / not forced local_only.
+
+### 32.48 Required evidence only on Provider A
+
+- **Setup:** Evidence1 **required**, only A; Evidence2 optional, only B; Evidence3 both.  
+- **Plans:** A requiredEvidenceSatisfied=true; B false.  
+- **Choose:** A; withhold Evidence2; pack required Evidence1 + sendable others.
+
+### 32.49 Two required evidence items no single provider accepts both
+
+- **Setup:** Evidence1 required→A only; Evidence2 required→B only.  
+- **Plans:** both fail requiredEvidenceSatisfied.  
+- **Outcome:** Case C — `no_provider_satisfies_required_evidence`; clarification / limitation / refuse unsupported claim; **do not** send only one required item and pretend complete.
+
+### 32.50 Only optional evidence incompatible with best provider
+
+- **Setup:** Provider A highest utility on required+preferred; EvidenceX optional incompatible with A.  
+- **Outcome:** Case E — select A; withhold X; continue; influence withheld with `evidence_requirement=optional`.
+
+### 32.51 All providers accept query; none accept required sensitive evidence
+
+- **Query:** raw_allowed for A and B.  
+- **Required evidence:** disclosure denies A and B.  
+- **Outcome:** Case C; not a silent empty-context “answer”; persist reason code.
+
+### 32.52 Exact token pack loses required evidence on initially chosen plan
+
+- **Lightweight projection:** Plan A appears to fit required evidence.  
+- **Full pack:** exact tokenization drops a required record.  
+- **Outcome:** reject Plan A; evaluate next valid plan; if none → Case C. Influence records plan rejection reason without raw text.
+
+### 32.53 Query itself is `local_only`
+
+- **Outcome:** Case F — provider planning skipped; no `ProviderCandidatePlan` evaluation; deterministic/refusal path; `externalInferenceBlocked=true`.
 
 ---
 
@@ -2504,9 +2703,13 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 32. Every user-visible privacy-withholding explanation has a corresponding disclosure-withheld influence/snapshot record.  
 33. `primaryIntentMode` is unique; `intentFacets` never duplicates the primary and is deterministically ordered.  
 34. Every provider-bound current user message passes purpose-specific query-inference disclosure; permission for embedding, indexing, planning, or reranking never authorizes final inference.  
-35. Provider selection is the intersection of query-compatible, evidence-compatible, and model-capable classes; empty intersection never fail-opens.  
+35. Provider selection uses query-compatible ∧ model-capable hard filters, then per-provider sendable/withheld evidence subsets and deterministic attainable utility; it does not require a provider that accepts every optional finalist.  
 36. Fixed 4/2 chunk counts are `targeted_passage` diversity caps only; section and whole-document completeness are coverage-based.  
-37. A derived summary labelled complete must have complete section/chunk provenance for the current document fingerprint; packed citation caps must not limit production coverage.
+37. A derived summary labelled complete must have complete section/chunk provenance for the current document fingerprint; packed citation caps must not limit production coverage.  
+38. An optional evidence-disclosure restriction does not automatically eliminate an otherwise query-compatible provider.  
+39. A provider plan is valid only if every required provider-bound evidence record is disclosure-compatible and fits the final pack.  
+40. Required evidence is never silently downgraded or withheld to make a provider plan appear valid.  
+41. Provider selection uses per-provider evidence subsets and deterministic utility; final rendering occurs only after one provider plan is chosen (except deterministic rejection/retry when exact packing drops required evidence).
 
 ---
 
@@ -2584,7 +2787,7 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 | 20 | Assertion truncation safety? | **Met** — §24.4 |
 | 21 | Data vs instructions? | **Met** — §25 |
 | 22 | Indirect injection reduced? | **Met** — §25, §29 |
-| 23 | Query + evidence + inference disclosure? | **Met** — §7.0 purpose-specific, §22 intersection |
+| 23 | Query + evidence + inference disclosure? | **Met** — §7.0 purpose-specific; §22 per-provider plans |
 | 24 | Model context size packing (raw/redacted/local-only user msg)? | **Met** — §23–24 |
 | 25 | Degradation? | **Met** — §28 |
 | 26 | Sent/withheld/budget-dropped explained? | **Met** — §27 finalState |
@@ -2628,14 +2831,14 @@ Evaluate at least:
 
 1. All §29 threats with automated/adversarial tests (including 17a–17g, 15a).  
 2. Calibration of §13 constants on labeled personal-query sets.  
-3. Scenarios §32.1–32.38 as golden decision traces with valid `primaryIntentMode`/`intentFacets`.  
+3. Scenarios §32.1–§32.53 as golden decision traces with valid `primaryIntentMode`/`intentFacets`.  
 4. Determinism under `rp-v1.0`.  
 5. **Math regression:** multiplicative policy cannot dominate (rank-1 exact ±Policy examples); additive domination must fail the test.  
 6. Injection suites (PDF, memory, filename).  
 7. Query disclosure preflight: forbidden-secret query never reaches external embed/index/planner/reranker; `allow_embedding` on assertions ≠ query auth.  
 7b. **Final inference:** a query blocked for inference (`local_only`) never appears in any external provider request; embedding permission ≠ inference permission; BYOK does not bypass.  
 7c. Redaction separation: `safeSemanticQueryText` vs `safeInferenceUserMessage` tested independently.  
-7d. Provider intersection: empty query∩evidence∩capability → no external inference.  
+7d. Per-provider plans: optional withhold continues; required-missing → Case C explicit fallback; never silent omit required; exact-pack rejection retries next plan.  
 8. Evidence disclosure routing + withheld influence rows ↔ user notices.  
 9. History eligibility (orphans excluded).  
 10. Influence `sent_to_provider` ≡ actually sent; withhold explanations require rows.  
@@ -2703,6 +2906,7 @@ Evaluate at least:
 | Earlier Stage 12 draft: query disclosure without final inference purpose | **Superseded** — embedding/index/planner/reranker/inference distinct |
 | Earlier Stage 12 draft: universal max 4/2 document chunk diversity | **Superseded** — targeted_passage-only; section/whole-document coverage trees |
 | Earlier Stage 12 draft: `whole_document_summary_max_source_sections` as completeness | **Superseded** — `partial_summary_max_sections_packed` for packed citations only |
+| Earlier Stage 12 draft: global “evidence-compatible provider classes” / empty intersection ⇒ local_only | **Superseded** — per-provider sendable subsets; Case E vs Case C |
 
 No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/graph rules bind.
 
@@ -2717,14 +2921,14 @@ No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/g
 - [x] Option B selected with multiplicative policy constants versioned  
 - [x] Multi-intent plans (`primaryIntentMode` + `intentFacets`)  
 - [x] Query disclosure preflight with purpose-specific final inference disposition  
-- [x] Query∩evidence∩capability provider intersection  
+- [x] Per-provider sendable subsets + required/preferred/optional evidence  
 - [x] Scope-specific document diversity / coverage labels  
 - [x] Revision≠history; whole-doc/section decision trees; identity consistency gate  
-- [x] Influence finalState incl. disclosure-withheld + query_inference_disposition  
+- [x] Influence finalState incl. disclosure-withheld + query_inference_disposition + plan snapshots  
 - [x] Eligibility/disclosure/packing/graph/history/rendering specified  
 - [x] Amendments recorded  
-- [x] 38 scenarios traced with valid plans  
-- [x] Invariants listed (incl. 27–33)  
+- [x] 53 scenarios traced with valid plans  
+- [x] 41 invariants listed  
 - [x] Acceptance criteria assessed  
 
 ---
