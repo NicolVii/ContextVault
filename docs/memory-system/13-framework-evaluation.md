@@ -53,7 +53,23 @@ Stages 7–12 remain binding, including `Final(c) = WRRF(c) × (1 + λ_policy ×
 
 ### 1.4 Non-negotiable Cortaix contracts
 
-Unchanged from prior revision: PostgreSQL canonical; external systems derived; no remote-text authority; Cortaix owns trust/eligibility/disclosure/conflict/packing; graph edges ≠ truth; disclosure before external calls; BYOK ≠ bypass; pinned embedding spaces; native fallback; provider independence; agent writes validated; no always-visible bypass; deletion/export from canonical state.
+1. PostgreSQL remains canonical for memory assertions, ownership, trust, lifecycle, temporal state, conflict state, disclosure, entity identity, user decisions, provenance, influence records, and operational coordination.
+2. External systems are derived, rebuildable, and replaceable.
+3. An external framework may never become the authoritative source of personal truth.
+4. External retrieval results must return canonical Cortaix IDs or IDs deterministically mapped to canonical Cortaix records.
+5. Remote text must never bypass canonical reconciliation.
+6. External frameworks cannot decide trust, eligibility, ownership, disclosure, conflict resolution, current versus historical truth, required versus optional evidence, final context packing, or provider compatibility.
+7. Graph edges never independently grant truth.
+8. Retrieval semantics remain WRRF × bounded multiplicative policy → dedupe → conflict-safe grouping → disclosure-aware provider planning → token-aware packing.
+9. No framework may redefine `Final(c)`.
+10. Query disclosure before every external embedding, index search, planner-model, reranker, and final inference call.
+11. BYOK does not automatically bypass disclosure policy.
+12. Embedding spaces remain pinned and separate; cross-space similarity is forbidden.
+13. Cortaix must continue safely when an optional external framework is unavailable.
+14. Provider and model independence preserved.
+15. Agent-autonomous memory writes may not bypass Stages 8–10 pipelines.
+16. Always-visible framework memory cannot bypass Stage 12 relevance/budget rules.
+17. User deletion, export, correction, retention, and purge remain enforceable from canonical state.
 
 ### 1.5 Research method
 
@@ -65,7 +81,24 @@ Primary sources preferred. Official docs verify **retrieval of vendor claims**, 
 
 ### 2.1 Hard gates
 
-Gates G1–G10 unchanged. Outcomes enum only: `pass | conditional_pass | fail | unknown`. Applicability separate: `applicable | not_applicable`. Failed applicable gate blocks canonical-core adoption. Scores never override failed gates.
+| Gate | Question |
+| --- | --- |
+| G1 Canonical authority | Can Cortaix retain PostgreSQL as canonical truth? |
+| G2 Canonical reconciliation | Can results return stable IDs mappable to current Cortaix records? |
+| G3 User isolation | Can every operation be scoped to one Cortaix user with server-side enforcement? |
+| G4 Disclosure and privacy | Can Cortaix prevent restricted query/evidence transfer? |
+| G5 Deletion, purge, export | Delete one record/user; purge embeddings/graph; confirm; rebuild; export; exit? |
+| G6 Deterministic fallback | Continue with PostgreSQL/FTS/pgvector/native retrieval if candidate unavailable? |
+| G7 Embedding-space control | Pin provider, model, dimensions, normalization, version, reindex? |
+| G8 Retrieval-semantic preservation | Retain WRRF, policy bound, eligibility, conflict-safe presentation, packing, influence? |
+| G9 Model/provider independence | Avoid lock to one inference provider or agent runtime? |
+| G10 Legal/licensing viability | OSS/commercial/hosted terms viable (flag legal review; not legal advice)? |
+
+**Gate outcomes (enum only):** `pass | conditional_pass | fail | unknown`.
+
+**Applicability (separate field, not an outcome):** `applicable | not_applicable`.
+
+**Rule:** A failed **applicable** hard gate blocks recommendation as Cortaix’s **canonical memory layer**. For a narrower adapter role, evaluate gates for that role separately. Weighted scores never override failed applicable hard gates.
 
 ### 2.2 Native target vs current implementation
 
@@ -173,11 +206,13 @@ A claim is **adjudicated** when its truth value—positive or negative—is supp
 | S22 | mem0ai/memory-benchmarks | Mem0 | Benchmark OSS repo | https://github.com/mem0ai/memory-benchmarks | GitHub API at access | commit `4b61c5d31b9c668a12b4f5e78064248a02c82d2b` | 2026-07-24 | yes | yes | no | medium | vendor |
 | S23 | Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning | Markovic et al. | Research paper | https://arxiv.org/abs/2505.24478 | arXiv 2505.24478 (2025) | arXiv id | 2026-07-24 | yes (Cognee-affiliated authors per README citation) | yes | no | medium | vendor-affiliated paper |
 | S24 | Supermemory README benchmark crown section | Supermemory | OSS README claim locus | https://github.com/supermemoryai/supermemory/blob/ea2cf33fd3572d8ba9d4064127025093fddcb547/README.md | commit date via pin | commit `ea2cf33…`; claim lines ~32–39 and ~375–379 | 2026-07-24 | yes | yes | no | medium | vendor |
-| S25 | HippoRAG paper (NeurIPS’24 lineage) + repo | OSU NLP | Paper + code | Paper via repo citations; code S19 | Paper year 2024 lineage | repo commit in S19; paper DOI/arXiv not re-fetched in full prose here | 2026-07-24 | no | partial (repo yes; full paper methodology **not fully read** in Stage 13) | no | medium | academic |
+| S25a | OSU-NLP-Group/HippoRAG repository | OSU NLP | Research OSS repo | https://github.com/OSU-NLP-Group/HippoRAG | pushed_at 2026-07-13T00:10:52Z | commit `1e8f60981bf760b64003aa5bf5668126d0c106b3`; LICENSE MIT | 2026-07-24 | no | yes | no | medium | academic |
+| S25b | HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models | Bernal Jiménez Gutiérrez, Yiheng Shu, Yu Gu, Michihiro Yasunaga, Yu Su | Research paper (NeurIPS ’24) | https://arxiv.org/abs/2405.14831 | arXiv 2405.14831 (2024) | arXiv id; methodology **not fully read** in Stage 13 | 2026-07-24 | no | yes (abstract/landing) | no | medium | academic |
+| S25c | From RAG to Memory: Non-Parametric Continual Learning for Large Language Models (HippoRAG 2) | (OSU NLP line; see arXiv) | Research paper (ICML ’25 lineage per README) | https://arxiv.org/abs/2502.14802 | arXiv 2502.14802 (2025) | arXiv id; methodology **not fully read** in Stage 13 | 2026-07-24 | no | yes (landing) | no | medium | academic |
 | S26 | LongMemEval upstream | Xiaowu et al. | Benchmark dataset/repo | https://github.com/xiaowu0162/LongMemEval | GitHub API at access | commit `9e0b455f4ef0e2ab8f2e582289761153549043fc` | 2026-07-24 | no | yes | no | medium | academic |
-| S27 | DMR benchmark as cited via Zep paper / MemGPT lineage | Zep paper cites MemGPT DMR | Paper citation | Via S8 | 2025 paper | not separately reproduced | 2026-07-24 | mixed | yes (citation retrieval) | no | low | mixed |
-| S28 | LoCoMo benchmark repo (as linked by Supermemory README) | Snap Research | Benchmark repo | https://github.com/snap-research/locomo | Linked from S24 | link verified via README fetch; commit not pinned in this audit | 2026-07-24 | no | partial | no | low | academic/industry |
-| S29 | ConvoMem benchmark repo (as linked by Supermemory README) | Salesforce | Benchmark repo | https://github.com/Salesforce/ConvoMem | Linked from S24 | link verified via README fetch; commit not pinned | 2026-07-24 | no | partial | no | low | industry |
+| S27 | DMR (Deep Memory Retrieval) as cited by Zep paper | Original MemGPT/DMR lineage **not independently resolved** in Stage 13; accessed only via Zep paper citation [S8] | Secondary citation | https://arxiv.org/abs/2501.13956 (citing context only) | Via S8 (2025) | **original DMR source not independently resolved in Stage 13** | 2026-07-24 | mixed | yes (citation only) | no | low | mixed |
+| S28 | LoCoMo benchmark repository | Snap Research | Benchmark repo | https://github.com/snap-research/locomo | GitHub API at access | commit `3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376` pinned 2026-07-24; also linked from S24 | 2026-07-24 | no | yes | no | medium | academic/industry |
+| S29 | ConvoMem benchmark repository | Salesforce (as linked by Supermemory README) | Benchmark repo link | https://github.com/Salesforce/ConvoMem | Link retrieved from S24 README | **Link located via S24; repository metadata/commit could not be verified in this environment (API 404)** — low confidence; not version-pinned | 2026-07-24 | no | partial (link only) | no | low | industry |
 
 **Independence rule:** Fetching Cortaix’s own repository (`S1`,`S2`,`S21`) verifies retrieval of Cortaix artifacts; it does **not** independently corroborate them. Fetching vendor docs verifies the vendor’s claim text; it does **not** independently corroborate correctness.
 
@@ -211,25 +246,92 @@ Remote-text fallback; null embeddings on Mem0 path; no query-disclosure gate; no
 
 ### 4.4 Must build / commodity / differentiating
 
-Unchanged: build trust/lifecycle/disclosure/WRRF/packing/deletion/entities natively; commodity embed/PDF/rerank/OTEL; differentiate on governance and provider independence.
+**Must build natively (regardless of framework choice):** assertion store; trust/lifecycle; disclosure; validation/dedupe/conflict; eligibility; WRRF×policy; packing; influence; deletion coordinator; entity identity & user decisions; provider independence.
+
+**Commodity / suitable for reuse:** embedding HTTP clients; PDF extraction; optional rerank HTTP; observability exporters (OTEL); later connector sync workers if outputs land as untrusted Gateway intake.
+
+**Strategically differentiating:** orthogonal trust/disclosure/conflict; reconciliation-first retrieval; influence explainability; model/provider independence as a product promise.
 
 ### 4.5 Preserve / adapt / retire [S2]
 
-Preserve ports + Supabase provider; Mem0 path candidate only after PoC; retire trusted system-prompt interpolation and profile force-inject.
+| Code | Disposition |
+| --- | --- |
+| `MemoryProvider`, embedding, document ports | **Preserve** and evolve toward Stage 9/12 ports |
+| `SupabaseMemoryProvider` + pgvector RPCs | **Preserve** as native baseline channel |
+| Mem0 HTTP client + mapping helpers | **Adapt** into strict `ExternalMemoryIndexPort` after PoC-A, or retire |
+| Think/Chat trusted system-prompt memory interpolation | **Retire/replace** per Stage 12 untrusted rendering |
+| Profile force-inject at similarity 1.0 | **Retire/replace** with ranked profile channel |
+| Flat `memories` schema | **Migrate** under Stage 16 toward Stage 9 assertions (not authorized here) |
 
 ---
 
-## 5. Candidate set
+## 5. Candidate set and classification
 
-Native; Mem0 OSS; Mem0 managed; Graphiti OSS; Zep managed; Cognee OSS; Cognee managed; Letta OSS; Letta managed; LangGraph/LangMem; Supermemory OSS; Supermemory managed; LlamaIndex; Memobase; HippoRAG; Reranker APIs. Classifications unchanged from prior revision (complete platforms vs complementary components).
+| # | Candidate | Classification(s) | Substitute vs complementary |
+| --- | --- | --- | --- |
+| 1 | Native Cortaix | complete memory platform (target) + supporting utilities | Control baseline |
+| 2 | Mem0 OSS | open-source memory engine; optional external derived index | Complementary index — not identical to managed |
+| 3 | Mem0 managed | managed memory API; complete memory platform posture | Complementary derived index only under adapters |
+| 4 | Graphiti OSS | temporal graph framework; open-source memory engine (graph) | Complementary derived projection |
+| 5 | Zep managed | managed memory API; temporal graph platform | Complete product — not a Stage 12 substitute |
+| 6 | Cognee OSS | open-source memory engine; temporal/graph RAG platform | Complementary derived layer |
+| 7 | Cognee managed | managed memory API | Complementary |
+| 8 | Letta OSS | agent runtime | **Not** a memory-store substitute |
+| 9 | Letta managed | agent runtime + managed hosting | Not a memory-store substitute |
+| 10 | LangGraph / LangMem | orchestration framework + supporting memory utilities | Complementary tools; not Stage 12 substitute |
+| 11 | Supermemory OSS | open-source memory engine | Complementary; evaluate separately from managed |
+| 12 | Supermemory managed | managed memory API + connectors | Complementary |
+| 13 | LlamaIndex memory/retrieval | document/RAG framework; retrieval framework | Complementary components |
+| 14 | Memobase | open-source memory engine | Complementary; watchlist |
+| 15 | HippoRAG | retrieval research framework | Complementary research |
+| 16 | Reranker APIs | optional reranker | Complementary function only |
 
----
+Do not compare an orchestration framework to a managed memory platform as identical scope. Do not rank a reranker against Native Cortaix.
 
-## 6. Native baseline
+## 6. Native baseline (control)
 
-PostgreSQL/Supabase/pgvector/FTS(planned)+Stage 8–12 services. High eng complexity; medium ops on Supabase; highest differentiation; lock-in negligible; security highest **when implemented**; 12-month cost engineering-dominant (§12).
+### 6.1 Composition
 
----
+| Layer | Source |
+| --- | --- |
+| Canonical store | PostgreSQL / Supabase |
+| Vectors | pgvector |
+| Lexical | PostgreSQL FTS (Stage 12 channel; implementation pending) |
+| Exact | PostgreSQL equality / structured filters |
+| Services | Native Stage 8–12 services |
+| Optional libs | Small commodity libs only (HTTP clients, PDF parse, metrics) |
+
+### 6.2 Already available vs to build
+
+| Component | Status |
+| --- | --- |
+| Row store + RLS | Available |
+| pgvector ANN | Available (cosine) |
+| Document chunk retrieval | Available (basic) |
+| Embedding providers (local/OpenAI) | Available |
+| FTS hybrid channel | Needs Cortaix service + SQL |
+| Assertion/trust/lifecycle model | Needs Cortaix service + schema (Stage 9) |
+| Processing pipeline | Needs workers + Gateway |
+| WRRF fusion + packing | Needs Cortaix services |
+| Entity/relationship projections | Needs Cortaix services; optional external assist |
+| Deletion coordinator | Needs Cortaix services |
+| Influence records | Needs schema + recorder |
+
+### 6.3 Complexity and economics
+
+| Dimension | Assessment |
+| --- | --- |
+| Engineering complexity | **High** for Stages 8–12 delivery — designed, largely not implemented |
+| Operational complexity | **Medium** on Supabase/Postgres; rises with workers |
+| Differentiation | **Highest** |
+| Lock-in | **Negligible** for memory semantics (own schema; Postgres portable) |
+| Security control | **Highest when implemented** |
+| Migration flexibility | **Highest** |
+| Twelve-month cost | Engineering-dominant (see §12); **not free** |
+
+**Strengths:** Satisfies all hard gates by construction (target); matches differentiation; offline-capable with local embeddings; no vendor memory authority; fits TypeScript/Next.js.
+
+**Weaknesses:** Engineering time, testing, on-call, evaluation harnesses, reindexing, migrations, security reviews, and operational tooling are real costs. Temporal graph sophistication lags Graphiti/Zep as a derived graph product unless built or adapted later.
 
 ## 7. Hard-gate results
 
@@ -571,16 +673,16 @@ Hard-gate failures still block all non-Native core adoption. Category-level evid
 
 | Candidate | Role | Category | Score | Weight | Contribution | Sources | Reason | Confidence | Unknowns |
 | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- |
-| HippoRAG | canonical Cortaix memory core | Architecture compatibility | 1 | 20 | 4.0 | S19,S25 | Research RAG framework — not a personal memory core product. | high | — |
+| HippoRAG | canonical Cortaix memory core | Architecture compatibility | 1 | 20 | 4.0 | S25a,S25b | Research RAG framework — not a personal memory core product. | high | — |
 | HippoRAG | canonical Cortaix memory core | Security, privacy, and governance | 2 | 18 | 7.2 | S19 | Offline research code; no Cortaix governance model. | medium | — |
 | HippoRAG | canonical Cortaix memory core | Data ownership and portability | 3 | 12 | 7.2 | S19 | MIT code can be studied; not a vault store. | high | — |
-| HippoRAG | canonical Cortaix memory core | Retrieval and temporal capability | 4 | 12 | 9.6 | S19,S25 | PPR-over-KG retrieval is relevant research signal → 4 for retrieval *ideas*, still not Stage 12. | medium | Transfer to Stage 12 |
+| HippoRAG | canonical Cortaix memory core | Retrieval and temporal capability | 4 | 12 | 9.6 | S25a,S25b | PPR-over-KG retrieval is relevant research signal → 4 for retrieval *ideas*, still not Stage 12. | medium | Transfer to Stage 12 |
 | HippoRAG | canonical Cortaix memory core | Integration fit (Next.js/TS/Supabase/PG/Vercel) | 1 | 10 | 2.0 | S19,S21 | Python research stack. | high | — |
 | HippoRAG | canonical Cortaix memory core | Operational reliability and observability | 1 | 8 | 1.6 | S19 | Not a managed ops product — low production ops score. | medium | — |
 | HippoRAG | canonical Cortaix memory core | Vendor and model independence | 4 | 7 | 5.6 | S19 | Academic MIT — high independence as research. | high | — |
 | HippoRAG | canonical Cortaix memory core | Performance and latency potential | 2 | 5 | 2.0 | S19 | Paper benches not Cortaix workloads → 2. | low | — |
 | HippoRAG | canonical Cortaix memory core | Twelve-month total cost of ownership | 3 | 5 | 3.0 | S19 | No SaaS; research eng only. | medium | — |
-| HippoRAG | canonical Cortaix memory core | Maturity, maintenance, community, licensing | 4 | 3 | 2.4 | S19,S25 | NeurIPS-lineage research [S25]. | high | — |
+| HippoRAG | canonical Cortaix memory core | Maturity, maintenance, community, licensing | 4 | 3 | 2.4 | S25a,S25b | NeurIPS-lineage research [S25]. | high | — |
 | **Weighted total** | | | | **100** | **44.6** | | Recomputes as Σ((score/5)×weight) | | |
 
 #### Score evidence — `Reranker APIs` / `canonical Cortaix memory core`
@@ -814,6 +916,62 @@ Adapter summary leaders (PoC-gated where noted): ExternalIndex Mem0 OSS **63.6**
 | **Weighted total** | | | | **100** | **44.6** | | Recomputes as Σ((score/5)×weight) | | |
 
 ---
+
+## 9B. Candidate architecture narratives
+
+Score tables (§8A–9) evaluate candidates. This section explains product scope. Outcomes match §19 (PoC-gated where required). Evidence % from §10 ledgers.
+
+### Native Cortaix
+
+**Scope:** Target complete personal-memory platform on PostgreSQL/Supabase/pgvector with native Stage 8–12 services. **OSS/managed:** N/A (first-party). **Runtime:** Next.js/TS + Supabase; workers for async jobs. **Memory model:** Designed orthogonal assertions (trust/lifecycle/temporal/disclosure); flat model in production today. **Retrieval:** Cosine today; WRRF×policy designed. **Governance:** RLS + designed Gateway/disclosure. **Next/Vercel fit:** Native. **Best role:** Core platform. **Hard gates:** Target pass; implementation partial (§4.3). **Lock-in:** 0. **Cost:** Eng-heavy, vendor-light. **Outcome:** `adopt_as_core_dependency`.
+
+### Mem0 OSS
+
+**Scope:** Open-source memory engine (library + self-hosted REST) [S3][S4][S20]. **Boundary:** Distinct from Mem0 managed. **Runtime:** Python-first; optional Docker REST; defaults LLM/embedder/vector/history [S4]. **Memory model:** Engine-owned memories/summaries unless subordinated. **Retrieval:** Search/add/delete APIs; not WRRF packing. **Governance:** Lacks Cortaix disclosure axes. **Next/Vercel fit:** HTTP adapter OK; full engine poor in-request. **Best role:** `ExternalMemoryIndexPort` (ID-only). **Core gates:** fail G1/G8. **Adapter gates:** conditional. **Lock-in:** 1–2. **Cost:** No SaaS fee; ops+model remain. **Outcome:** `proof_of_concept_before_decision` (PoC-A).
+
+### Mem0 managed
+
+**Scope:** Hosted memory API with public plans [S5][S6]. **Runtime:** Vendor SaaS; TS/Python clients. **Retrieval:** v3 hybrid search. **Governance:** Vendor processes text; operator access inherent; purge attestation unknown. **Best role:** Optional derived index (watchlist, not default). **Core gates:** fail. **Lock-in:** 3. **Cost:** Public plans; S@100% search exceeds Starter; M/L often exceed Pro → unknown overage. **Outcome:** `watchlist`.
+
+### Graphiti OSS
+
+**Scope:** Temporal context graph (episodes, validity, hybrid retrieval) [S7][S8]. **Runtime:** Python ≥3.10 + Neo4j/FalkorDB/Neptune; defaults OpenAI. **Memory model:** Graph facts/edges — must remain derived. **Governance:** Edges ≠ truth [S1]. **Next/Vercel fit:** Worker-only. **Best role:** `RelationshipProjectionPort` / `EntityProjectionPort`. **Core gates:** fail. **Lock-in:** 2–3. **Cost:** Infra+LLM. **Outcome:** `proof_of_concept_before_decision` (PoC-B).
+
+### Zep managed
+
+**Scope:** Managed temporal context lake; `memory.get` prompt-oriented context [S9][S9a]. **Best role:** None required; watchlist only if ID/candidate APIs used without prompt authority. **Core gates:** fail G1/G8. **Lock-in:** 4 as primary memory. **Cost:** Credits unresolved (`credits_per_episode` unknown). **Outcome:** `reject_for_cortaix` as core.
+
+### Cognee OSS
+
+**Scope:** AI memory platform; vector+graph; Postgres-graph option [S10]. **Runtime:** Python engine; TS/Rust clients. **Best role:** Watchlist derived graph/extraction — port must be named before any PoC. **Core gates:** fail. **Lock-in:** 2. **Outcome:** `watchlist`.
+
+### Cognee managed
+
+**Scope:** Cloud memory; $2.50/1M tokens [S11]. **Best role:** None now. **Core gates:** fail. **Lock-in:** 3. **Cost:** Token map illustrative only. **Outcome:** `watchlist`.
+
+### Letta OSS / managed
+
+**Scope:** Stateful agent runtime (not a vault store) [S12][S13]. **Best role:** None. **Core gates:** fail G1/G8/G9. **Lock-in:** 5. **Outcome:** `reject_for_cortaix`.
+
+### LangGraph / LangMem
+
+**Scope:** Python memory tools + LangGraph store [S14]. **Best role:** Inspiration for `ExtractionAssistPort` only. **Core gates:** fail. **Lock-in:** 2. **Outcome:** `reject_for_cortaix` as core; watchlist inspiration.
+
+### Supermemory OSS
+
+**Scope:** MIT TS-oriented memory/context engine; self-host claims [S15]. **Do not assume** managed connector parity. **Best role:** Watchlist local engine. **Core gates:** fail. **Lock-in:** 2. **Outcome:** `watchlist`.
+
+### Supermemory managed
+
+**Scope:** Hosted API + connectors + profiles [S15a]. **Best role:** `ConnectorIngestionPort` (untrusted intake). **Core gates:** fail. **Lock-in:** 3–4 if memory+connectors couple. **Cost:** List prices known; SM-token map unresolved. **Outcome:** `watchlist` + PoC-D.
+
+### LlamaIndex
+
+**Scope:** Document/RAG + agent Memory blocks [S16][S17]. **Best role:** Document tooling watchlist; **no package selected**. **Core gates:** fail as personal-memory authority. **Lock-in:** 1. **Outcome:** `watchlist`.
+
+### Memobase / HippoRAG / Reranker APIs
+
+Memobase: profile memory OSS → `watchlist`. HippoRAG: research PPR-KG → `watchlist` (ideas). Rerankers: `RetrievalReranker` → `proof_of_concept_before_decision` (PoC-C); vendor not pinned.
 
 ## 10. Material-claim ledgers and evidence completeness
 
@@ -1058,12 +1216,12 @@ Definition reminder: adjudicated positive **and** negative facts count. Implemen
 | claim_id | material_claim | truth_value_or_outcome | source_ids | source_supports_claim | confidence | adjudicated |
 | --- | --- | --- | --- | --- | --- | --- |
 | HR1 | License MIT at pinned commit | true | S19 | yes | high | yes |
-| HR2 | Research RAG using knowledge graph + Personalized PageRank | true | S19,S25 | yes | high | yes |
+| HR2 | Research RAG using knowledge graph + Personalized PageRank | true | S25a,S25b | yes | high | yes |
 | HR3 | NeurIPS’24-lineage paper exists | true | S25 | yes | high | yes |
 | HR4 | Is a managed personal-memory SaaS | false | S19 | yes | high | yes |
-| HR5 | Methodology fully re-run on Cortaix data in Stage 13 | false | S19,S25 | yes | high | yes |
+| HR5 | Methodology fully re-run on Cortaix data in Stage 13 | false | S25a,S25b | yes | high | yes |
 | HR6 | Can replace Stage 12 fusion as product dependency | false | S1 | yes | high | yes |
-| HR7 | Useful as retrieval-research inspiration | true | S19,S25 | yes | medium | yes |
+| HR7 | Useful as retrieval-research inspiration | true | S25a,S25b | yes | medium | yes |
 | HR8 | Production purge/export story for Cortaix | not_applicable | S19 | yes | high | yes |
 | HR9 | Python research codebase | true | S19 | yes | high | yes |
 | HR10 | Independent production SLA exists | false | S19 | yes | high | yes |
@@ -1110,18 +1268,78 @@ Native note: **100% evidence completeness** means all listed claims are adjudica
 
 ---
 
-## 11. Port contracts
+## 11. Port contracts (plausible adapters)
 
-Ten-point contracts unchanged in substance from prior revision for:
+### 11.1 Mem0 → `ExternalMemoryIndexPort`
 
-1. Mem0 → `ExternalMemoryIndexPort`  
-2. Graphiti → `RelationshipProjectionPort` / `EntityProjectionPort`  
-3. Reranker → `RetrievalReranker`  
-4. Supermemory managed → `ConnectorIngestionPort` (watchlist/PoC-D)  
-5. LlamaIndex document tooling → watchlist, no package selected  
-6. Cognee → watchlist; port must be named before any future PoC  
+1. **What the candidate owns:** Derived index entries and vendor/OSS embeddings only; never canonical assertions.  
+2. **What Cortaix owns:** Assertions, trust, lifecycle, eligibility, WRRF×policy fusion, packing, disclosure, deletion authority, influence.  
+3. **Data sent:** Disclosure-approved memory text + metadata IDs; disclosure-approved queries only.  
+4. **Output returned:** Remote id + opaque score + **required** canonical mapping key; **no authoritative text**.  
+5. **Canonical ID mapping:** `external_memory_index_entries` ↔ assertion/revision via `cv_memory_id` (or equivalent).  
+6. **Disclosure boundary:** Purpose checks before every embed/search; BYOK does not bypass; denied purpose → zero calls.  
+7. **Failure behaviour:** Timeout/5xx → skip channel; native PG/FTS/pgvector continues.  
+8. **Rebuild behaviour:** Re-push from PostgreSQL; index disposable.  
+9. **Deletion/purge behaviour:** Delete mapping + remote record; deletion coordinator job; verify absence; vendor retention after delete remains **unknown** until attested.  
+10. **Replacement/migration strategy:** Swap adapter behind the port; rebuild; exit drill; feature-flag off.
 
----
+### 11.2 Graphiti → `RelationshipProjectionPort`
+
+1. **Owns:** Derived relationship edges/episodes in Neo4j/FalkorDB/Neptune (etc.) [S7].  
+2. **Cortaix owns:** Supporting assertion truth, eligibility, hop caps (0/1), packing, user relationship decisions that must survive rebuild.  
+3. **Data sent:** Disclosure-approved assertion texts that justify relationships only.  
+4. **Output:** Projected edge candidates with foreign keys + scores; **never trust grants**.  
+5. **ID mapping:** Graph edge UUID ↔ `assertion_id` / relationship-series id table.  
+6. **Disclosure:** Before Graphiti LLM extraction and embeds.  
+7. **Failure:** Disable relationship channel; native continues.  
+8. **Rebuild:** Drop graph edges; rebuild from assertions.  
+9. **Deletion/purge:** Remove user edges; confirm empty; coordinator tracks.  
+10. **Replace:** Another projection engine or native SQL projection.
+
+### 11.3 Graphiti → `EntityProjectionPort`
+
+**Shared semantics with §11.2** for disclosure, failure, rebuild, purge, and replace. Differences:
+
+1. **Owns:** Derived entity nodes/summaries in the graph DB [S7].  
+2. **Cortaix owns:** Operational entity identity, aliases, merge/split user decisions, eligibility.  
+3. **Data sent:** Disclosure-approved entity labels / mention texts.  
+4. **Output:** Entity candidate nodes + scores mapped to Cortaix `entity_id`.  
+5. **ID mapping:** Graph node UUID ↔ `entity_id` (user-scoped).  
+6–10. Same disclosure/failure/rebuild/purge/replace pattern as §11.2; entity projections remain subordinate to canonical entities.
+
+### 11.4 Reranker providers → `RetrievalReranker`
+
+1. **Owns:** Optional reorder scores only.  
+2. **Cortaix owns:** Eligibility, disclosure, Final semantics, packing.  
+3. **Data sent:** Disclosure-approved query + already-eligible candidate snippets/IDs.  
+4. **Output:** Permutation/scores for input `candidateId`s only.  
+5. **ID mapping:** `candidateId` unchanged.  
+6. **Disclosure:** Purpose `reranker`; deny → identity noop.  
+7. **Failure:** Identity/noop ordering; request succeeds.  
+8. **Rebuild:** Not applicable (stateless; no derived corpus).  
+9. **Deletion/purge:** Not applicable (no retained memory corpus); provider retention must be recorded before enablement.  
+10. **Replace:** Change HTTP vendor or disable flag. **No vendor selected now** — Stage 15 must pin provider/model/pricing/retention before PoC-C execution.
+
+### 11.5 Supermemory managed → `ConnectorIngestionPort`
+
+1. **Owns:** Connector sync workers and source fetch [S15a].  
+2. **Cortaix owns:** Gateway intake, validation, trust, storage, assertion activation.  
+3. **Data sent:** OAuth tokens / connector config; **not** canonical vault write authority.  
+4. **Output:** Raw/normalized documents or events as **untrusted intake** only.  
+5. **ID mapping:** External document ids → Cortaix document/intake ids.  
+6. **Disclosure:** Source-class policies; highly sensitive sources default deny.  
+7. **Failure:** Connector pause/backoff; product continues.  
+8. **Rebuild:** Re-sync or abandon vendor mirrors.  
+9. **Deletion/purge:** Delete connection + mirrored objects; confirm [S15a]; attestation unknown.  
+10. **Replace:** Native connectors or another vendor. Watchlist + PoC-D before adoption.
+
+### 11.6 LlamaIndex document tooling (watchlist)
+
+**No concrete LlamaIndex component is selected.** Therefore **no adoption and no PoC is authorized** for LlamaIndex in Stage 13. If a future evaluation names a specific reader/node-parser module, that PR must supply a full ten-point contract for `DocumentSearchPort` or document ingestion only. Until then: **watchlist**.
+
+### 11.7 Cognee (watchlist; possible derived role)
+
+**No concrete Cognee port is selected.** Cognee must not be treated as both relationship projection and extraction assist ambiguously. If advanced beyond watchlist, Stage 15+ must name **exactly one** of `RelationshipProjectionPort` or `ExtractionAssistPort` and supply a ten-point contract. Postgres-graph affinity [S10] is interesting but overlaps Stages 8–12; **not selected**; **no PoC authorized** until the port is named.
 
 ## 12. Cost and TCO scenarios
 
@@ -1159,7 +1377,14 @@ M: 45,000–240,000 / month
 L: 800,000–4,000,000 / month
 ```
 
-**External searches** at 0/25/50/100% of turns — unchanged table from prior revision (S @ 100% = 20,000–40,000 searches).
+**External searches at call rates of turns**
+
+| Rate | S searches/mo | M | L |
+| --- | --- | --- | --- |
+| 0% | 0 | 0 | 0 |
+| 25% | 5,000–10,000 | 75,000–150,000 | 1,000,000–2,000,000 |
+| 50% | 10,000–20,000 | 150,000–300,000 | 2,000,000–4,000,000 |
+| 100% | 20,000–40,000 | 300,000–600,000 | 4,000,000–8,000,000 |
 
 **Graph episodes (illustrative, low confidence):** 0.5–1.0 × writes → S 2,000–24,000; M 45,000–480,000; L 800,000–8,000,000.
 
@@ -1244,7 +1469,19 @@ Mapping Cortaix turns → SM tokens requires content-length assumptions **not fi
 
 ### 12.6 Native-only monthly buckets
 
-Vendor memory $0; model/DB/infra/eng ranges unchanged from prior revision (low confidence eng estimates).
+### 12.6 Separated monthly cost buckets (native-only, 0% external memory calls)
+
+| Bucket | S | M | L | Confidence |
+| --- | --- | --- | --- | --- |
+| Vendor memory fees | $0 | $0 | $0 | high |
+| Model/embedding fees | $0–$200 | $200–$3,000 | $3,000–$40,000 | low |
+| Database fees | $0–$200 | $200–$2,000 | $2,000–$15,000 | low |
+| Worker/infra | $0–$100 | $100–$1,000 | $1,000–$10,000 | low |
+| Eng build (amortized) | $5k–$15k | $8k–$25k | $12k–$40k | low |
+| Eng maintenance | $1k–$5k | $3k–$10k | $6k–$20k | low |
+| Migration/exit | negligible | low | low | medium |
+
+If Mem0 managed is enabled, add vendor fees from §12.2; at nontrivial search rates public Pro is often insufficient → enterprise/usage **unknown**.
 
 ---
 
@@ -1253,7 +1490,7 @@ Vendor memory $0; model/DB/infra/eng ranges unchanged from prior revision (low c
 | Field | Mem0 memory-benchmarks | Zep DMR (via S8) | Zep LongMemEval (via S8) | Supermemory #1 claims | Cognee arXiv 2505.24478 | HippoRAG |
 | --- | --- | --- | --- | --- | --- | --- |
 | Benchmark name | Mem0 evaluation suite | DMR | LongMemEval | LongMemEval/LoCoMo/ConvoMem crowns | KG↔LLM interface paper | HippoRAG |
-| Source ID | **S22** | **S8**, **S27** | **S8**, **S26** | **S24** (+ S26/S28/S29 links) | **S23** (README cite only in S10) | **S19**, **S25** |
+| Source ID | **S22** | **S8**, **S27** | **S8**, **S26** | **S24** (+ S26/S28/S29 links) | **S23** (README cite only in S10) | **S25a**, **S25b** |
 | Dataset | unknown without full methodology read | DMR (MemGPT-associated) | LongMemEval | as claimed in README | paper-specific | paper/repo |
 | Task | memory-augmented LLM eval (repo description) | deep memory retrieval | long-term temporal QA | memory benches | complex reasoning interface | multi-hop RAG |
 | Memory input size | unknown | unknown | unknown | unknown | unknown | unknown |
@@ -1278,17 +1515,94 @@ Do not merge into one leaderboard.
 
 ---
 
-## 14. Supermemory OSS vs managed
+## 14. Supermemory OSS vs managed (separated)
 
-Separated as before: MIT self-host vs hosted ToS/pricing/connectors; do not transfer managed connectors to OSS without evidence; both fail as canonical core; managed best watchlist role = ConnectorIngestionPort; evidence % from §10.11–10.12.
+| Dimension | Supermemory OSS [S15] | Supermemory managed [S15a] |
+| --- | --- | --- |
+| License / terms | MIT at commit `ea2cf33…` | Hosted ToS + pricing; legal review required |
+| Deployment topology | Self-host claims (“one binary” marketing in README) | SaaS API |
+| Data location | Operator-controlled if truly self-hosted | Vendor cloud |
+| Runtime requirements | TS-oriented monorepo; ops on Cortaix | HTTP API from Next.js |
+| Available connectors | **Do not assume** full managed connector set without evidence | Drive/Notion/Gmail/GitHub-class connectors documented |
+| Stable-ID behaviour | Unknown mapping to Cortaix without adapter work | customId/document ids documented; mapping still Cortaix-owned |
+| Search output | Unknown without deeper OSS API audit | Search/profile APIs; risk of prompt-ready profiles |
+| Deletion/export evidence | Unknown parity with managed | Forget APIs + resets documented; attestation unknown |
+| Best permitted role | Watchlist local engine | `ConnectorIngestionPort` watchlist (+ PoC-D) |
+| Core hard gates | fail G1/G8 | fail G1/G8; G4 fail for sensitive unconditional sync |
+| Evidence completeness | see §10.11 | see §10.12 |
+| Lock-in | 2 | 3–4 if connectors+memory couple |
+| Final outcome | `watchlist` | `watchlist` + PoC-D; reject as canonical memory |
 
----
+## 15. Build-versus-reuse decomposition (22 components)
 
-## 15. Build-versus-reuse decomposition
+| # | Component | Native responsibility | Reuse candidate | Decision | Reason | Hard-gate dependency | PoC required | Implementation-stage owner |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Canonical assertion store | PostgreSQL assertions | — | `build_native` / `reject_external_ownership` | Gate 1 | G1 | no | Stage 16 schema/Gateway |
+| 2 | Trust and lifecycle | Orthogonal axes engine | — | `build_native` / `reject_external_ownership` | Stage 8 | G1,G8 | no | Stage 16 |
+| 3 | Extraction assistance | Gateway-owned LLM/heuristic | LLM HTTP; not Mem0-as-authority | `build_native` + `optional_external_adapter` | Stage 10 | G4 | no | Stage 16 |
+| 4 | Deduplication | Native pipeline | — | `build_native` | Coupled to trust | G1 | no | Stage 16 |
+| 5 | Conflict detection | Native pipeline | — | `build_native` | Stage 10/12 | G8 | no | Stage 16 |
+| 6 | Entity extraction | Native + LLM assist | — | `build_native` | Stage 11 | G1 | no | Stage 16 |
+| 7 | Entity resolution | User decisions canonical | — | `build_native` | Stage 11 | G1 | no | Stage 16 |
+| 8 | Relationship projection | Native SQL primary | Graphiti derived | `build_native` + `proof_of_concept_required` | Edges ≠ truth | G1,G8 | **yes PoC-B** | Stage 16+ |
+| 9 | Temporal graph | Not required v1 | Graphiti/Zep derived | `defer` | Stage 11 Option E | G1 | only if promoted | Stage 16+ |
+| 10 | Embedding generation | Pinned HTTP/local clients | OpenAI-compatible | `reuse_standard_library` | Commodity | G7 | no | existing/Stage 16 |
+| 11 | Vector indexing | pgvector primary | Mem0 optional | `build_native` + `proof_of_concept_required` | Fallback native | G6,G7 | **yes PoC-A** | Stage 16+ |
+| 12 | Full-text search | Postgres FTS | — | `build_native` | Stage 12 channel | G8 | no | Stage 16 |
+| 13 | Exact search | SQL | — | `build_native` | — | G8 | no | Stage 16 |
+| 14 | Hybrid fusion | WRRF×policy | — | `build_native` / `reject_external_ownership` | Stage 12 | G8 | no | Stage 16 |
+| 15 | Reranking | Noop interface | Unnamed HTTP APIs | `proof_of_concept_required` | Optional | G4,G8 | **yes PoC-C** | Stage 16+ |
+| 16 | Context packing | Native packer | — | `build_native` / `reject_external_ownership` | Stage 12 | G8 | no | Stage 16 |
+| 17 | Conversation summaries | Derived until confirmed | — | `build_native` | Confirm-before-trust | G1 | no | Stage 16 |
+| 18 | Document ingestion | Existing pipeline | LlamaIndex watchlist only | `build_native` | No package selected | G1 | no | existing/Stage 16 |
+| 19 | Connectors | Later native or adapter | Supermemory managed | `defer` / `managed_service_candidate` | After core | G1,G4,G5 | **PoC-D if pursued** | Stage 16+ |
+| 20 | Observability | Metrics/traces | OTEL libs | `reuse_standard_library` | Commodity | — | no | ongoing |
+| 21 | Influence and provenance | Native recorder | — | `build_native` | Stage 12 | G8 | no | Stage 16 |
+| 22 | Evaluation tooling | Cortaix golden sets | Public datasets as data | `build_native` | Stage 15 | — | no | Stage 15 |
 
-Unchanged decisions: native for assertion/trust/fusion/packing; Mem0/Graphiti/rerank/connectors PoC-gated or watchlist; no graph DB required for v1.
 
----
+## 15A. Performance assessment
+
+Evidence labels: `documented_measurement | vendor_benchmark | research_benchmark | estimated | unknown`.
+
+| Concern | Native PG/pgvector | Mem0 (optional channel) | Graphiti/Zep graph (optional) | Evidence type |
+| --- | --- | --- | --- | --- |
+| Write latency | Row insert fast; embedding adds cost | Async/eventual add patterns exist on managed | LLM extraction heavy per episode | estimated; vendor docs for patterns |
+| Retrieval latency | Stage 12 designs low–medium for Option B | Vendor sub-50ms-class claims for platform — **not measured here** | Sub-200ms claims — **not measured here** | vendor_benchmark / estimated |
+| Background processing delay | Needs durable workers (designed) | Vendor-side for managed | Required for graph construction | estimated |
+| Cold starts | Next.js route cold starts apply | HTTP client cold start minor | Python+graph DB cold start significant | estimated |
+| Serverless suitability | Request path OK; long jobs must be workers | HTTP OK as optional | Poor for in-request Python+Neo4j | estimated |
+| Graph update cost | N/A native v1 | N/A unless graph memory enabled | High (LLM+DB) | estimated |
+| Reindex cost | PG rebuild jobs | Re-push derived index | Full graph rebuild expensive | estimated |
+| Failure recovery | Native path continues if adapters optional | Must timeout and degrade | Must skip channel | estimated (target); partially_implemented today for Mem0 path |
+| Large-vault behaviour | Needs Stage 15 soak | Unknown at Cortaix scale | Unknown at Cortaix scale | unknown |
+| Document ingestion throughput | Existing chunk/embed path; not soak-tested | N/A for memory index role | N/A | estimated / unknown |
+| Query fan-out | Parallel channels in Stage 12 design | +1 optional channel | +1 optional channel | estimated |
+| External LLM-call dependency | Extraction/optional rerank only | Managed may hide model calls | High for graph construction | estimated |
+| Stage 12 latency compatibility | Designed for Option B | Acceptable **only** if timed out and optional | Optional only | estimated |
+
+Unsupported vendor latency claims are **not** treated as facts. Do not compare LongMemEval/DMR numbers as Cortaix packing quality.
+
+
+## 15B. Lock-in and exit analysis
+
+**Maximum acceptable dependency depth = 1** optional derived system behind a port, always rebuildable from PostgreSQL.
+
+| Candidate | External data stored | Raw content retained | Embedding export | Graph export | Stable IDs | History/provenance export | Correction survival | Deletion verification | Canonical rebuild path | Migration difficulty | Max depth | Lock-in 0–5 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: |
+| Native | PostgreSQL (+ Storage bytes) | yes | yes | n/a (native) | yes (assertion ids) | yes | yes | yes | n/a | low | 0 | 0 |
+| Mem0 OSS | vectors/history store | configurable | depends on backend | if graph enabled | mem0 ids | partial | via canonical | conditional | from PG | medium | 1 | 1–2 |
+| Mem0 managed | vendor store | vendor | unknown | Pro graph unknown | mem0 ids | unknown | via canonical | conditional | from PG | medium–high | 1 | 3 |
+| Graphiti OSS | graph DB | episodes | model-dependent | yes in DB | graph UUIDs | strong in graph | must mirror decisions in PG | conditional | from assertions | high | 1 | 2–3 |
+| Zep managed | managed graph/context | yes | unknown | unknown | zep ids | vendor | via canonical | unknown | from PG | high | 1 | 4 |
+| Cognee OSS | self-host stores | yes if configured | depends | depends | cognee ids | unknown | via canonical | conditional | from PG | medium–high | 1 | 2 |
+| Cognee managed | vendor cloud | yes | unknown | unknown | vendor ids | unknown | via canonical | unknown | from PG | high | 1 | 3 |
+| Letta OSS | agent state | yes | n/a | n/a | agent ids | agent-centric | poor fit | unknown | rewrite product | severe | 2+ | 5 |
+| Letta managed | hosted agent state | yes | n/a | n/a | agent ids | agent-centric | poor fit | unknown | rewrite product | severe | 2+ | 5 |
+| LangGraph/LangMem | BYO / LangGraph store | depends | depends | n/a | framework keys | partial | via canonical if mapped | conditional | from PG | medium | 1 | 2 |
+| Supermemory OSS | local/self-host store | yes if configured | unknown | unknown | sm ids | unknown | via canonical | unknown | from PG | medium–high | 1 | 2 |
+| Supermemory managed | vendor cloud | yes | unknown | unknown | sm ids | partial APIs | via canonical | soft-forget | from PG | high | 1 | 3–4 |
+| LlamaIndex | BYO stores if used | depends | depends | n/a | framework ids | partial | via canonical | conditional | from PG | medium | 1 | 1 |
 
 ## 16. Proof-of-concept specifications
 
@@ -1407,17 +1721,76 @@ Letta/Zep/Mem0/Supermemory as canonical truth; WRRF replacement; remote-text-aut
 
 ---
 
-## 17. Security analysis
+## 17. Security analysis (≥25 framework-adoption threats)
 
-Prior ≥33 threats remain applicable (cross-user, remote text authority, stale derived, incomplete purge, disclosure leaks, embed drift, agent writes, graph-as-truth, conflict collapse, opaque rerank, outage, license/pricing/termination, supply chain, Python expansion, dual-write divergence, etc.).
+| # | Threat | Candidate types affected | Architectural protection | Operational protection | Residual risk | Stage 14 question | Stage 15 test |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Cross-user retrieval | Managed/OSS indexes, connectors | Gateway forces Cortaix userId; ignore unmapped hits | Key rotation; scoped keys | Confused deputy / vendor bugs | Can vendor filters be bypassed? | Isolation suite |
+| 2 | Vendor tenant-filter failure | Managed APIs | Never trust filter-only; map IDs then RLS reload | Audit sampling | Vendor bug | Prove server-side isolation? | Cross-tenant probe |
+| 3 | Remote text becoming authoritative | Mem0/Zep/Supermemory/LangMem | Forbid remote-text fallback; ID-only ports | Lint/tests | Code regression | Is reconcile always on? | No-text-authority test |
+| 4 | Stale external facts | All derived | Eligibility from canonical timestamps/status | Rebuild jobs | Sync lag | How stale is acceptable? | Staleness SLA test |
+| 5 | Deleted canonical still retrievable externally | All derived | Deletion coordinator; suppress on canonical miss | Verify deletes | Soft-delete gaps | Is purge confirmed? | Deleted-record suppression |
+| 6 | Incomplete purge | Managed | Track per-system deletion state | Manual attest | Unknown retention | Contractual purge? | Purge evidence test |
+| 7 | Query secret leakage | All external calls | QueryDisclosureService deny | Redaction of logs | Side channels | Purpose matrix complete? | Disclosure deny test |
+| 8 | Provider-restricted evidence leakage | External index/rerank/infer | Evidence disclosure flags | Policy monitors | Mis-tagging | BYOK bypass attempts? | Evidence disclosure test |
+| 9 | Embedding-space drift | Managed embedders | Pin space_id; reject cross-space | Version monitors | Silent vendor change | Who controls model? | Drift detection |
+| 10 | Silent model changes | Managed | Contract pins; health checks | Vendor notices | Undetected change | Can we detect? | Canary embeddings |
+| 11 | Unversioned retrieval changes | Managed | Cortaix `retrieval_policy_version` | Changelogs | Vendor rerank drift | Freeze fusion locally? | Version pin test |
+| 12 | Framework-owned trust decisions | Agent runtimes / memory platforms | Trust only via Gateway | Reject agent self-write paths | Heuristic leakage | Hot-path tools? | Write-path conformance |
+| 13 | Agent-autonomous writes | Letta/LangMem tools | Proposals only through Gateway | Disable tools | Bypass attempts | Can writes bypass validation? | Tool-write injection test |
+| 14 | Always-visible memory bypass | Profiles / framework injection | Stage 12 ranked channels + budget | — | Force-inject regressions | Profile force-inject gone? | Packing budget test |
+| 15 | Prompt injection via framework context | Prompt-ready APIs | Untrusted rendering | — | Delimiter failures | Structured delimiters sufficient? | Injection corpus |
+| 16 | Graph edges treated as truth | Graphiti/Zep/Cognee | Edges derived; assertions decide | — | Graph-only answers | Graph influences trust? | Conflict vs edge test |
+| 17 | Conflict collapse | Summarizers / managed memory | ConflictContextService | — | Merged opposites | Summaries collapsing conflicts? | Conflict preservation |
+| 18 | Historical facts as current | Temporal graphs | Temporal eligibility axes | — | Invalidated edge leakage | Invalid windows enforced? | Temporal correctness |
+| 19 | Opaque reranker behaviour | Rerank APIs | Optional; cannot change eligibility | Log features | Promoting ineligible | Bound effect enough? | Eligibility-after-rerank |
+| 20 | Benchmark overfitting | Vendor marketing | Own golden set; don’t select on benches | — | Eval harness bias | Own set adequate? | Cortaix eval |
+| 21 | Vendor outage | Managed | Optional channel; native continue | Status pages | Timeout misconfig | Timeouts correct? | Outage fallback |
+| 22 | Rate limiting | Managed | Backoff; degrade | Budgets | User-visible errors | Budgets set? | Rate-limit soak |
+| 23 | API-version retirement | Managed | Adapter version pins | Contract watch | Forced upgrades | Pin strategy? | Contract watch |
+| 24 | Licensing changes | OSS + hosted | Pin versions; legal review | Watch | Fork/exit cost | License watch process? | License watch |
+| 25 | Pricing changes | Managed | Caps; native fallback | Finance alerts | Sudden TCO jump | Caps enforced? | TCO revisit |
+| 26 | Service termination | Managed | Exit/rebuild plan | Backups | Incomplete exit | Exit drill ready? | Exit drill |
+| 27 | Export incompleteness | Managed | Canonical export from PG | — | Missing provenance | Export parity? | Export parity test |
+| 28 | Migration lock-in | Dual-write systems | Single canonical; derived disposable | — | Depth creep | Depth still ≤1? | Rebuild test |
+| 29 | Supply-chain compromise | OSS deps / Python services | Minimal deps; pin hashes | SBOM/audits | Transitive risk | SBOM process? | SBOM review |
+| 30 | Self-host configuration exposure | OSS servers | Private networks; secrets | Hardening checklist | Misconfig | Hardening done? | Hardening checklist |
+| 31 | Python service expansion | Graphiti/Cognee/Mem0 OSS | Isolate workers; not in Next request path | — | Surface growth | Boundary clear? | Boundary review |
+| 32 | Background-worker failure | All async | Durable outbox; idempotency | — | Lost jobs | Outbox sufficient? | Retry/idempotency tests |
+| 33 | Duplicate canonical and external writes | Hybrid adapters | Idempotent mapping keys | — | Divergence | Dual-write safe? | Dual-write divergence test |
 
----
+## 18. Worked adoption scenarios (≥25)
 
-## 18. Worked adoption scenarios
+Format per scenario: setup → candidate/port → hard-gate implications → Cortaix behaviour → fallback → deletion/disclosure/provenance where relevant → adoption implication.
 
-Prior ≥25 scenarios remain applicable (native-only; unmapped Mem0 text discarded; deleted suppress; outage fallback; disclosure deny; graph false edge; account delete; Python workers; pricing triple; prompt-ready refuse; connector untrusted intake; rebuild; eng-cost vs differentiation).
-
----
+1. **Native-only retrieval** — Setup: adapters off. Port: native channels. Gates: all native. Behaviour: WRRF×policy → pack. Fallback: n/a. Implication: validates Recommendation B core path.  
+2. **Mem0 returns remote text without canonical ID** — Port: ExternalMemoryIndexPort. G2/G8: fail if packed. Behaviour: discard hit; log. Fallback: other channels. Implication: PoC-A must prove zero remote-text packs.  
+3. **External framework returns deleted memory** — Derived index/graph. G5. Behaviour: canonical reload miss → suppress. Implication: deletion coordinator required before adapter enablement.  
+4. **External framework unavailable** — Any optional adapter. G6. Behaviour: skip channel; native succeeds. Implication: adapters must be optional.  
+5. **External provider changes embedding model** — Managed embed / Graphiti defaults. G7. Behaviour: space_id mismatch → disable channel; reindex. Implication: pin spaces or fail closed.  
+6. **Query disclosure denies external search** — Mem0/Graphiti/rerank. G4. Behaviour: zero egress. Implication: purpose matrix mandatory.  
+7. **Evidence may not leave Cortaix** — Highly sensitive assertions. G4. Behaviour: withhold from external index & providers; local-only pack possible. Implication: disclosure ≠ relevance override.  
+8. **Optional graph adapter is stale** — Graphiti. G1/G8. Behaviour: drop/low-weight channel; assertions still retrieve. Implication: derived only.  
+9. **Graph framework creates a false relationship** — Graphiti/Zep/Cognee. G1. Behaviour: no trust grant; need supporting assertions / user decision. Implication: edges ≠ truth.  
+10. **User corrects a memory** — Any derived. Behaviour: Gateway revision; derived indexes update async; old remote suppressed. Provenance: revision retained canonically. Implication: corrections survive in PG.  
+11. **User deletes their account** — All derived. G5. Behaviour: deletion coordinator purges PG + derived; Auth last. Implication: adapters without purge path blocked for sensitive use.  
+12. **User exports their vault** — Export API. Behaviour: export canonical PG; external optional. Implication: vendor export not required for user rights.  
+13. **Candidate has Python-only runtime** — Graphiti/Cognee/Mem0 OSS engine. Behaviour: isolate as worker or reject in-request. Implication: Next/Vercel boundary.  
+14. **Long-running workers on Vercel-hosted product** — Graph build / extraction. Behaviour: durable jobs off request thread. Implication: Stage 9 outbox before graph adapters.  
+15. **Managed service pricing triples** — Mem0/Zep/Supermemory/Cognee cloud. Behaviour: disable adapter; native continues. Implication: optional economics.  
+16. **Open-source project abandoned** — Any OSS adapter. Behaviour: remove adapter; rebuild from PG. Implication: depth ≤1 + rebuild drills.  
+17. **License changes** — OSS/hosted. Behaviour: legal review; freeze version; prepare exit. Implication: pin commits.  
+18. **Strong benchmark, weak methodology** — Vendor crowns. Behaviour: ignore for selection; run own eval. Implication: benches ≠ adoption.  
+19. **Excellent retrieval, weak deletion** — Managed candidates. G5. Behaviour: reject for sensitive data until attestation. Implication: deletion gates binding.  
+20. **Prompt-ready context violates Stage 12 packing** — Zep `memory.get`, LlamaIndex Memory merge, profiles. G8. Behaviour: refuse interface; demand candidate IDs. Implication: reject as retrieval authority.  
+21. **Candidate used only as optional reranker** — Reranker APIs. Port: RetrievalReranker. Behaviour: noop on deny/outage. Implication: PoC-C; vendor pin required.  
+22. **Connectors Cortaix would otherwise build** — Supermemory managed. Port: ConnectorIngestionPort. Behaviour: untrusted intake only. Implication: PoC-D; no write authority.  
+23. **External graph rebuildable from PostgreSQL** — Graphiti. Behaviour: drop DB; rebuild. Implication: acceptable depth 1.  
+24. **Exit migration from current Mem0 integration** — Current hybrid [S2]. Behaviour: stop dual-write; backfill embeddings; remove remote-text path; delete vendor data; optional later PoC-A. Implication: current path not production-final.  
+25. **Native costs more engineering time but preserves differentiation** — Native vs managed cores. Behaviour: accept eng TCO under B. Implication: hard gates > vendor convenience.  
+26. **Dual-write divergence** — Mem0+PG. Behaviour: canonical wins; repair jobs. Implication: Stage 14 red-team dual-write.  
+27. **Reranker receives disclosure-denied snippets** — PoC-C. Behaviour: omit or skip rerank. Implication: evidence disclosure test.  
+28. **Connector syncs sensitive Drive folder** — PoC-D. Behaviour: default deny; no sync. Implication: source-class policies.
 
 ## 19. Decision outcomes
 
@@ -1471,30 +1844,28 @@ Corrected scoring does not override hard-gate failures.
 
 ### 21.1 Candidate matrix
 
-| Candidate | Core gates | Core weighted | Best port | Role score | Evidence % | Verdict |
-| --- | --- | ---: | --- | --- | ---: | --- |
-| Native | pass target | 91.4 | core | 91.4 | 100 | adopt core |
-| Mem0 OSS | fail | 43.6 | ExternalMemoryIndexPort | 63.6 | 80 | PoC-A |
-| Mem0 managed | fail | 45.2 | ExternalMemoryIndexPort | 58.2 | 60 | watchlist |
-| Graphiti OSS | fail | 43.8 | Projection | 63.8 | 90 | PoC-B |
-| Zep managed | fail | 45.0 | none required | — | 70 | reject core |
-| Cognee OSS | fail | 40.8 | watchlist | 60.8 | 80 | watchlist |
-| Cognee managed | fail | 37.4 | — | — | 50 | watchlist |
-| Letta OSS | fail | 19.8 | — | — | 75 | reject |
-| Letta managed | fail | 20.8 | — | — | 50 | reject |
-| LangGraph/LangMem | fail | 33.8 | inspiration | 44.6 | 88 | reject core |
-| Supermemory OSS | fail | 47.4 | watchlist | — | 64 | watchlist |
-| Supermemory managed | fail | 43.0 | ConnectorIngestionPort | 54.2 | 73 | watchlist/PoC-D |
-| LlamaIndex | fail | 44.0 | doc watchlist | 66.4 | 100 | watchlist |
-| Memobase | fail | 38.4 | — | — | 70 | watchlist |
-| HippoRAG | fail | 44.6 | research | — | 100 | watchlist |
-| Reranker APIs | fail store | 35.0 | RetrievalReranker | 63.8 | 75 | PoC-C |
+| Candidate | Core hard gates | Core weighted | Evidence completeness | Implementation/deployment relevance | Best permitted role | Role-specific score | Role-specific gates | Lock-in | TCO status | PoC requirement | Verdict |
+| --- | --- | ---: | ---: | --- | --- | --- | --- | ---: | --- | --- | --- |
+| Native Cortaix | pass (target) | 91.4 | 100% | Partial impl; Stage 8–12 mostly designed_not_implemented | Core platform | 91.4 | target pass | 0 | Eng-heavy; vendor $0 | none for core | `adopt_as_core_dependency` |
+| Mem0 OSS | fail | 43.6 | 80% | Current hybrid exists; unsafe remote-text | ExternalMemoryIndexPort | 63.6 | conditional | 1–2 | Ops+model; no SaaS | **PoC-A** | `proof_of_concept_before_decision` |
+| Mem0 managed | fail | 45.2 | 60% | Optional SaaS | ExternalMemoryIndexPort | 58.2 | conditional | 3 | S@100% search > Starter; M/L often > Pro; overage unknown | none (watchlist) | `watchlist` |
+| Graphiti OSS | fail | 43.8 | 90% | Not integrated | Relationship/EntityProjection | 63.8 | conditional | 2–3 | Infra+LLM | **PoC-B** | `proof_of_concept_before_decision` |
+| Zep managed | fail | 45.0 | 70% | Not integrated | none required | not_scored as core substitute | fail prompt-context core | 4 | credits_per_episode unknown | none | `reject_for_cortaix` as core |
+| Cognee OSS | fail | 40.8 | 80% | Not integrated | watchlist derived | 60.8 proj card | conditional | 2 | Self-host | none until port named | `watchlist` |
+| Cognee managed | fail | 37.4 | 50% | Not integrated | none now | not_scored_for_this_role | fail core | 3 | tokens_per_write unknown | none | `watchlist` |
+| Letta OSS | fail | 19.8 | 75% | Not integrated | none | not_scored_for_this_role | fail | 5 | Product fork | none | `reject_for_cortaix` |
+| Letta managed | fail | 20.8 | 50% | Not integrated | none | not_scored_for_this_role | fail | 5 | Product fork; price unknown | none | `reject_for_cortaix` |
+| LangGraph/LangMem | fail | 33.8 | 88% | Not integrated | inspiration only | 44.6 extract card | fail core | 2 | Python tax | none | `reject_for_cortaix` as core |
+| Supermemory OSS | fail | 47.4 | 64% | Not integrated | watchlist engine | not_scored_for_connectors | fail core | 2 | Self-host ops | none | `watchlist` |
+| Supermemory managed | fail | 43.0 | 73% | Not integrated | ConnectorIngestionPort | 54.2 | conditional | 3–4 | Plan prices known; SM-token map unknown | **PoC-D** if pursued | `watchlist` |
+| LlamaIndex | fail | 44.0 | 100% | Not a dependency today | doc tooling watchlist | 66.4 | fail memory core | 1 | OSS | none (no package selected) | `watchlist` |
+| Memobase | fail | 38.4 | 70% | Not integrated | none | not_scored_for_this_role | fail | 2 | unknown | none | `watchlist` |
+| HippoRAG | fail | 44.6 | 100% | Research only | research ideas | not_scored_for_this_role | fail | 0–1 | eng | none | `watchlist` |
+| Reranker APIs | fail as store | 35.0 | 75% | Not integrated | RetrievalReranker | 63.8 | conditional | 1 | unknown until vendor pin | **PoC-C** | `proof_of_concept_before_decision` |
 
 ### 21.2 Component matrix
 
-Native for assertions/trust/fusion/packing/influence/FTS; pgvector primary; Mem0/Graphiti/rerank/connectors PoC-gated or watchlist; LlamaIndex no package selected.
-
----
+See §15 (22-component build-versus-reuse matrix) for native/reuse/decision/PoC ownership.
 
 ## 22. Invariants
 
@@ -1511,37 +1882,117 @@ Prior invariants 1–25 retained, plus:
 
 ---
 
-## 23. Acceptance delta
+## 23. Acceptance questions (all 38 answered)
 
-Score rationales added (§8A–9). Evidence completeness redefined and ledgers completed (§2.5, §10). Native evidence % ≠ implementation readiness (§4.3, §10.1). Independence fields corrected (§3). Benchmark sources S22–S29 added; audit-depth fields present (§13). Extraction calls calculated; document chunks calculated with low-confidence assumptions (§12). Zep symbolic credits; Cognee sensitivity math; Supermemory unresolved usage (§12.3–12.5). PoC-B/C/D complete (§16). Recommendation B retained.
-
----
+1. **Native baseline?** PostgreSQL/Supabase/pgvector/FTS(planned) + native Stage 8–12 services (§6).  
+2. **Current Mem0?** Hybrid derived index with remote-text fallback, null embeddings, no disclosure gate, no PG degrade (§4.2) [S2].  
+3. **Strategic differentiation?** Trust/lifecycle/disclosure/conflict/WRRF packing/influence/provider independence.  
+4. **Commodity?** Embed HTTP clients, PDF parse, optional rerank, OTEL, later connectors.  
+5. **Pass all hard gates as core?** Only Native (target architecture).  
+6. **Fail as canonical memory layers?** All external complete platforms/runtimes evaluated (§7.1).  
+7. **Valid narrow adapters?** Mem0 OSS (PoC-A), Graphiti (PoC-B), rerankers (PoC-C), Supermemory connectors (PoC-D/watchlist).  
+8. **Best temporal graphs?** Graphiti OSS (then Zep managed) — **derived only**, not authority.  
+9. **Best retrieval-only reuse?** Optional rerankers + native PG channels; LlamaIndex patterns watchlist for docs.  
+10. **Best connectors?** Supermemory managed among evaluated set (watchlist).  
+11. **Python services?** Mem0 OSS engine, Graphiti, Cognee, LangMem, HippoRAG, Memobase.  
+12. **Fit Next.js/Vercel?** Native TS + HTTP adapters; avoid in-request Python/Neo4j.  
+13. **Long-running workers?** Graphiti/Cognee/Mem0 extraction; Stage 9 outbox.  
+14. **Self-hostable?** Mem0 OSS, Graphiti, Cognee OSS, Letta (rejected), Supermemory OSS claims, LlamaIndex.  
+15. **Self-host ops cost?** Non-trivial (DB/graph/LLM keys/upgrades/on-call) — not free.  
+16. **Managed-only?** Zep primarily managed; several cloud offerings.  
+17. **Stable canonical IDs?** Only if Cortaix metadata mapping enforced; vendor IDs alone insufficient.  
+18. **Opaque prompt-ready text?** Zep `memory.get`, LangMem/LlamaIndex memory merge, many managed defaults.  
+19. **Permit Cortaix-owned ranking?** Only ID/score candidate APIs — not prompt blobs.  
+20. **Permit Cortaix-owned packing?** Same — candidates in, packer out.  
+21. **Deletion/purge?** Native yes (target); Mem0 APIs exist but attestation unknown; many managed soft-delete.  
+22. **Export?** Native canonical export; vendor export often incomplete/unknown.  
+23. **Acceptable licensing?** Apache-2.0/MIT generally OK pending legal review; hosted ToS separate.  
+24. **Unacceptable lock-in?** Letta runtime (5); Zep/Supermemory as primary memory (3–4).  
+25. **Unverified claims?** Sub-50ms/sub-200ms; benchmark crowns; enterprise purge SLAs; isolation guarantees; `credits_per_episode`; SM-token map.  
+26. **Cost ranges at three scales?** §12 workload math + buckets.  
+27. **Most important unknowns?** Purge attestation; managed embed pins; enterprise prices; Mem0 retention; dual-write divergence; credits_per_episode; tokens_per_write measured.  
+28. **PoC necessary?** PoC-A/B/C; PoC-D if connectors pursued.  
+29. **PoC unnecessary?** Letta/Zep/Mem0 as canonical; WRRF replacement; remote-text authority designs.  
+30. **Current Mem0 disposition?** Harden or disable; migrate to optional adapter after PoC-A; remove remote-text authority (§20.4).  
+31. **Build regardless of framework?** §15 native rows (assertions, trust, fusion, packing, disclosure, deletion, influence, entities).  
+32. **Avoid building?** Competing agent runtime; mandatory Neo4j for v1; vendor trust engines; prompt-ready memory platforms as core.  
+33. **Recommendation?** **B** — native canonical core + optional ports; no provider selected now.  
+34. **What could reverse?** Independent hard-gate-safe primary derived engine with verified purge/isolation **and** proven inability to deliver native Stage 12 — not demonstrated.  
+35. **Stage 14 must attack?** §24 red-team list.  
+36. **Stage 15 must test?** §24 test list.  
+37. **Stage 16 sequencing?** Native ports first; adapters after PoCs; dedicated PRs for deps.  
+38. **Stage 17 preserve?** All invariants §22 and hard gates; no framework may reopen Stages 7–12.
 
 ## 24. Stage 14 / 15 / 16–17 handoffs
 
-Stage 14 red-teams B, dual-write, purge, score subjectivity, adapter surface. Stage 15 runs conformance + pins reranker vendor before PoC-C. Stage 16 native first; adapters after PoCs. Stage 17 preserves invariants. **No implementation authorized.**
+### 24.1 Stage 14 — red-team questions (individual)
 
----
+1. Is Recommendation B biased toward Stages 7–12 because they already exist (architecture-confirmation bias)?  
+2. Are native engineering and on-call costs understated (§6/§12)?  
+3. Are managed operational advantages understated?  
+4. Are privacy/isolation guarantees for adapters assumed rather than proven?  
+5. Is canonical reconciliation realistic under vendor API partial failures?  
+6. Can an optional adapter quietly become mandatory via product defaults?  
+7. Does dual-writing create unrecoverable divergence?  
+8. Can vendor scores/summaries leak into trust decisions through UI or heuristics?  
+9. Are deletion and purge guarantees strong enough for GDPR-class expectations?  
+10. Are benchmark comparisons invalid across methodologies?  
+11. Is the adapter boundary too complex versus “just native”?  
+12. Does Recommendation B create too much operational surface if Graphiti+Mem0+rerank+connectors all land?  
+13. Should Mem0 be removed entirely rather than hardened?
+
+### 24.2 Stage 15 — required tests (individual)
+
+1. Adapter conformance (ID-only, timeouts)  
+2. Canonical ID reconciliation  
+3. Deleted-record suppression  
+4. Cross-user isolation  
+5. Query-disclosure enforcement  
+6. Evidence-disclosure enforcement  
+7. Embedding-version drift  
+8. Outage fallback  
+9. Rebuild from PostgreSQL  
+10. Export parity  
+11. Purge verification  
+12. Latency budgets vs Stage 12  
+13. Cost metering  
+14. Retrieval quality on Cortaix golden set  
+15. Conflict preservation  
+16. Temporal correctness  
+17. Prompt-injection resistance  
+18. Framework version upgrade safety  
+19. Exit migration drill  
+20. (Before PoC-C) Pin reranker provider, model/version, pricing source, retention posture
+
+### 24.3 Stages 16–17
+
+1. **Framework work sequencing:** Only after native Stage 8–12 ports exist; optional adapters phased.  
+2. **First adapter candidates:** Harden/disable current Mem0 path; noop `RetrievalReranker` interface; then PoC-A/B/C as approved.  
+3. **Integrations that wait:** Graphiti production, connectors, managed Mem0 default, Cognee, Supermemory as memory core, LlamaIndex packages.  
+4. **Dependency-addition PR requirements:** Any `mem0ai`, graphiti, neo4j/falkor, cohere/voyage, supermemory SDK, etc. needs a dedicated PR.  
+5. **PoCs required before adoption:** PoC-A before Mem0 optional enablement; PoC-B before graph projection; PoC-C before reranker vendor; PoC-D before connector vendor.  
+6. **Reversibility requirements:** Feature flags; rebuild scripts; depth ≤1; disposable derived data.  
+7. **Changes not yet authorized:** Schema migrations, provider code changes, dependency adds, prompt changes, removing remote-text fallback in code, turning on adapters — implementation stages only after reviews.
 
 ## 25. Final report checklist
 
-1. Category score-evidence tables added for core and scored adapter roles.  
-2. Evidence completeness = adjudicated/total.  
-3. Native evidence 100% with separate §4.3 implementation matrix.  
-4. All candidate ledger percentages visible above.  
-5. S1/S2/S21 independently_corroborated = no.  
-6. Benchmark sources S22–S29 mapped to rows.  
-7. actually_reproduced = no for all.  
-8. Extraction S/M/L totals calculated.  
-9. Document-chunk assumptions and totals calculated (low confidence).  
-10. Zep unresolved; Cognee bands shown; Supermemory usage unresolved.  
-11–13. PoC-B/C/D complete.  
-14. Recommendation B supported.  
-15. Unknowns: purge attestations, credits_per_episode, tokens_per_write measured, SM-token map, reranker vendor pin.  
-16. Safe to merge as draft docs after review.  
-17. Stage 14 may begin after review (red-team only).
-
----
+1. Document is **self-contained**; normative sections do not depend on earlier unmerged drafts.  
+2. Score arithmetic and category rationales retained.  
+3. Claim ledgers and evidence-completeness formula retained.  
+4. Port contracts fully restored (§11).  
+5. 22-component matrix restored (§15).  
+6. Performance assessment restored (§15A).  
+7. Lock-in/exit analysis restored (§15B).  
+8. ≥33 explicit security threats (§17).  
+9. ≥28 worked scenarios (§18).  
+10. All 38 acceptance questions answered (§23).  
+11. Stage 14–17 handoffs detailed (§24).  
+12. Final matrix includes lock-in, TCO, PoC fields (§21).  
+13. Benchmark sources corrected (S25a/b/c, S27, S28, S29).  
+14. Recommendation B remains supported; no provider selected now.  
+15. Safe to merge as draft docs after architecture review.  
+16. Stage 14 may begin after review (red-team only).  
+17. No implementation authorized.
 
 ## 26. Document control
 
@@ -1551,3 +2002,10 @@ Stage 14 red-teams B, dual-write, purge, score subjectivity, adapter surface. St
 | Providers selected now | None |
 | Next stage | 14 — red-team |
 | PR posture | Draft documentation only |
+
+---
+
+## 27. Document history (non-normative)
+
+Earlier PR draft revisions (including `496569da…`) were used only as **donors** to restore substantive sections omitted by summarization. **Only this file is normative for merge.** Phrases such as “unchanged from prior revision” are not used for required content.
+
