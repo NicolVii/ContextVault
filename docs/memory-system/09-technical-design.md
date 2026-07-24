@@ -7,7 +7,7 @@
 
 Stages 1–8 are treated as **complete** even if `00-roadmap.md` status text lags. Prior reports are **not** edited. Disagreements with Stages 7–8 are recorded in §45 rather than silently changed.
 
-This document is **self-contained**. Required design content is stated here directly. It incorporates the security and schema corrections for Gateway-only mutation, backend-only turn completion, same-assertion revision binding, purge/tombstones, blocked intake, provenance source-deletion, turn-message idempotency, non-inventive legacy mapping, deletion survivability, actor identity, semantic link uniqueness, constrained jobs, embedding-space registry, worker ingestion, forbidden-secret non-storage, intake-to-assertion link table, namespaced idempotency, honest 1536-d embedding rules, distinct `extract_document_candidates` jobs, and split assertion vs document-chunk embedding result commands.
+This document is **self-contained**. Required design content is stated here directly. It incorporates the security and schema corrections for Gateway-only mutation, backend-only turn completion, same-assertion revision binding, purge/tombstones, blocked intake, provenance source-deletion, turn-message idempotency, non-inventive legacy mapping, deletion survivability, actor identity, semantic link uniqueness, constrained jobs, embedding-space registry, worker ingestion, forbidden-secret non-storage, intake-to-assertion link table, namespaced idempotency, honest 1536-d embedding rules, distinct `extract_document_candidates` jobs, split assertion vs document-chunk embedding result commands, and atomic vector delivery inside those embedding result commands.
 
 ---
 
@@ -461,8 +461,15 @@ Compatibility writes go through Gateway adapter RPCs only.
 | `p_job_id` | Durable job id |
 | `p_worker_id` | Lease owner string |
 | `p_user_id` | Target user (must match job) |
-| `p_command` | Allowlisted `worker_command_type` payload (jsonb) |
+| `p_command` | Allowlisted `worker_command_type` payload (jsonb). Embedding result commands may include `embedding` as a JSON number array (see vector contract below). |
 | `p_command_idempotency_key` | Command key under `(user_id, key)` |
+
+**Embedding vector transport contract (normative — one exact choice):**
+
+1. Application workers pass `embedding?: number[]` inside the `mark_*_embedding_result` command object.  
+2. SQL `gateway_execute_worker_command` receives that array as part of `p_command` jsonb.  
+3. Inside the DEFINER RPC, the array is validated then converted to `vector(1536)` and written to the embedding table in the **same transaction** as `state` / `error_code`.  
+4. There is **no** separate typed `p_embedding` argument and **no** pre-write of the vector outside this RPC.
 
 **Verification order (all required):**
 
@@ -510,9 +517,19 @@ Compatibility writes go through Gateway adapter RPCs only.
 1. `job_type = 'embed_assertion'`.  
 2. `subject_type='assertion'` and `subject_id = command.assertionId`.  
 3. `revisionId` belongs to that assertion (`(user_id, assertion_id, revision_id)`).  
-4. When `state='ready'`, `revisionId` must equal the assertion’s `current_revision_id`.  
-5. `embeddingSpace` matches the job payload and an active `embedding_spaces` row.  
-6. Mutates only `memory_embeddings` for that assertion/space — never document-chunk embedding rows.
+4. `embeddingSpace` matches the job payload and an **active** `embedding_spaces` row.  
+5. Mutates only `memory_embeddings` for that assertion/space — never document-chunk embedding rows.  
+6. **When `state='ready'`:**  
+   - `embedding` is required;  
+   - it contains exactly **1,536 finite numeric values** (reject NaN/±Infinity/non-numbers);  
+   - `errorCode` must be null/absent;  
+   - `revisionId` must equal the assertion’s `current_revision_id`;  
+   - RPC converts the JSON array to `vector(1536)` and upserts `embedding` + `state='ready'` + `error_code=NULL` + revision binding **atomically**.  
+7. **When `state='failed'`:**  
+   - `embedding` must be absent or null;  
+   - `errorCode` is required;  
+   - RPC sets `state='failed'` and `error_code` atomically and **does not write** the `embedding` column (an existing valid ready vector for a still-current revision is not overwritten by a failed command; a failed command whose revision is no longer current is rejected).  
+8. Workers must not write the vector outside this RPC and then call a second command to mark ready.
 
 ##### `mark_document_chunk_embedding_result`
 
@@ -520,9 +537,18 @@ Compatibility writes go through Gateway adapter RPCs only.
 2. `subject_type='document_chunk'` and `subject_id = command.chunkId`.  
 3. Chunk belongs to `command.documentId` and `p_user_id`.  
 4. `contentSha256` matches the current chunk content fingerprint.  
-5. `embeddingSpace` matches the job payload and registry.  
+5. `embeddingSpace` matches the job payload and an **active** registry row.  
 6. Stale, missing, or deleted chunks (or documents in a forbidding deletion workflow) cannot be marked `ready`.  
-7. Mutates only `document_chunk_embeddings` — never assertion embedding rows.
+7. Mutates only `document_chunk_embeddings` — never assertion embedding rows.  
+8. **When `state='ready'`:**  
+   - `embedding` is required with exactly **1,536 finite numeric values**;  
+   - `errorCode` must be null/absent;  
+   - RPC converts JSON → `vector(1536)` and stores vector + `state='ready'` + `error_code=NULL` + fingerprint **atomically**.  
+9. **When `state='failed'`:**  
+   - `embedding` must be absent or null;  
+   - `errorCode` is required;  
+   - RPC sets failed state/error atomically without writing `embedding`; does not clobber a still-valid ready vector for the current fingerprint; rejects if fingerprint is stale.  
+10. Workers must not pre-write the chunk vector then separately mark ready.
 
 ##### `transition_temporal`
 
@@ -536,14 +562,21 @@ Compatibility writes go through Gateway adapter RPCs only.
 - Model/system-generated assertions always enter as `trust='candidate'`, `authority_source='none'`, unless a separately recorded user approval decision already exists for that assertion (approval is a user RPC, not a worker command).  
 - Actor recorded as `actor_kind='worker'`.  
 
-**Atomicity:** intake decision (if any), assertion/revision/provenance/disclosure/link rows, `memory_intake_decision_assertions`, embedding result rows, `memory_command_results`, and follow-up job registration commit in one transaction. Replay returns the existing command result.
+**Atomicity:** intake decision (if any), assertion/revision/provenance/disclosure/link rows, `memory_intake_decision_assertions`, embedding vector+state rows, `memory_command_results`, and follow-up job registration commit in one transaction. Replay returns the existing command result (**ids/state/codes only — never the embedding vector**).
+
+**Embedding privacy / durability:**
+
+1. The embedding vector is derived numerical data, not raw user text; it may travel in the service-role RPC `p_command`.  
+2. It must **not** be copied into `durable_jobs.payload`, `memory_command_results.result_json`, audit metadata, or worker error metadata.  
+3. Job payloads continue to hold only IDs, hashes, embedding-space identity, and expected revision or fingerprint.
 
 **Cross-domain isolation:**
 
 1. A turn-extraction job cannot create a document-derived candidate.  
 2. A document-extraction job cannot create a conversational or inference candidate.  
 3. An assertion embedding job cannot mutate a document-chunk embedding.  
-4. A document-chunk embedding job cannot mutate an assertion embedding.
+4. A document-chunk embedding job cannot mutate an assertion embedding.  
+5. Vector write and `ready`/`failed` state always commit together; split “write vector then mark ready” is forbidden.
 
 ---
 
@@ -921,9 +954,11 @@ Physical column remains `vector(1536)`. Seed includes `legacy-unlabeled-1536` an
 **Unique:** `(user_id, assertion_id, embedding_space)`  
 **FK:** `(user_id, assertion_id, revision_id) → memory_assertion_revisions(user_id, assertion_id, id)` ON DELETE CASCADE  
 **Index:** ivfflat WHERE `state='ready'`  
-**RLS:** SELECT own; no client writes.  
-**Writers:** EmbeddingService via `gateway_execute_worker_command` sole mutator of `state` / `embedding` / `error_code` through leased `mark_assertion_embedding_result` (`job_type='embed_assertion'` only). Deletion purge steps delete rows.  
-**TX owner:** worker command TX verifying lease + assertion subject + current revision (when ready) before upsert. Document-chunk embedding jobs must never write this table.  
+**RLS:** SELECT own; no client writes; no direct service_role table UPDATE outside the worker Gateway RPC.  
+**Writers:** Sole mutator of `state` / `embedding` / `error_code` is leased `mark_assertion_embedding_result` inside `gateway_execute_worker_command` (`job_type='embed_assertion'` only). Deletion purge steps delete rows.  
+**TX owner:** one worker command TX validates lease + assertion subject + active space + vector dimensions (ready) or errorCode (failed), then writes vector+state atomically. Document-chunk embedding jobs must never write this table.  
+**Ready invariant:** `state='ready'` ⇒ `embedding IS NOT NULL` AND `vector_dims(embedding)=1536` AND `error_code IS NULL` AND revision is current.  
+**Failed invariant:** failed command never supplies a vector; RPC does not overwrite a still-valid ready vector when rejecting stale attempts.  
 **Stale rule:** revision advance marks ready→stale and enqueues rebuild for current revision only.  
 **Retrieval join:** `revision_id = current_revision_id AND state='ready' AND embedding_space = :pinned_space`.
 
@@ -984,9 +1019,11 @@ Physical column remains `vector(1536)`. Seed includes `legacy-unlabeled-1536` an
 **Unique:** `(user_id, chunk_id, embedding_space)`  
 **FKs:** `(user_id, document_id) → documents(user_id,id) ON DELETE CASCADE`; `(user_id, chunk_id) → document_chunks(user_id,id) ON DELETE CASCADE`  
 **Indexes:** ivfflat WHERE ready; `(user_id, document_id)`  
-**RLS:** SELECT own; no client writes.  
-**Writers:** DocumentService + MemoryIngestionGateway register `embed_document_chunk` jobs only (no embedding write). EmbeddingService via `gateway_execute_worker_command` sole mutator of `state` / `embedding` / `error_code` through leased `mark_document_chunk_embedding_result`. DeletionWorkflowService soft-deletes / purges during document deletion.  
-**TX owner:** worker command TX verifying lease + chunk subject + content fingerprint before upserting ready/failed. Assertion-embedding jobs must never write this table.  
+**RLS:** SELECT own; no client writes; no direct service_role table UPDATE outside the worker Gateway RPC.  
+**Writers:** DocumentService + MemoryIngestionGateway register `embed_document_chunk` jobs only (payload: ids/hashes/space — never the vector). Sole mutator of `state` / `embedding` / `error_code` is leased `mark_document_chunk_embedding_result` inside `gateway_execute_worker_command`. DeletionWorkflowService soft-deletes / purges during document deletion.  
+**TX owner:** one worker command TX validates lease + chunk subject + fingerprint + active space + vector dimensions (ready) or errorCode (failed), then writes vector+state atomically. Assertion-embedding jobs must never write this table.  
+**Ready invariant:** `state='ready'` ⇒ `embedding IS NOT NULL` AND `vector_dims(embedding)=1536` AND `error_code IS NULL` AND `content_sha256` matches current chunk.  
+**Failed invariant:** failed command never supplies a vector; does not clobber a still-valid ready vector for the current fingerprint.  
 **Readers:** document retrieval / Stage 12 ports.
 
 ---
@@ -1112,14 +1149,14 @@ Physical column remains `vector(1536)`. Seed includes `legacy-unlabeled-1536` an
 | --- | --- |
 | extract_turn_candidates | subject_type=turn; subject_id NOT NULL; turn_id = subject_id; conversational/inference candidates only |
 | extract_document_candidates | subject_type=document (whole-document after chunking) OR subject_type=document_chunk (re-extract one chunk after content change); subject_id NOT NULL; payload may include document_id, optional chunk_id, content fingerprint |
-| embed_assertion | subject_type=assertion; subject_id NOT NULL; payload includes revision_id, embedding_space; mutations only via mark_assertion_embedding_result |
-| embed_document_chunk | subject_type=document_chunk; subject_id NOT NULL; payload includes document_id, content_sha256, embedding_space; mutations only via mark_document_chunk_embedding_result |
+| embed_assertion | subject_type=assertion; subject_id NOT NULL; payload includes revision_id, embedding_space (ids/hashes only — **never** the vector); mutations only via mark_assertion_embedding_result which carries the vector in the RPC command |
+| embed_document_chunk | subject_type=document_chunk; subject_id NOT NULL; payload includes document_id, content_sha256, embedding_space (ids/hashes only — **never** the vector); mutations only via mark_document_chunk_embedding_result which carries the vector in the RPC command |
 | sync_external_index / reconcile_external_index / rebuild_fts / transition_temporal / quarantine_forbidden_secret | subject_type=assertion; subject_id NOT NULL |
 | delete_step | subject_type=deletion_workflow; subject_id NOT NULL |
 | usage_repair | subject_type=usage_repair |
 | compat_projection_sync | subject_type=assertion |
 
-**Payload privacy:** UUIDs, enums, counters, error codes, space ids, content hashes — **never** raw message/assertion/document/secret text.  
+**Payload privacy:** UUIDs, enums, counters, error codes, space ids, content hashes — **never** raw message/assertion/document/secret text, and **never** embedding vectors. Vectors travel only in the service-role worker command RPC (`p_command.embedding`), not in `durable_jobs.payload`.  
 **Retry:** failed with attempts remaining → reschedule; else dead_letter.  
 **Lease recovery:** leased with expired lease reclaimable.  
 **Cancellation:** deletion workflow cancels obsolete jobs.  
@@ -1596,6 +1633,8 @@ type WorkerIngestionCommand =
       revisionId: string;
       embeddingSpace: string;
       state: "ready" | "failed";
+      /** Required when state='ready'; exactly 1536 finite numbers. Absent/null when state='failed'. */
+      embedding?: number[];
       errorCode?: string;
       commandIdempotencyKey: string;
     }
@@ -1606,6 +1645,8 @@ type WorkerIngestionCommand =
       contentSha256: string;
       embeddingSpace: string;
       state: "ready" | "failed";
+      /** Required when state='ready'; exactly 1536 finite numbers. Absent/null when state='failed'. */
+      embedding?: number[];
       errorCode?: string;
       commandIdempotencyKey: string;
     };
@@ -1671,31 +1712,37 @@ interface DerivedIndexPort {
   enqueueRebuild(tx: Tx, input: { userId: UserId; assertionId: string; reason: string }): Promise<void>;
 }
 interface EmbeddingIndexPort {
-  /** Assertion embeddings only — called only from leased embed_assertion → mark_assertion_embedding_result. */
-  upsertAssertion(input: {
+  /**
+   * Worker-facing API: build the mark_*_embedding_result command (including embedding vector on ready)
+   * and invoke MemoryIngestionGateway.executeWorker. Must not write tables directly.
+   */
+  completeAssertionEmbedding(input: {
+    jobId: JobId;
+    workerId: WorkerId;
     userId: UserId;
     assertionId: string;
     revisionId: string;
     embeddingSpace: string;
-    vector: number[];
-  }): Promise<void>;
-  markAssertionStale(input: { userId: UserId; assertionId: string }): Promise<void>;
-  /** Document-chunk embeddings only — called only from leased embed_document_chunk → mark_document_chunk_embedding_result. */
-  upsertDocumentChunk(input: {
+    state: "ready" | "failed";
+    embedding?: number[];
+    errorCode?: string;
+    commandIdempotencyKey: string;
+  }): Promise<{ assertionId: string; state: string } | { ok: false; error: ServiceError }>;
+  completeDocumentChunkEmbedding(input: {
+    jobId: JobId;
+    workerId: WorkerId;
     userId: UserId;
     documentId: string;
     chunkId: string;
     contentSha256: string;
     embeddingSpace: string;
-    vector: number[];
-  }): Promise<void>;
-  markDocumentChunkFailed(input: {
-    userId: UserId;
-    documentId: string;
-    chunkId: string;
-    embeddingSpace: string;
-    errorCode: string;
-  }): Promise<void>;
+    state: "ready" | "failed";
+    embedding?: number[];
+    errorCode?: string;
+    commandIdempotencyKey: string;
+  }): Promise<{ chunkId: string; state: string } | { ok: false; error: ServiceError }>;
+  /** Internal producer helper: mark rows stale and register rebuild jobs — never persists a vector. */
+  markAssertionStale(input: { userId: UserId; assertionId: string }): Promise<void>;
 }
 interface ExternalMemoryIndexPort {
   sync(input: { userId: UserId; assertionId: string }): Promise<void>;
@@ -1759,7 +1806,7 @@ interface AuditExplainabilityStore {
 | AssertionReviewService | User JWT via Gateway | Review RPC TX | — | Replaces review PATCH status flips |
 | AssertionProvenanceStore | Inside Gateway TX | Same TX as assertion write | raw bodies | New |
 | Retrieval persistence | User RLS SELECT / INVOKER RPC | Read-only | ranking constants | Ports for Stage 12 |
-| EmbeddingIndexPort | Worker SR via split embedding commands | Job TX bound to embed_assertion or embed_document_chunk | cross-space compare; naive pad/truncate; cross-table writes | Splits `reembed` into assertion vs chunk paths |
+| EmbeddingIndexPort | Worker SR → executeWorker with embedding in command | Single Gateway TX writes vector+state | cross-space compare; naive pad/truncate; cross-table writes; split vector-then-ready; vectors in jobs/results/logs | Splits `reembed`; no direct table writes |
 | ExternalMemoryIndexPort | Worker SR | Job TX | remote text as authority | Wraps Mem0 |
 | ConversationStore | User/server RPCs | Idempotent user message | — | Extended with turn_id |
 | TurnStore | User JWT DEFINER for begin/append | Fingerprint conflict detection | — | New |
@@ -1791,15 +1838,15 @@ Listed as `WorkerIngestionCommand`. Always produce candidates or embedding/tempo
 | --- | --- | --- |
 | `conversational_candidate` / `inference_candidate` | `extract_turn_candidates` | candidate assertions with chat/turn provenance only |
 | `document_candidate` | `extract_document_candidates` | candidate assertions with document/chunk provenance only |
-| `mark_assertion_embedding_result` | `embed_assertion` | `memory_embeddings` only |
-| `mark_document_chunk_embedding_result` | `embed_document_chunk` | `document_chunk_embeddings` only |
+| `mark_assertion_embedding_result` | `embed_assertion` | `memory_embeddings` only; carries `embedding?: number[]` for ready |
+| `mark_document_chunk_embedding_result` | `embed_document_chunk` | `document_chunk_embeddings` only; carries `embedding?: number[]` for ready |
 | `transition_temporal` | `transition_temporal` | temporal fields only |
 
-There is no shared `mark_embedding_metadata` command; assertion and chunk embedding results are distinct types so a leased job cannot update the wrong derived table.
+There is no shared `mark_embedding_metadata` command; assertion and chunk embedding results are distinct types so a leased job cannot update the wrong derived table. Ready results require a 1,536-d finite vector in the command; failed results omit the vector and require `errorCode`. The RPC converts the JSON array to `vector(1536)` and commits vector+state together. Idempotent replay returns ids/state only — not the vector.
 
 ### Results and errors
 
-`IngestionResult` carries `intakeDecisionId`, per-assertion results, and `partial`. Errors use `ServiceError` tagged union. Idempotent replay with the same `(user_id, command_idempotency_key)` returns the prior `memory_command_results.result_json` without duplicate rows.
+`IngestionResult` carries `intakeDecisionId`, per-assertion results, and `partial`. Embedding result commands return a narrow result (`assertionId`/`chunkId` + `state` + optional `errorCode`) stored in `result_json` — never the vector. Errors use `ServiceError` tagged union. Idempotent replay with the same `(user_id, command_idempotency_key)` returns the prior `memory_command_results.result_json` without duplicate rows or vector replay.
 
 ---
 
@@ -1811,8 +1858,8 @@ There is no shared `mark_embedding_metadata` command; assertion and chunk embedd
 | Remember + extras | Gateway | user JWT DEFINER | multiple assertions + links | same | command key | same | partial codes | same key |
 | Chat candidate registration | Worker → worker Gateway | service_role | intake, links, conversational/inference candidate assertions… | leased `extract_turn_candidates` + turn subject | job/command key | job TX | retry/DLQ | replay |
 | Document candidate registration | Worker → worker Gateway | service_role | intake, links, document_candidate assertions + provenance | leased `extract_document_candidates` + document or chunk subject | job/command key | job TX | retry/DLQ | replay |
-| Assertion embedding result | Worker → worker Gateway | service_role | `memory_embeddings` (+ command_results) | leased `embed_assertion` + assertion/revision/space checks | command key | job TX | retry/DLQ | replay |
-| Document-chunk embedding result | Worker → worker Gateway | service_role | `document_chunk_embeddings` (+ command_results) | leased `embed_document_chunk` + chunk/document/fingerprint/space checks | command key | job TX | retry/DLQ | replay |
+| Assertion embedding result | Worker → worker Gateway | service_role | `memory_embeddings.embedding` + state/error (+ command_results ids/state) | leased `embed_assertion` + assertion/revision/space + 1536-d vector (ready) or errorCode (failed) | command key | **one TX**: validate then write vector+state; no pre-write | retry/DLQ | replay ids/state only |
+| Document-chunk embedding result | Worker → worker Gateway | service_role | `document_chunk_embeddings.embedding` + state/error (+ command_results ids/state) | leased `embed_document_chunk` + chunk/document/fingerprint/space + 1536-d vector (ready) or errorCode (failed) | command key | **one TX**: validate then write vector+state; no pre-write | retry/DLQ | replay ids/state only |
 | Approve/reject/defer | Review RPC | user JWT DEFINER | assertion, decision | pending check | `(user_id, assertion_id, key)` | RPC | conflict | same key |
 | Correction | Gateway | user JWT DEFINER | assertions, links, revisions | active link unique | command key | RPC | conflict | same key |
 | Mark historical / repudiate / archive | Gateway | user JWT DEFINER | assertion (+decision) | row lock | command key | TX | error | same key |
@@ -1835,7 +1882,7 @@ There is no shared `mark_embedding_metadata` command; assertion and chunk embedd
 | `append_turn_user_message` | TurnStore | authenticated EXECUTE | DEFINER | `auth.uid()=p_user_id` | Idempotent per turn |
 | `begin_or_get_turn` | TurnStore | authenticated EXECUTE | DEFINER | uid | Fingerprint conflict → raise |
 | `gateway_execute_command` | Gateway user path | authenticated EXECUTE | DEFINER | uid | Dispatches UserIngestionCommand |
-| `gateway_execute_worker_command` | Worker | **EXECUTE service_role only** | DEFINER | leased job + user/subject/type matrix (§8.1.1) | Cannot create user_asserted/trusted; turn extract ≠ document extract; assertion embed ≠ chunk embed |
+| `gateway_execute_worker_command` | Worker | **EXECUTE service_role only** | DEFINER | leased job + user/subject/type matrix (§8.1.1) | Cannot create user_asserted/trusted; turn extract ≠ document extract; assertion embed ≠ chunk embed; ready embeddings validate/convert JSON array → `vector(1536)` atomically with state |
 | `approve_memory_candidate` | Review | authenticated EXECUTE | DEFINER | uid + row owner | pending only |
 | `reject_memory_candidate` / `defer_memory_candidate` | Review | authenticated | DEFINER | uid | |
 | `correct_memory_assertion` | Gateway | authenticated | DEFINER | uid | |
@@ -1869,10 +1916,17 @@ Browser may only call HTTP `runTurn` with message + clientTurnKey + session + se
 | --- | --- |
 | `p_job_id`, `p_worker_id` | Claim lease |
 | `p_user_id` | Must equal job.user_id |
-| `p_command` | Allowlisted worker command only |
+| `p_command` | Allowlisted worker command only; embedding result commands may include `embedding` JSON number array |
 | `p_command_idempotency_key` | Under `(user_id, key)` |
 
-Arbitrary commercial payloads, trust upgrades to `user_asserted`/`user_confirmed`, document candidates under turn jobs, conversational candidates under document jobs, assertion-embedding results under chunk jobs (or vice versa), or unrelated job types are rejected.
+**Embedding result validation (inside RPC):**
+
+| `state` | Required | Forbidden | Atomic write |
+| --- | --- | --- | --- |
+| `ready` | `embedding` length 1536 all finite; active space; current revision or chunk fingerprint; `errorCode` null | missing/short/long/non-finite vector | convert JSON → `vector(1536)` + `state='ready'` + `error_code=NULL` together |
+| `failed` | `errorCode` | non-null `embedding` | set `state='failed'` + `error_code` without writing `embedding`; reject if subject revision/fingerprint stale rather than clobbering a valid ready row |
+
+Arbitrary commercial payloads, trust upgrades to `user_asserted`/`user_confirmed`, document candidates under turn jobs, conversational candidates under document jobs, assertion-embedding results under chunk jobs (or vice versa), vectors in job payloads/result_json, or unrelated job types are rejected.
 
 ---
 
@@ -1892,10 +1946,10 @@ Legend: ✓ allowed for own rows via `auth.uid() = user_id`; ✗ denied; SR = se
 | memory_intake_decision_assertions | ✓ | own | ✗ | ✓ | own | composite FKs both ends | RPC-only |
 | memory_command_results | ✓ | own | ✗ | ✓ | own | `(user_id, key)` | RPC-only |
 | embedding_spaces | ✓ | active | ✗ | ✓ | active flag | N/A | SR mutate |
-| memory_embeddings | ✓ | own | ✗ | ✓ W via `mark_assertion_embedding_result` only | own | revision triple | no client writes; not writable by chunk-embed jobs |
+| memory_embeddings | ✓ | own | ✗ | ✓ W via `mark_assertion_embedding_result` only (vector+state atomic) | own | revision triple | no client/direct SR writes; not writable by chunk-embed jobs; ready ⇒ 1536-d vector present |
 | memory_fts_documents | ✓ | own | ✗ | ✓ W | own | revision triple | no client writes |
 | external_memory_index_entries | ✓ | own | ✗ | ✓ W | own | revision triple | no client writes |
-| document_chunk_embeddings | ✓ | own | ✗ | ✓ W via `mark_document_chunk_embedding_result` only | own | composite FKs | no client writes; not writable by assertion-embed jobs |
+| document_chunk_embeddings | ✓ | own | ✗ | ✓ W via `mark_document_chunk_embedding_result` only (vector+state atomic) | own | composite FKs | no client/direct SR writes; not writable by assertion-embed jobs; ready ⇒ 1536-d vector present |
 | conversation_turns | ✓ | own | ✗ | ✓ | own | session composite | RPC/completion |
 | turn_inference_attempts | ✓ | own | ✗ | ✓ | own | turn composite | backend |
 | usage_repair_obligations | ✓ | own | ✗ | ✓ | own | turn composite | completion/W |
@@ -2081,6 +2135,10 @@ flowchart LR
 | 4c | Assertion embed mutating chunk embedding | split embedding commands + subject checks | Worker Gateway | Shared helper bug | Stage 15 |
 | 4d | Chunk embed mutating assertion embedding | split embedding commands + subject checks | Worker Gateway | Shared helper bug | Stage 15 |
 | 4e | Ready embed for stale revision/fingerprint | current_revision_id / contentSha256 checks on ready | Worker Gateway | Race vs content change | tests |
+| 4f | Ready without vector / wrong dim | RPC requires 1536 finite values; convert in TX | Worker Gateway | malformed provider output | tests |
+| 4g | Split write: vector then mark ready | Forbidden; sole write path is atomic command | EmbeddingIndexPort → executeWorker only | bug writing tables directly | Stage 15 |
+| 4h | Vector leaked to jobs/results/logs | payload/result_json/audit allowlists exclude vectors | redaction + schema checks | accidental field copy | lint/tests |
+| 4i | Failed command clears valid ready vector | failed path does not write embedding; stale subject rejected | Worker Gateway | race mishandling | tests |
 | 5 | Worker using unleased job | Lease verification | claim/execute coupling | Clock skew on lease | Ops |
 | 6 | Forged actor UUID | actor_kind + owner equality CHECKs | RPC sets actor | — | tests |
 | 7 | Secret stored on block | intake_decisions; no forbidden_secret on disclosure enum | Gateway | Detector misses | Stage 10 |
@@ -2238,11 +2296,13 @@ sequenceDiagram
     WG->>H: document_candidate only
     WG-->>W: new result
   else embed_assertion
-    WG->>H: mark_assertion_embedding_result → memory_embeddings
-    WG-->>W: new result
+    Note over W,WG: command carries embedding[] on ready; never in job.payload
+    WG->>H: validate 1536-d vector + revision; write vector+ready atomically
+    WG-->>W: result ids/state only
   else embed_document_chunk
-    WG->>H: mark_document_chunk_embedding_result → document_chunk_embeddings
-    WG-->>W: new result
+    Note over W,WG: command carries embedding[] on ready; never in job.payload
+    WG->>H: validate 1536-d vector + fingerprint; write vector+ready atomically
+    WG-->>W: result ids/state only
   end
   alt success
     W->>J: succeeded
@@ -2369,7 +2429,11 @@ stateDiagram-v2
 57. A document candidate is always tied to a document or chunk owned by the same user as the job.  
 58. `mark_assertion_embedding_result` is allowed only from `embed_assertion` and mutates only `memory_embeddings`.  
 59. `mark_document_chunk_embedding_result` is allowed only from `embed_document_chunk` and mutates only `document_chunk_embeddings`.  
-60. Ready assertion embeddings always bind the assertion’s current revision; ready chunk embeddings always match the current chunk content fingerprint.
+60. Ready assertion embeddings always bind the assertion’s current revision; ready chunk embeddings always match the current chunk content fingerprint.  
+61. A ready embedding row always stores an actual 1,536-dimensional finite vector committed in the same transaction as `state='ready'`.  
+62. Failed embedding commands omit the vector, require `errorCode`, and do not overwrite a still-valid ready vector.  
+63. Embedding vectors may travel in service-role worker commands but must never appear in `durable_jobs.payload`, `memory_command_results.result_json`, audit metadata, or worker error metadata.  
+64. Workers must not write embedding vectors outside `gateway_execute_worker_command` and then separately mark ready.
 
 ---
 
@@ -2393,6 +2457,10 @@ stateDiagram-v2
 | Assertion embed cmd on chunk job | rejected | no chunk/assertion cross-write | use matching embedding command |
 | Chunk embed cmd on assertion job | rejected | no cross-write | use matching embedding command |
 | Ready embed stale revision/fingerprint | rejected | remains pending/stale | enqueue new embed job for current content |
+| Ready embed missing/wrong-dim/non-finite vector | rejected | no ready write | worker recomputes embedding |
+| Failed embed with non-null embedding | rejected | no write | omit vector; supply errorCode |
+| Failed embed on stale subject | rejected | prior ready vector preserved | enqueue job for current content |
+| Vector written outside RPC then mark ready | forbidden / fails policy | split window avoided | use single atomic command |
 | Duplicate Keep | same result | one decision | idempotency key |
 | Forbidden secret block | policy_blocked | intake decision only | user revises content |
 | Forbidden reclassify | assertion hidden | quarantine + deletion workflow | resume deletion |
@@ -2499,6 +2567,8 @@ Admin repudiation path not enabled. Offline legacy kind classification optional 
 | 33 | Document extract job distinct from turn extract | **Met** — `extract_document_candidates` + allowlist |
 | 34 | Assertion vs chunk embedding commands split | **Met** — `mark_*_embedding_result` pair |
 | 35 | Cross-domain worker isolation | **Met** — §8.1.1 / invariants 55–60 |
+| 36 | Ready embeddings carry atomic 1536-d vectors | **Met** — command `embedding[]` + RPC convert |
+| 37 | Vectors excluded from jobs/results/logs | **Met** — §8.1.1 / §8.20 / Appendix A |
 
 ---
 
@@ -2560,6 +2630,7 @@ Physical schema redesign; entity graphs; ranking weights; framework selection; m
 | Missing worker ingestion path under service_role | Corrected — `gateway_execute_worker_command` |
 | document_candidate allowed from extract_turn_candidates or undefined document extract job | Corrected — `extract_document_candidates` only |
 | Shared mark_embedding_metadata for assertion and chunk embeds | Corrected — split `mark_assertion_embedding_result` / `mark_document_chunk_embedding_result` |
+| Embedding result commands marked ready without carrying a vector | Corrected — `embedding?: number[]` in command; JSON array validated/converted to `vector(1536)` atomically with state |
 | Stage 7/8 binding architecture | Preserved |
 
 No binding disagreement requiring Stage 7/8 revision was found beyond clarifications already recorded (direct_answer usage exception; purged tombstones; worker path).
@@ -2578,6 +2649,9 @@ No binding disagreement requiring Stage 7/8 revision was found beyond clarificat
 - [x] Assertion embedding jobs cannot mutate document-chunk embeddings  
 - [x] Document-chunk embedding jobs cannot mutate assertion embeddings  
 - [x] Ready embeddings require current revision or current chunk fingerprint  
+- [x] Ready embeddings require a 1,536-d vector committed atomically with state  
+- [x] Failed embedding results omit vectors and do not clobber valid ready vectors  
+- [x] Vectors never copied into jobs, command-result JSON, audit, or error metadata  
 - [x] Current revision always same assertion  
 - [x] Purged tombstone has no private revision text  
 - [x] Blocking a secret does not store the secret  
@@ -2621,12 +2695,13 @@ No binding disagreement requiring Stage 7/8 revision was found beyond clarificat
 | `conversation_turns.retrieval_snapshot` | ids, scores, channel codes |
 | `memory_review_decisions.notes` | short reason codes |
 | `usage_repair_obligations.payload` | tokens/cost/model ids |
-| `durable_jobs.payload` | ids, enums, hashes, counters, space ids |
+| `durable_jobs.payload` | ids, enums, hashes, counters, space ids — **never** embedding vectors |
 | `response_influence_records.eligibility_snapshot` | filter flags/codes |
-| `audit_log.metadata` | ids/codes/metrics |
-| worker error metadata | error codes |
+| `audit_log.metadata` | ids/codes/metrics — **never** embedding vectors |
+| worker error metadata | error codes — **never** embedding vectors |
 | `memory_intake_decisions.content_fingerprint` | irreversible hash only |
-| `memory_command_results.result_json` | ids/codes/flags only |
+| `memory_command_results.result_json` | ids/codes/flags/state only — **never** embedding vectors |
+| `gateway_execute_worker_command` `p_command.embedding` | allowed for ready mark_*_embedding_result only (derived numeric data; service_role) |
 
 ---
 
@@ -2681,7 +2756,16 @@ No binding disagreement requiring Stage 7/8 revision was found beyond clarificat
 32. `mark_assertion_embedding_result` under `embed_document_chunk` is rejected (and vice versa).  
 33. `mark_assertion_embedding_result` ready with non-current revision_id is rejected.  
 34. `mark_document_chunk_embedding_result` ready with mismatched contentSha256 is rejected.  
-35. Assertion-embed job does not mutate `document_chunk_embeddings`; chunk-embed job does not mutate `memory_embeddings`.
+35. Assertion-embed job does not mutate `document_chunk_embeddings`; chunk-embed job does not mutate `memory_embeddings`.  
+36. Ready embedding command without `embedding` or with length ≠ 1536 is rejected.  
+37. Ready embedding command with non-finite values is rejected.  
+38. Ready embedding command with non-null `errorCode` is rejected.  
+39. Failed embedding command with non-null `embedding` is rejected.  
+40. Failed embedding command without `errorCode` is rejected.  
+41. After successful ready command, row has `state='ready'` and `vector_dims(embedding)=1536` in the same committed TX.  
+42. `durable_jobs.payload` and `memory_command_results.result_json` never contain the embedding array.  
+43. Idempotent replay of an embedding result returns ids/state only, not the vector.  
+44. Direct table UPDATE of `memory_embeddings.embedding` / `document_chunk_embeddings.embedding` outside the worker Gateway RPC is denied by grants.
 
 ---
 
