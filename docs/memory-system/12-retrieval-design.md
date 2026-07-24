@@ -30,13 +30,13 @@ Citations use repository paths and prior-stage section references as of this des
 
 ### Verdict
 
-Cortaix’s target retrieval architecture is **Option B — multi-channel candidate generation, weighted reciprocal-rank fusion (WRRF), then deterministic policy rescoring**, followed by **canonical reconciliation-first eligibility**, **conflict-safe grouping**, **hierarchical reserve-then-fill token packing**, and **structured untrusted context rendering**.
+Cortaix’s target retrieval architecture is **Option B — multi-channel candidate generation, weighted reciprocal-rank fusion (WRRF), then bounded multiplicative policy adjustment (±15%)**, followed by **canonical reconciliation-first eligibility**, **conflict-safe grouping**, **hierarchical reserve-then-fill token packing**, and **structured untrusted context rendering**.
 
 PostgreSQL remains the sole authority for memory assertions, ownership, trust, lifecycle, disclosure, entity identity, relationship user decisions, and operational coordination. Embeddings, FTS documents, graph projections, and external indexes are **derived and rebuildable**. Every search hit reconciles to current canonical state before ranking. Ranking never grants trust. Disclosure never yields to relevance. Retrieved text is always **untrusted data**, never system instructions.
 
 ### Why Option B
 
-| Need | Option A linear hybrid | **Option B WRRF + policy** | Option C cross-encoder | Option D LLM judge |
+| Need | Option A linear hybrid | **Option B WRRF × policy** | Option C cross-encoder | Option D LLM judge |
 | --- | --- | --- | --- | --- |
 | Determinism | Medium (score-scale fragile) | **High** | Medium–low without pin | Low |
 | Explainability | Medium | **High** (rank + features) | Opaque score | Opaque |
@@ -54,19 +54,25 @@ Option C may later sit behind `RetrievalReranker` as an **optional** second stag
 rawQuery + turnId + userId + model/selection hints
         │
         ▼
- RetrievalPlanner → RetrievalQueryPlan (once)
+ Local deterministic query-policy scan
         │
         ▼
- HybridCandidateRetriever (parallel channels, shared query embedding)
+ QueryDisclosureDecision (before any external call)
+        │
+        ▼
+ RetrievalPlanner → RetrievalQueryPlan (once; primaryIntentMode + intentFacets)
+        │
+        ▼
+ HybridCandidateRetriever (only permitted channels; shared query embedding if allowed)
         │
         ▼
  CanonicalEligibilityService (reconcile + gate; scores cannot override)
         │
         ▼
- CandidateFusionService (WRRF) → policy rescoring → Deduplicator → ConflictContextService
+ CandidateFusionService (WRRF × bounded policy) → optional rerank → Deduplicator → ConflictContextService
         │
         ▼
- DisclosureContextPlanner (sensitivity summary → compatible provider class)
+ Evidence DisclosureContextPlanner (sensitivity summary → compatible provider class)
         │
         ▼
  ContextPacker (model-specific token budget, hierarchical reserve-then-fill)
@@ -75,21 +81,23 @@ rawQuery + turnId + userId + model/selection hints
  ContextRenderer (structured ContextPackage → provider adapter)
         │
         ▼
- InfluenceRecorder (selected + budget-drop + conflict groups; ids/scores/codes)
+ InfluenceRecorder (sent + budget-drop + disclosure-withheld + conflict/ambiguity + direct-answer)
 ```
 
 ### Headline Stage 12 decisions
 
-1. **Architecture:** Option B WRRF + deterministic policy rescoring; optional reranker interface unused for correctness.  
-2. **Policy version:** `retrieval_policy_version = "rp-v1.0"`.  
-3. **Query plan:** Deterministic rules first; optional structured model assistance cannot grant trust, widen ownership, bypass disclosure, or silently pick ambiguous entities/projects.  
-4. **Graph expansion v1:** **Zero-hop default**; **one bounded hop** only for `entity_focused` / `relationship_focused` via Stage 11 contracts to supporting assertions — never friend-of-friend.  
-5. **Disclosure order:** Option B — build disclosure summary → select compatible provider/model → pack to that window.  
-6. **Packing:** Hierarchical reserve-then-fill with group minima/maxima and utility-per-token fill.  
-7. **History:** Complete eligible turns with reserved recent-turn budget; no orphan/failed turns; optional derived summaries never become trusted memory.  
-8. **Identity:** Not unconditional inject-everything; direct name/identity short-circuits may bypass expensive retrieval when deterministic.  
-9. **External indexes:** IDs only → canonical map → eligibility; **no remote-text fallback**.  
-10. **Amendments:** Compact JSONB expansions on `response_influence_records` and `conversation_turns.retrieval_snapshot`; optional `retrieval_policy_version` column; conversation-turn eligibility fields if missing.
+1. **Architecture:** Option B WRRF × deterministic bounded policy; optional reranker interface unused for correctness.  
+2. **Policy version:** `retrieval_policy_version = "rp-v1.0"`. Final score is multiplicative: `Final = WRRF × (1 + λ_policy × Policy)` with `λ_policy = 0.15`, so policy adjusts fusion by at most ±15% and cannot dominate or invent candidates.  
+3. **Query plan:** `primaryIntentMode` + deterministic `intentFacets`; optional structured model assistance cannot grant trust, widen ownership, bypass disclosure, or silently pick ambiguous entities/projects.  
+4. **Query disclosure preflight:** Local scan produces `QueryDisclosureDecision` **before** any external embedding, external-index, planner-model, or reranker call.  
+5. **Graph expansion v1:** **Zero-hop default**; **one bounded hop** only for `entity_focused` / `relationship_focused` via Stage 11 contracts to supporting assertions — never friend-of-friend.  
+6. **Evidence disclosure order:** Option B — build evidence disclosure summary → select compatible provider/model → pack to that window (after query preflight and retrieval).  
+7. **Packing:** Hierarchical reserve-then-fill with group minima/maxima and utility-per-token fill; whole-document summarisation uses an explicit coverage decision tree, not the Q&A chunk cap.  
+8. **History:** Complete eligible turns with reserved recent-turn budget; no orphan/failed turns; optional derived summaries never become trusted memory.  
+9. **Identity:** Not unconditional inject-everything; deterministic short-circuit only after a complete canonical identity consistency check (not lexical absence-of-conflict).  
+10. **External indexes:** IDs only → canonical map → eligibility; **no remote-text fallback**; query text still requires query disclosure.  
+11. **Influence:** Persist sent, budget-dropped, disclosure-withheld finalists, conflict/ambiguity notices, and direct-answer identity fields.  
+12. **Amendments:** Compact JSONB expansions on `response_influence_records` and `conversation_turns.retrieval_snapshot`; explicit final-state vocabulary beyond a single `selected` boolean.
 
 ### Completeness
 
@@ -266,7 +274,7 @@ Each channel produces an independent ranked list. Fuse with **weighted reciproca
 | --- | --- |
 | Correctness | Strong for multi-channel recall without forcing score commensurability |
 | Determinism | High under pinned `retrieval_policy_version` |
-| Explainability | Channel ranks + fused rank + policy deltas |
+| Explainability | Channel ranks + fused rank + bounded policy multiplier |
 | Latency / cost | Low–medium; parallel channels |
 | Provider independence | High |
 | Failure behaviour | Drop failed channel; fuse remaining |
@@ -315,7 +323,7 @@ Broad deterministic recall, then expensive semantic rerank.
 | `RetrievalPlanner` | Turn Orchestrator / Retrieval | Build `RetrievalQueryPlan` once |
 | `HybridCandidateRetriever` | Retrieval | Fan-out channels |
 | `CanonicalEligibilityService` | Memory CAS + Disclosure | Reconcile + gate |
-| `CandidateFusionService` | Retrieval | WRRF + policy score |
+| `CandidateFusionService` | Retrieval | WRRF × bounded policy score |
 | `RetrievalReranker` | Retrieval (optional) | No-op in v1 |
 | `CandidateDeduplicator` | Retrieval | Multi-level dedupe |
 | `ConflictContextService` | Retrieval + Memory model | Groups + presentation |
@@ -345,9 +353,63 @@ See §33 for the full invariant list. Non-negotiable: score ≠ trust; external 
 
 ## 7. Query planning
 
+### 7.0 Query disclosure preflight (normative, before external calls)
+
+Stored-record disclosure flags do **not** authorize disclosure of the user’s current query. Before any external embedding, external-index search, optional planner-model assist, or optional reranker call:
+
+```ts
+type QueryDisclosureDecision = {
+  /** Raw user text stays local by default. */
+  rawQueryLocalOnly: true;
+  externalSemanticAllowed: boolean;
+  externalIndexSearchAllowed: boolean;
+  plannerModelAllowed: boolean;
+  rerankerModelAllowed: boolean;
+
+  /** Optional redacted query for external semantic use only when lossless for intent. */
+  safeSemanticQueryText?: string;
+  reasonCodes: Array<
+    | 'allowed'
+    | 'forbidden_secret_detected'
+    | 'provider_restricted_query'
+    | 'highly_sensitive_query'
+    | 'user_policy_denied'
+    | 'redaction_not_lossless'
+  >;
+};
+```
+
+**Required sequence:**
+
+```text
+Raw user query
+  → local deterministic query-policy scan
+  → safe local query plan skeleton
+  → QueryDisclosureDecision
+  → permitted candidate channels only
+  → candidate reconciliation
+  → evidence disclosure summary
+  → compatible provider selection
+  → provider-specific filtering
+  → packing
+```
+
+**Rules:**
+
+1. `rawQuery` remains local unless query disclosure explicitly allows an external purpose.  
+2. Query text containing forbidden secrets must not be sent to external embedding, external index, planner-model, or reranker services.  
+3. A locally produced redacted `safeSemanticQueryText` may be used only when redaction preserves retrieval intent.  
+4. If safe redaction is impossible, disable external semantic/index/model-assisted channels.  
+5. Continue with local FTS, exact matching, canonical entity/project queries, and eligible conversation history.  
+6. `allow_embedding` on stored assertions does **not** authorize embedding the current query.  
+7. BYOK does **not** automatically bypass query-disclosure policy.  
+8. Record explicit degradation and withholding codes **without** storing the secret query in logs.  
+9. Do **not** send raw query text to an external index merely because the index returns IDs only.  
+10. Optional reranking must receive only disclosure-approved candidate text and query representation.
+
 ### 7.1 `RetrievalQueryPlan`
 
-Produced **once per user turn**. Provider-independent.
+Produced **once per user turn**. Provider-independent. Multi-intent is representable without compound string invention.
 
 ```ts
 type IntentMode =
@@ -367,13 +429,24 @@ type IntentMode =
 
 type TemporalMode = 'current' | 'historical' | 'prospective' | 'ended' | 'unknown';
 
+type DocumentRetrievalScope =
+  | 'targeted_passage'
+  | 'section'
+  | 'whole_document';
+
 type RetrievalQueryPlan = {
   userId: string;
   turnId: string;
   rawQuery: string;
 
-  intentMode: IntentMode;
-  /** Primary modes requested; may include multiple when ambiguous. */
+  /** Dominant retrieval and packing strategy. */
+  primaryIntentMode: IntentMode;
+  /**
+   * Additional modes. Must not duplicate primaryIntentMode.
+   * Deterministic ascending enum-name order after construction.
+   */
+  intentFacets: IntentMode[];
+
   requestedTemporalModes: TemporalMode[];
 
   /** Resolved only — never guessed from ambiguous labels. */
@@ -382,8 +455,14 @@ type RetrievalQueryPlan = {
   relationshipTypes: string[];
   documentIds: string[];
   referencedFilenames: string[];
+  /** Set when requiresDocumentEvidence; default targeted_passage. */
+  documentRetrievalScope?: DocumentRetrievalScope;
 
   lexicalQueries: string[];
+  /**
+   * Text used for local semantic/FTS planning. For external semantic calls,
+   * use QueryDisclosureDecision.safeSemanticQueryText when present and allowed.
+   */
   semanticQueryText: string;
   embeddingSpace?: string; // pinned space id when embeddings used
 
@@ -393,6 +472,7 @@ type RetrievalQueryPlan = {
   requiresGraphEvidence: boolean;
 
   disclosurePurpose: 'chat_inference';
+  queryDisclosure: QueryDisclosureDecision;
 
   /** Stage 12 additions */
   planConfidence: 'high' | 'medium' | 'low';
@@ -409,36 +489,72 @@ type RetrievalQueryPlan = {
 };
 ```
 
+**Intent semantics:**
+
+1. `primaryIntentMode` controls the dominant retrieval and packing strategy.  
+2. `intentFacets` contains zero or more additional modes.  
+3. The primary mode must **not** be duplicated in `intentFacets`.  
+4. Facet ordering is deterministic (stable sort by `IntentMode` enum name).  
+5. Unknown classification uses a primary fallback plus explicit facets — never invent compound strings such as `"current_state+personal_recall"`.  
+6. Provider/model assistance may propose facets but cannot change ownership, trust, disclosure, or ambiguity decisions.
+
 ### 7.2 How the plan is produced
 
 **Stage 12 decision — hybrid deterministic planner with optional structured assist:**
 
+0. **Query disclosure first** (§7.0): if external assist/embedding/index denied, planner stays local-only.  
 1. **Deterministic rules (required):**
-   - Identity patterns (“what is my name”, “who am I”) → `identity`, `directAnswerHint='identity_name'`.  
-   - Temporal cues (“before”, “used to”, “in 2024”, “previously”) → include `historical` / `ended`.  
-   - Prospective cues (“plan to”, “will”, “next month”) → `prospective`.  
-   - Uncertainty cues (“might”, “options”, “should I”) → `uncertain_or_options`.  
-   - Explicit document/filename references → `document_focused`, populate `referencedFilenames` / attachment ids.  
-   - “What did we discuss / decide” → `conversation_recall`.  
-   - Explicit memory commands → `memory_management` (retrieval may still run for grounding corrections).  
-   - General knowledge with no personal markers and `requiresPersonalContext=false` → skip personal channels (still allow history if needed for discourse).  
+   - Identity patterns (“what is my name”, “who am I”) → `primaryIntentMode='identity'`, `directAnswerHint='identity_name'`.  
+   - Temporal cues (“before”, “used to”, “in 2024”, “previously”) → `primaryIntentMode` or facet `historical`; `requestedTemporalModes` include `historical` / `ended`.  
+   - Prospective cues → facet or primary `prospective`.  
+   - Uncertainty cues → facet or primary `uncertain_or_options`.  
+   - Explicit document/filename references → `primaryIntentMode='document_focused'` (or facet), populate ids/filenames; set `documentRetrievalScope` (`whole_document` for summarise-this-file; else `targeted_passage` / `section`).  
+   - “What did we discuss / decide” → facet or primary `conversation_recall`.  
+   - Project + decision questions → e.g. `primaryIntentMode='project_scoped'`, `intentFacets=['conversation_recall']` (sorted).  
+   - Current personal state → e.g. `primaryIntentMode='current_state'`, `intentFacets=['personal_recall']`.  
+   - Explicit memory commands → `primaryIntentMode='memory_management'`; correction grounding may add facet `personal_recall`.  
+   - General knowledge with no personal markers and `requiresPersonalContext=false` → `primaryIntentMode='general'`.  
 2. **Existing references:** attachment document ids, session project bindings, prior turn entity ids in `retrieval_snapshot`.  
 3. **Stage 11 resolution:** `resolveEntityId`, `resolveProjectScopeLabel` — on `ambiguous`, set ambiguity flag and **do not** invent ids.  
-4. **Optional structured model assistance:** may propose `intentMode`, lexical expansions, entity mention strings. **Forbidden:** granting trust, widening `userId`, setting disclosure true, selecting among ambiguous projects/entities, injecting remote facts.  
-5. **Model-free fallback:** if assist fails or `planConfidence='low'`, use broad personal recall with `requestedTemporalModes` including `current` (+ `unknown`), enable memory+document+history channels, keep graph optional.
+4. **Optional structured model assistance:** may propose `primaryIntentMode` / `intentFacets`, lexical expansions, entity mention strings — **only if** `queryDisclosure.plannerModelAllowed`. **Forbidden:** granting trust, widening `userId`, setting disclosure true, selecting among ambiguous projects/entities, injecting remote facts, changing ambiguity outcomes.  
+5. **Model-free fallback:** if assist fails or `planConfidence='low'`, use `primaryIntentMode='personal_recall'` with facets as needed, `requestedTemporalModes` including `current` (+ `unknown`), enable local memory+document+history channels, keep graph optional.
 
 ### 7.3 Uncertain classification
 
 When intent is uncertain:
 
-- Prefer **recall over silence** for personal questions (`requiresPersonalContext=true`) with medium channel limits.  
-- Prefer **no personal retrieval** for clear general-knowledge questions.  
+- Prefer **recall over silence** for personal questions (`requiresPersonalContext=true`) with medium channel limits: `primaryIntentMode='personal_recall'`, optional facets `current_state` / `uncertain_or_options`.  
+- Prefer **no personal retrieval** for clear general-knowledge questions (`primaryIntentMode='general'`).  
 - Never silently bind ambiguous entities/projects; return ambiguity groups to packing.  
 - Temporal uncertainty → include `current` and allow historical as secondary (lower policy weight unless cues present).
 
 ### 7.4 Direct identity short-circuit
 
-**Stage 12 decision:** Deterministic direct answers for allowlisted identity fields (display name, and narrowly scoped persona questions where product policy allows) may **bypass expensive multi-channel retrieval** while still recording influence for the identity field used. If memory assertions **conflict** with profile fields, do **not** short-circuit; run full retrieval and emit a conflict group.
+**Stage 12 decision:** Deterministic direct answers for allowlisted identity fields (display name, and narrowly scoped persona questions where product policy allows) may **bypass expensive multi-channel / external retrieval** while still recording influence for the identity field used (`used_in_deterministic_local_answer`).
+
+**Before short-circuit, run a complete canonical identity consistency check** (local PostgreSQL / Stage 11 only — not `memory_exact` absence-of-hit):
+
+1. Account profile field (e.g. `display_name`).  
+2. Self entity (follow redirects; reject if unresolved).  
+3. Eligible trusted **current** identity assertions grounded to self.  
+4. Relevant succession / conflict state among those assertions.  
+5. Current revision and disclosure-safe local metadata.  
+6. Canonical alias / primary-name contract from Stage 11 when present.
+
+**Short-circuit may proceed only when the check is complete and unambiguous.**
+
+**Disable the shortcut when any of:**
+
+```text
+identity assertions are conflicted
+self entity is unresolved or rebuild-pending
+identity projection is stale
+multiple current names require interpretation
+canonical identity lookup fails
+```
+
+On disable: run ordinary local retrieval (and permitted channels), emit conflict/ambiguity groups as needed — **do not** treat exact lexical search as proof that no conflict exists.  
+**Do not** require external semantic retrieval merely to answer a clean name question.
 
 ---
 
@@ -450,8 +566,9 @@ Channels run **independently** and preferably **in parallel**. Each returns rank
 
 | Rule | Decision |
 | --- | --- |
-| Parallelism | All enabled channels start together |
-| Shared embedding | Exactly **one** query embedding per `(turnId, embeddingSpace)` reused by memory + document semantic channels |
+| Query disclosure gate | Channels that need external query text/embeddings run only if `QueryDisclosureDecision` permits that purpose |
+| Parallelism | All **permitted** channels start together |
+| Shared embedding | Exactly **one** query embedding per `(turnId, embeddingSpace)` reused by memory + document semantic channels **when** `externalSemanticAllowed` (or local embedder); never embed forbidden raw query externally |
 | Cross-space scores | Forbidden |
 | Channel timeout | Soft deadline per channel; late results dropped with degradation marker |
 | Auth | Always scoped to `userId`; RLS + explicit filters |
@@ -490,13 +607,14 @@ Filters applied at generation or immediately after (still subject to eligibility
 3. Embedding ready + fingerprint match when semantic.  
 4. Soft-deleted / purge documents excluded.
 
-**Modes:**
+**Modes** (driven by `documentRetrievalScope` on the plan):
 
-- Normal Q&A: top chunks by fusion.  
-- Summarization (“summarise this PDF”): prefer section-diverse coverage of the targeted document; raise document channel weight; still pack under budget.  
+- `targeted_passage` (normal Q&A): top chunks by fusion under ordinary per-document caps.  
+- `section`: ordered, adjacent, deduplicated chunks from the identified section under a section-specific budget.  
+- `whole_document` (e.g. “summarise this PDF”): follow the honest whole-document decision tree in §19 — **not** the Q&A chunk cap alone.  
 - Filename targeting: boost that `documentId`.
 
-**Limits:** semantic **24**, FTS **24**, max **8** chunks considered per document before diversity.
+**Limits:** semantic **24**, FTS **24**; see §13 for `normal_q_and_a_max_chunks_per_document` vs whole-document coverage policy.
 
 Overlap-aware handling: see §14.
 
@@ -566,17 +684,19 @@ Separate layers:
 
 **Not** an unconditional inject-everything channel.
 
-Conflicts between profile fields and trusted identity assertions → conflict group, not silent profile win in multi-signal mode (note: current code prefers structured identity for name questions — target preserves short-circuit only when no conflicting trusted assertion exists).
+Conflicts between profile fields and trusted identity assertions → conflict group, not silent profile win. Short-circuit requires the **complete canonical identity consistency check** (§7.4), not a light `memory_exact` search. Current code’s structured-identity preference is preserved only when that check is complete and unambiguous.
 
 ### 8.H External derived indexes
 
-1. External service returns **IDs only** (+ opaque remote score for channel rank).  
-2. Map via `external_memory_index_entries` → `assertion_id` / `revision_id`.  
-3. Reload canonical assertion + eligibility.  
-4. Unmapped / wrong user / deleted → drop; mark stale index.  
-5. **No remote-text fallback** (closes current Mem0 gap).  
-6. Timeout → degrade to PostgreSQL channels.  
-7. No cross-embedding-space comparison.
+1. Channel runs only if `queryDisclosure.externalIndexSearchAllowed`.  
+2. Even then, send only disclosure-approved query representation (`safeSemanticQueryText` or denied) — **never** raw secret query merely because hits are IDs.  
+3. External service returns **IDs only** (+ opaque remote score for channel rank).  
+4. Map via `external_memory_index_entries` → `assertion_id` / `revision_id`.  
+5. Reload canonical assertion + eligibility.  
+6. Unmapped / wrong user / deleted → drop; mark stale index.  
+7. **No remote-text fallback** (closes current Mem0 gap).  
+8. Timeout or query-disclosure denial → degrade to PostgreSQL channels (`external_index_timeout` or `query_disclosure_denied`).  
+9. No cross-embedding-space comparison.
 
 ---
 
@@ -592,7 +712,9 @@ After candidate generation and **before** ranking fusion finalization, every can
 4. Attach disclosure policy, succession, temporal, modality, organisation, retention, trust, review.  
 5. Resolve entity redirects on attached entity ids.  
 6. Resolve project ambiguity — if still ambiguous, outcome `ambiguous_scope`.  
-7. For graph-derived stubs, replace with supporting assertion refs (retain graph provenance).
+7. For graph-derived stubs, replace with supporting assertion refs (retain graph provenance).  
+
+**Revision vs historical fact (normative):** A prior revision is **provenance**, not automatically a historical fact. Reconciliation binds candidates to the **current revision** of each eligible canonical assertion. Historical meaning comes from temporal phase, succession links, distinct period assertions, or Stage 11 episodes — not from arbitrary earlier wording revisions (see §14.1, §16).
 
 ### 9.2 Documents
 
@@ -634,7 +756,7 @@ ambiguous_scope          — cannot safely use until disambiguated
 5. Review state eligible (rejected candidates out).  
 6. Retention `present`.  
 7. Organisation `visible` for ordinary assistant context.  
-8. Succession valid for requested temporal mode (superseded → not current; may be `eligible_historical`).  
+8. Succession valid for requested temporal mode (superseded head → not current; may be `eligible_historical` **only** when succession semantics authorize historical use of that **assertion**, not merely because an older revision string exists).  
 9. Temporal phase/bounds fit plan modes.  
 10. Modality fits plan (uncertain/planned not settled unless `uncertain_or_options` / prospective).  
 11. Conflict represented safely (`eligible_conflicted` or grouped — never silent settled dual).  
@@ -798,7 +920,8 @@ type RetrievalCandidate = {
 - Same assertion from semantic+FTS+entity → **one** candidate; merge provenance channel ranks.  
 - Same chunk from FTS+vector → one candidate.  
 - Graph expansion pointing at assertion A merges into assertion A candidate with `relationship` / `entity` provenance.  
-- Revision advance invalidates candidate ids tied to old `assertionRevisionId`.  
+- Candidates bind to the **current** revision of each eligible assertion; revision advance invalidates stubs keyed to stale `assertionRevisionId`.  
+- Earlier revisions are **not** separate historical candidates (see §16).  
 - Selected text loaded after finalist IDs when feasible; operational logs store ids/scores/codes only.
 
 ---
@@ -807,10 +930,11 @@ type RetrievalCandidate = {
 
 ### 12.1 Method (exact v1)
 
-**Stage 12 decision:**
+**Stage 12 decision — WRRF with bounded multiplicative policy:**
 
 1. Per channel, keep top-N candidates that are not `ineligible` / `stale_index` (conflicted/historical/local_only retained with flags).  
-2. Compute **Weighted Reciprocal Rank Fusion**:
+2. A candidate **must** have at least one retrieval-channel rank. Policy cannot create a candidate from zero retrieval evidence (`WRRF = 0` ⇒ `Final = 0`).  
+3. Compute **Weighted Reciprocal Rank Fusion**:
 
 \[
 \mathrm{WRRF}(c) = \sum_{ch \in channels(c)} w_{ch} \cdot \frac{1}{k + r_{ch}(c)}
@@ -818,30 +942,46 @@ type RetrievalCandidate = {
 
 where \(r_{ch}(c)\) is 1-based rank in channel `ch`, \(k=60\) (standard RRF constant), \(w_{ch}\) from §13.
 
-3. Compute **policy score**:
+4. Compute **policy raw and clipped policy**:
 
 \[
-\mathrm{Policy}(c) = \mathrm{clip}\Big(
+\mathrm{PolicyRaw}(c) =
   b_{pin} + b_{confirm} + b_{source} + b_{temporal} + b_{project} + b_{entity} + b_{session}
   - p_{dup} - p_{conflict} - p_{overlap} - p_{sensitive} - p_{prev}
   + 0.05 \cdot \mathrm{confidenceWeak}
-\Big)
 \]
-
-clipped to `[-1.0, +1.0]`.
-
-4. Final score:
 
 \[
-\mathrm{Final}(c) = \mathrm{WRRF}(c) + \lambda \cdot \mathrm{Policy}(c)
+\mathrm{Policy}(c) = \mathrm{clip}(\mathrm{PolicyRaw}(c), -1.0, +1.0)
 \]
 
-with \(\lambda = 0.15\) (policy cannot dominate fusion).
+5. **Final score (bounded multiplicative — policy cannot dominate fusion):**
 
-5. Optional `RetrievalReranker` may reorder within the top **M=40** finalists **without** changing eligibility or disclosure. Default = identity.
+\[
+\mathrm{Final}(c) = \mathrm{WRRF}(c) \times \bigl(1 + \lambda_{\mathrm{policy}} \cdot \mathrm{Policy}(c)\bigr)
+\]
 
-6. Apply diversity / dedupe / conflict grouping (§14–15).  
-7. Select top finalists for packing (not yet token-truncated).
+with \(\lambda_{\mathrm{policy}} = 0.15\). Therefore policy may adjust fusion by **at most ±15%** and cannot replace channel relevance.
+
+**Numerical example — rank-1 exact-only candidate** (\(w_{exact}=1\)):
+
+```text
+WRRF = 1 / 61 ≈ 0.01639
+
+Policy = +1:
+Final = 0.01639 × 1.15 ≈ 0.01885
+
+Policy = -1:
+Final = 0.01639 × 0.85 ≈ 0.01393
+```
+
+(Contrast with the rejected additive form `WRRF + 0.15 × Policy`, where policy ±0.15 would dwarf `WRRF ≈ 0.016`.)
+
+6. Clarify relevance-only signals: pinning, confirmation, source authority, confidence, recency, entity overlap, and project match **modify relevance only**. None grant eligibility or trust.  
+7. Optional `RetrievalReranker` may reorder within the top **M=40** finalists **after** this deterministic score and **without** changing eligibility or disclosure. Default = identity. Reranker inputs require query + candidate disclosure approval (§7.0).  
+8. Apply diversity / dedupe / conflict grouping (§14–15).  
+9. Select top finalists for packing (not yet token-truncated).  
+10. **Tie-breaking remains deterministic:** higher `Final`, then higher `WRRF`, then exact-match presence, then newer `last_confirmed_at`, then stable `candidateId`.
 
 ### 12.2 Hard filters vs ranking features
 
@@ -849,20 +989,22 @@ with \(\lambda = 0.15\) (policy cannot dominate fusion).
 | --- | --- |
 | Ownership, trust, retention, organisation, disclosure, ready doc, revision match | **Hard filter** |
 | Temporal/modality mismatch vs plan | **Hard filter** (or route to historical/conflicted outcome) |
-| Semantic, FTS, exact, entity overlap, project match, pin, confirmation, recency, confidence | **Boost / weak boost** |
+| Semantic, FTS, exact, entity overlap, project match, pin, confirmation, recency, confidence | **Boost / weak boost** (relevance only; enter `Policy` / channel ranks) |
 | Duplicate, overlap, conflict-as-settled attempt, same-source spam | **Penalty** |
-| Pin, confidence, similarity, graph edge | **Must never grant trust** |
-| Any score | **Must never override disclosure** |
+| Pin, confidence, similarity, graph edge | **Must never grant trust or eligibility** |
+| Any score / policy multiplier | **Must never override disclosure** |
+| Policy with `WRRF=0` | **No candidate** — cannot invent evidence |
 
 ### 12.3 Calibration
 
-All numeric weights in §13 are **initial calibration constants**, versioned under `retrieval_policy_version`, changeable without changing canonical memory semantics. Stage 15 owns empirical calibration.
+All numeric weights in §13 are **initial calibration constants**, versioned under `retrieval_policy_version`, changeable without changing canonical memory semantics. Stage 15 owns empirical calibration of channel weights, \(\lambda_{\mathrm{policy}}\) (must remain a **multiplicative** bound unless the formula is explicitly version-bumped), pin boost, and thresholds — and must verify that policy still cannot dominate fusion under the pinned formula.
 
 ### 12.4 Special ranking rules
 
 - Recency must **not** bury durable identity / standing preferences: identity/preference kinds receive `b_source` floor when temporally compatible.  
 - When plan requests historical, do **not** apply current-phase penalty to historical candidates; use `historicalRelevance`.  
-- Pin boosts rank but **cannot force inclusion** if ineligible or crowded out by higher-utility diverse evidence under packing minima.
+- Pin boosts rank but **cannot force inclusion** if ineligible or crowded out by higher-utility diverse evidence under packing minima.  
+- Policy multiplier cannot promote a non-retrieved id into the candidate set.
 
 ---
 
@@ -893,7 +1035,7 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 | Constant | Value | Notes |
 | --- | --- | --- |
 | `k_rrf` | 60 | Standard RRF |
-| `lambda_policy` | 0.15 | Policy blend |
+| `lambda_policy` | 0.15 | Multiplicative bound: `Final = WRRF × (1 + λ × Policy)`; ±15% max |
 | `channel_limit_memory_semantic` | 32 | |
 | `channel_limit_memory_fts` | 32 | |
 | `channel_limit_memory_exact` | 16 | |
@@ -907,8 +1049,10 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 | `global_retrieval_deadline_ms` | 800 | Soft conceptual budget |
 | `min_similarity_floor` | 0.12 | Post-gate weak filter for semantic-only weak hits (**calibration**) — exact/FTS exempt |
 | `max_assertions_per_family` | 2 | Dedupe |
-| `max_chunks_per_document` | 4 | Diversity |
-| `max_chunks_per_section` | 2 | |
+| `normal_q_and_a_max_chunks_per_document` | 4 | Diversity for `targeted_passage` Q&A only |
+| `max_chunks_per_section` | 2 | Section / Q&A diversity |
+| `whole_document_coverage_policy` | see §19 | Prefer complete ordered coverage after overlap removal when it fits; else derived summary or partial/clarify — **not** four-chunk “full” summary |
+| `whole_document_summary_max_source_sections` | Stage 15 calibration | Cap on distinct sections used when packing a labelled partial/derived whole-document summary |
 | `near_paraphrase_similarity` | 0.92 | Calibration; Stage 15 |
 
 ### 13.3 Policy boosts / penalties (additive before clip)
@@ -931,7 +1075,7 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 
 ### 13.4 What Stage 15 must calibrate
 
-Similarity floor, near-paraphrase threshold, channel weights, λ, pin boost, chunk maxima, and latency deadlines.
+Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ_policy` (keep ±15% unless version bump), pin boost, Q&A chunk maxima, whole-document summary section caps, and latency deadlines. Stage 15 must include a regression that additive policy domination cannot reappear under `rp-v1.0`.
 
 ---
 
@@ -942,14 +1086,16 @@ Similarity floor, near-paraphrase threshold, channel weights, λ, pin boost, chu
 | Case | Policy |
 | --- | --- |
 | Same assertion, many channels | Merge to one candidate |
-| Multiple revisions | Keep current revision only (historical query may keep prior as `eligible_historical` separately keyed) |
+| Multiple revisions | Retrieve the **current revision** of each eligible canonical assertion. Earlier revisions remain **provenance-only** unless an explicit canonical assertion/succession structure (or Stage 11 episode) represents historical truth — not merely older wording |
 | Merged assertions | Follow survivor id |
-| Superseded | Exclude as current; optional historical |
+| Superseded | Exclude as current; may be `eligible_historical` only via succession semantics authorizing historical use of that assertion |
 | Near-paraphrase (sim ≥ 0.92, same kind, overlapping temporal) | Keep highest Final; others penalty / drop from pack |
 | Distinct scopes or temporal periods | **Do not merge** |
 
-**Duplicate key (exact):** `assertion:{assertionId}:{assertionRevisionId}`  
-**Family key:** `assertion_family:{rootAssertionId or assertionId}`
+**Duplicate key (exact):** `assertion:{assertionId}:{assertionRevisionId}` (revision id is the **current** eligible revision)  
+**Family key:** `assertion_family:{rootAssertionId or assertionId}`  
+
+**Normative:** A prior revision is provenance, not automatically a historical fact. Do not key separate “historical” candidates from arbitrary earlier revisions of the same assertion.
 
 ### 14.2 Memory ↔ document
 
@@ -1028,13 +1174,29 @@ The model must not receive two contradictory records formatted as two equally se
 
 ## 16. Temporal and modality handling
 
-| Plan mode | Prefer | Exclude as settled current |
+| Plan mode (primary or facet) | Prefer | Exclude as settled current |
 | --- | --- | --- |
 | `current_state` | `temporal_phase=current`, in-window | historical/ended/expired-as-present, prospective-as-present |
-| `historical` | historical/ended + superseded as history | — |
+| `historical` | assertions with historical/ended phase; superseded assertions when succession authorizes historical use; distinct period assertions; Stage 11 episodes for distinct periods | Arbitrary earlier wording revisions; edit/normalization-only revisions; distrusted prior content; corrected-false revisions unless succession/trust explicitly authorizes historical truth |
 | `prospective` | prospective/planned | — |
 | `uncertain_or_options` | uncertain/conditional/hypothetical/planned | presenting them as asserted |
 | mixed / unknown | current primary; historical secondary | silent collapse |
+
+**Historical retrieval may use:**
+
+1. A canonical assertion whose temporal phase is historical or ended.  
+2. A superseded assertion linked through explicit succession semantics and still eligible for historical use.  
+3. A separate assertion representing a prior real-world period.  
+4. Stage 11 relationship episodes representing distinct periods.
+
+**Historical retrieval must not use:**
+
+1. Arbitrary earlier wording revisions.  
+2. A revision replaced because of spelling, formatting, normalization, or editing.  
+3. A corrected false revision unless explicit trust/succession state authorizes it as historical truth.  
+4. Distrusted prior content.
+
+Revision IDs remain in provenance and influence records for the **current** revision of each packed assertion; revision history is not factual history.
 
 Labels on `ContextRecord`: `temporalLabel`, `trustLabel`.
 
@@ -1066,11 +1228,42 @@ Answers Stage 11 handoff questions:
 ## 19. Document retrieval
 
 1. Require ready + ownership + fingerprint.  
-2. Semantic + FTS + exact filename.  
-3. Summarization mode: section diversity objective inside document cap.  
-4. Q&A mode: precision chunks.  
-5. Overlap merge rules §14.  
-6. Document instructions quoted as document content (`untrustedData: true`).
+2. Semantic + FTS + exact filename (subject to query disclosure for external embeds).  
+3. Scope from plan: `targeted_passage` | `section` | `whole_document`.  
+4. Overlap merge rules §14.  
+5. Document instructions quoted as document content (`untrustedData: true`).
+
+### 19.1 `targeted_passage`
+
+Use normal semantic/FTS/exact retrieval and `normal_q_and_a_max_chunks_per_document` (4).
+
+### 19.2 `section`
+
+Use ordered, adjacent, deduplicated chunks from the identified section under a section-specific budget (`max_chunks_per_section` and section token reserve).
+
+### 19.3 `whole_document` — honest summarisation decision tree
+
+Ordinary one-pass Q&A caps are **not** sufficient to claim a complete document summary.
+
+1. Confirm **one** resolved, ready, user-owned target document.  
+2. Build an ordered section/chunk coverage map.  
+3. If the complete useful document representation fits the available context, pack **complete ordered coverage** after overlap removal.  
+4. Otherwise, use a **derived document summary** only if:
+   - it is explicitly marked derived,
+   - it has complete chunk/section provenance,
+   - it is current for the document fingerprint,
+   - disclosure permits it,
+   - it is **never** treated as trusted memory.  
+5. If no current derived summary exists and complete coverage does not fit, ordinary one-pass retrieval **must not** claim to provide a complete summary.  
+6. Return one of:
+   - a clearly labelled **partial** summary,
+   - a scoped **section** summary,
+   - a limitation/clarification response,
+   - or a request for a staged hierarchical summarisation workflow.  
+7. A staged hierarchical summarisation workflow may be specified conceptually; **implementation remains deferred to Stages 16–17**.  
+8. **Do not** silently summarize a long PDF from four top-ranked chunks.
+
+Constants: `normal_q_and_a_max_chunks_per_document`, `whole_document_coverage_policy`, `whole_document_summary_max_source_sections` (§13). Influence records must label partial vs derived vs complete coverage.
 
 ---
 
@@ -1119,10 +1312,12 @@ Long thread 40 turns, budget 1200 history tokens:
 | Question | Decision |
 | --- | --- |
 | Always available locally | `display_name`, `persona` (and self entity id) |
-| Enter provider request | When `intentMode=identity` or plan requires personal identity/style; else optional low priority |
-| Deterministic direct answer | Name (and narrowly scoped identity) when no conflicting trusted assertion |
-| Bypass expensive retrieval | Allowed on clean direct identity hit |
-| Profile vs memory conflict | Conflict group; no silent single truth |
+| Enter provider request | When `primaryIntentMode='identity'` or identity/style facets require it; else optional low priority |
+| Deterministic direct answer | Only after complete canonical identity consistency check (§7.4) is complete and unambiguous |
+| Bypass expensive / external retrieval | Allowed on clean short-circuit; still no external call required for a clean name question |
+| Proof of non-conflict | Canonical self-grounded trusted current identity assertions + succession/conflict — **not** `memory_exact` miss |
+| Disable short-circuit | Conflicted identity, unresolved/rebuild-pending self, stale identity projection, multiple current names, lookup failure |
+| Profile vs memory conflict | Conflict group; no silent single truth; record influence for fields considered |
 
 ---
 
@@ -1140,32 +1335,35 @@ Approaches:
 
 ### 22.2 Order of operations
 
-1. Candidate retrieval (channels may use embeddings only if `allow_embedding` for those items — embedding disclosure enforced at index build time per Stages 9–10; query embed uses non-secret query text).  
-2. Local eligibility (including `local_only`).  
-3. **Disclosure summary:** sensitivity classes + flags among finalists.  
-4. Provider/model selection constrained by disclosure compatibility + capability metadata.  
-5. Disclosure filtering for selected provider.  
-6. Context packing to model window.  
-7. Inference.
+1. **Query disclosure preflight** (§7.0) — before any external query-processing call.  
+2. Candidate retrieval on **permitted** channels only. Stored `allow_embedding` governs whether an assertion may have been indexed externally historically; it does **not** authorize embedding the current query.  
+3. Local eligibility (including `local_only`).  
+4. **Evidence disclosure summary:** sensitivity classes + flags among finalists.  
+5. Provider/model selection constrained by disclosure compatibility + capability metadata.  
+6. Disclosure filtering for selected provider (withheld finalists recorded — §27).  
+7. Context packing to model window.  
+8. Inference (or deterministic local answer).
 
 ### 22.3 Flags
 
 | Flag | Meaning |
 | --- | --- |
-| `allow_inference` | May enter provider prompt for chat inference |
-| `allow_embedding` | May be embedded externally (index build; not Stage 12 write path) |
-| `allow_external_index` | May sync to external index |
-| BYOK | User-supplied keys still require disclosure flags; BYOK does not bypass user policy (**Assumption** aligned with Stage 7/9) |
+| `allow_inference` | May enter provider prompt for chat inference (evidence) |
+| `allow_embedding` | Stored assertion may be embedded externally (index **build**; not authorization to embed the live query) |
+| `allow_external_index` | Stored assertion may sync to external index |
+| QueryDisclosureDecision | Live-query purposes: external semantic / index search / planner / reranker |
+| BYOK | User-supplied keys still require both query and evidence disclosure; BYOK does not bypass (**Assumption** aligned with Stage 7/9) |
 
 ### 22.4 Outcomes
 
 | Situation | Behaviour |
 | --- | --- |
-| Best evidence cannot disclose to any available provider | Prefer local-only / direct deterministic answer if possible; else answer with reduced context + user-visible withhold notice |
+| Best evidence cannot disclose to any available provider | Prefer local-only / direct deterministic answer if possible; else answer with reduced context + user-visible withhold notice backed by influence rows |
 | Compatible alternative provider exists | Router may prefer disclosure-compatible provider |
-| Provider-restricted assertion | `local_only` or filter out for incompatible provider |
+| Provider-restricted assertion | `local_only` or filter out for incompatible provider; persist `drop_reason` |
 | Highly sensitive | Same; stricter defaults |
-| User told of withhold? | **Yes** — user-facing explanation; not raw secret content |
+| Query disclosure denies external channels | Local FTS/exact/entity/history only; degradation codes; no secret query in logs |
+| User told of withhold? | **Yes** — user-facing explanation; not raw secret content; **must** have corresponding influence/snapshot record |
 | No-context fallback | General knowledge / clarify / ask user; never fail-open secrets |
 
 ---
@@ -1260,7 +1458,8 @@ U(c) = \frac{\mathrm{Final}(c) + \gamma \cdot \mathbf{1}_{essential}}{1 + tokens
 | No evidence fits | Empty retrieval context; answer generally / ask clarification |
 | Very small window models | Raise similarity floor; keep conflict notices + top 1–2 assertions; shrink history aggressively |
 | Very large windows | Still enforce diversity caps; do not dump entire vault |
-| Tie-break | Higher WRRF, then exact match, then newer `last_confirmed_at`, then stable id |
+| `whole_document` scope | Follow §19.3; may exceed Q&A chunk cap when packing complete ordered coverage that fits; never claim completeness from four chunks |
+| Tie-break | Higher `Final`, then higher WRRF, then exact match, then newer `last_confirmed_at`, then stable `candidateId` |
 
 Prevents: profile monopolies, one long memory crowding atomics, overlapping chunk floods, history monopolies, low-value graph displacing direct evidence, ignoring metadata overhead (citation labels counted).
 
@@ -1301,9 +1500,12 @@ type ContextRecord = {
 type ContextPackage = {
   retrievalPolicyVersion: string;
   queryPlanSummary: {
-    intentMode: IntentMode;
+    primaryIntentMode: IntentMode;
+    intentFacets: IntentMode[];
     temporalModes: TemporalMode[];
+    documentRetrievalScope?: DocumentRetrievalScope;
     ambiguityFlags: string[];
+    queryDisclosureReasonCodes: string[];
   };
   systemPolicyRef: string; // separate — not mixed into records
   records: ContextRecord[];
@@ -1330,14 +1532,15 @@ type ContextPackage = {
 
 ## 26. Provider / model interaction
 
-1. DisclosureContextPlanner selects compatible provider class.  
-2. Model registry supplies context window + capabilities.  
-3. ContextPacker packs to that window.  
-4. ContextRenderer adapts `ContextPackage` to provider message schema.  
-5. Inference runs.  
-6. InfluenceRecorder persists what was **actually sent**.
+1. Query disclosure already constrained which external retrieval/planning/rerank calls ran.  
+2. Evidence DisclosureContextPlanner selects compatible provider class for inference.  
+3. Model registry supplies context window + capabilities.  
+4. ContextPacker packs to that window; disclosure-withheld finalists are not sent.  
+5. ContextRenderer adapts `ContextPackage` to provider message schema.  
+6. Inference runs (or deterministic local answer).  
+7. InfluenceRecorder persists sent, withheld, budget-dropped, notices, and direct-answer fields (§27).
 
-Routing may prefer disclosure-compatible providers. Framework/provider choice cannot redefine retrieval semantics (Invariant 26).
+Routing may prefer disclosure-compatible providers. Framework/provider choice cannot redefine retrieval semantics (Invariant 26). Optional rerankers receive only disclosure-approved query representation and candidate text.
 
 ---
 
@@ -1347,45 +1550,86 @@ Starting from Stage 9 `response_influence_records`.
 
 ### 27.1 Persist
 
-**Stage 12 decision:** Persist **selected records** + **final budget drops** of finalists + **conflict/ambiguity groups**. Optionally persist aggregated metrics for lower-ranked candidates (counts by channel/reason) without raw text.
+**Stage 12 decision — persist:**
 
-Do **not** store raw provider prompts for debugging by default.
+1. Every record **actually sent** to a provider (`sent_to_provider`).  
+2. Every finalist dropped because of token budget (`dropped_for_budget`).  
+3. Every finalist withheld because of provider disclosure incompatibility (`withheld_before_pack`).  
+4. Every rendered conflict or ambiguity notice.  
+5. Every identity field used in a deterministic direct answer (`used_in_deterministic_local_answer`).  
+6. Aggregated counts for lower-ranked candidates that never became finalists (no raw text).
 
-### 27.2 Fields per influence row / snapshot
+Do **not** store raw provider prompts, raw private evidence text, or secret raw query content for debugging by default.
+
+### 27.2 Final-state vocabulary (required in JSONB snapshot)
+
+A single ambiguous `selected` boolean is **insufficient** unless the snapshot carries exact final states:
+
+```text
+selected_for_pack
+sent_to_provider
+used_in_deterministic_local_answer
+withheld_before_pack
+dropped_for_budget
+```
+
+For disclosure-withheld finalists:
+
+```text
+selected = false
+drop_reason ∈ {
+  disclosure_denied,
+  provider_restricted,
+  no_compatible_provider,
+  query_disclosure_denied
+}
+```
+
+Also record: canonical IDs only; eligibility/disclosure codes; provider class considered; `retrieval_policy_version`; whether a user-visible withholding notice was shown. **A user-facing claim that context was withheld must have a corresponding influence/snapshot record.**
+
+### 27.3 Fields per influence row / snapshot
 
 | Field | Required |
 | --- | --- |
 | turn_id, assistant_message_id, user_id | Yes |
-| assertion_id + revision_id / document_chunk_id / identity_field / turn_ids | As applicable |
-| channel(s), channel ranks, fused rank | Yes (snapshot JSONB) |
-| score features (compact) | Yes for selected + budget drops |
+| assertion_id + **current** revision_id / document_chunk_id / identity_field / turn_ids | As applicable |
+| channel(s), channel ranks, WRRF, Final, fused rank | Yes for finalists (snapshot JSONB) |
+| score features (compact) | Yes for sent, budget drops, disclosure-withheld |
 | eligibility snapshot | Yes |
 | retrieval_policy_version | Yes |
 | embedding space/version | When used |
-| query-plan mode | Yes |
-| selected / dropped | Yes |
-| drop reason | When dropped |
-| context tokens consumed | Yes for selected |
-| provider disclosure decision | Yes |
-| citation label | Yes for selected |
+| primaryIntentMode + intentFacets | Yes |
+| documentRetrievalScope | When document evidence |
+| queryDisclosure reason codes (not raw query) | Yes |
+| final_state (vocabulary above) | Yes |
+| selected boolean | Compatible with Stage 9; interpret via final_state |
+| drop_reason | When not sent |
+| context tokens consumed | Yes when sent / packed |
+| provider disclosure decision + provider class | Yes for finalists |
+| citation label | Yes when sent |
 | conflict group id | When applicable |
+| user_visible_withhold_notice | Boolean when withheld |
+| document coverage label | `complete` / `partial` / `derived_summary` / `section` when docs |
 
-### 27.3 User-facing explanations (conceptual)
+### 27.4 User-facing explanations (conceptual)
 
 - “You saved this.”  
 - “Relevant to Project Atlas.”  
 - “Mentioned in your document.”  
 - “This was true in 2024.”  
 - “Two saved facts conflict.”  
-- “This context stayed private and was not sent to this model.”  
-- “This older conversation was not included because of the context limit.”  
+- “This context stayed private and was not sent to this model.” ← requires withheld influence row  
+- “This older conversation was not included because of the context limit.” ← requires budget-drop row  
+- “This is a partial summary of the document; full coverage did not fit.” ← coverage label  
 
 Correction entry points: Vault assertion, conflict decision, document open — UI deferred.
 
-### 27.4 Integrity rules
+### 27.5 Integrity rules
 
-- Every actually sent evidence record has an influence record.  
-- No influence record claims selected evidence that was not sent.  
+- Every actually sent evidence record has an influence record with `sent_to_provider`.  
+- No influence record claims `sent_to_provider` for evidence that was not sent.  
+- Every privacy-withholding explanation has a withheld influence/snapshot record.  
+- Direct identity answers record `used_in_deterministic_local_answer` for fields used.  
 - Thinking UI must be able to consume influence records (closes Stage 5 gap; UI implementation Deferred).
 
 ---
@@ -1414,9 +1658,12 @@ Correction entry points: Vault assertion, conflict decision, document open — U
 
 | Failure | Behaviour |
 | --- | --- |
+| Query disclosure denies external semantic/index/planner/reranker | Local FTS/exact/entity/project/history only; mark `query_disclosure_denied`; never log secret query |
 | Embedding provider outage | FTS + exact + entity/project/history; mark `embeddings_unavailable` |
 | Stale embeddings | Exclude stale hits; FTS/exact remain |
 | External index timeout | Ignore channel; PostgreSQL only |
+| Identity short-circuit disabled | Full local retrieval path; conflict/ambiguity as needed |
+| Whole-document coverage does not fit and no derived summary | Labelled partial / section / clarify / request staged workflow — never silent four-chunk “full” summary |
 | Graph `rebuild_pending` | Skip graph channel; mark `graph_incomplete` |
 | Reranker outage | No-op rerank |
 | Document search outage | Skip documents |
@@ -1448,8 +1695,16 @@ Reusable query embedding: one per space per turn; never duplicate for memory+doc
 | 13 | History flooding | Turn eligibility + reserve | Caps | — | Long thread test | No |
 | 14 | Conflict suppression | Conflict groups required | Packing reserve for notices | UI omission | Dual manager test | No |
 | 15 | Historical as current | Temporal gate + labels | Plan modes | Classifier error | Before-Athens test | No |
+| 15a | Old wording revision treated as historical fact | Revision≠history rule §16 | Current revision only; succession/phase for history | Misread revisions | Revision-vs-history test | No |
 | 16 | Uncertain as fact | Modality gate + labels | — | Classifier error | Plan uncertainty test | No |
-| 17 | Sensitive→wrong provider | Disclosure planner Option B | Filter before pack | Router bug | Sensitive withhold test | No |
+| 17 | Sensitive→wrong provider | Evidence disclosure planner Option B | Filter before pack; influence withheld rows | Router bug | Sensitive withhold test | No |
+| 17a | Secret query→external embed/index | QueryDisclosureDecision preflight | Deny external channels; local-only continue | Detector miss | Forbidden-secret query never leaves | No |
+| 17b | allow_embedding on assertion misused as query auth | Explicit separation in §7.0 / §22 | Preflight ignores stored allow_embedding for live query | Confusion | Query embed denied while assertion embed allowed | No |
+| 17c | External index search with raw secret query despite ID-only hits | Rule: query disclosure required | Block channel | Implementer shortcut | Index search denied for secret query | No |
+| 17d | Withhold UI without influence row | Persist withheld finalists | Integrity check | Bug | Withhold notice⇔influence | No |
+| 17e | Four-chunk fake full PDF summary | §19.3 decision tree | Coverage labels | Product pressure | Whole-doc honesty test | No |
+| 17f | Identity short-circuit via memory_exact miss | Canonical consistency check §7.4 | Disable on conflict/stale/self issues | Shortcut regression | Dual-name short-circuit disabled | No |
+| 17g | Additive policy domination revived | Multiplicative Final formula | Version pin rp-v1.0 | Formula drift | Policy ±15% math test | No |
 | 18 | Provider-restricted embedded externally | allow_embedding separate | Index workers | Worker bug | Restricted not externalized | No |
 | 19 | Missing provenance | Influence required for sent | Completion TX | Partial write | Influence completeness | No |
 | 20 | Stale revision retrieval | Revision match gate | stale_index | Race | Stale embed drop | No |
@@ -1501,15 +1756,19 @@ type RetrievalDegradation = {
     | 'channel_timeout'
     | 'partial_results'
     | 'tokenizer_unavailable'
-    | 'model_metadata_uncertain';
+    | 'model_metadata_uncertain'
+    | 'query_disclosure_denied'
+    | 'identity_short_circuit_disabled'
+    | 'whole_document_coverage_incomplete';
   channel?: RetrievalChannel;
   detailCode?: string;
 };
 
 type FusedCandidate = RetrievalCandidate & {
   wrrfScore: number;
-  policyScore: number;
-  finalScore: number;
+  policyRaw: number;
+  policyScore: number; // clipped [-1,1]
+  finalScore: number;  // WRRF × (1 + λ_policy × Policy)
   fusedRank: number;
 };
 
@@ -1521,26 +1780,49 @@ type ContextPackingDecision = {
   retrievalPolicyVersion: string;
 };
 
+type InfluenceFinalState =
+  | 'selected_for_pack'
+  | 'sent_to_provider'
+  | 'used_in_deterministic_local_answer'
+  | 'withheld_before_pack'
+  | 'dropped_for_budget';
+
 type InfluenceRecord = {
   userId: string;
   turnId: string;
   assistantMessageId: string;
   canonicalKind: CanonicalKind;
   assertionId?: string;
-  assertionRevisionId?: string;
+  assertionRevisionId?: string; // current revision of packed assertion
   documentChunkId?: string;
   identityField?: string;
   turnIds?: string[];
   channel: string;
   eligibilitySnapshot: Record<string, unknown>;
-  scoreSnapshot: Record<string, unknown>;
+  scoreSnapshot: Record<string, unknown>; // includes wrrf, policy, final
   relevance?: number;
+  /** Stage 9 column; interpret with finalState. */
   selected: boolean;
-  dropReason?: string;
+  finalState: InfluenceFinalState;
+  dropReason?:
+    | 'disclosure_denied'
+    | 'provider_restricted'
+    | 'no_compatible_provider'
+    | 'query_disclosure_denied'
+    | 'budget_exceeded_atomic'
+    | 'budget_dropped'
+    | 'deduped'
+    | string;
   citationLabel?: string;
   tokensConsumed?: number;
   disclosureDecision: string;
+  providerClassConsidered?: string;
+  userVisibleWithholdNotice?: boolean;
+  documentCoverageLabel?: 'complete' | 'partial' | 'derived_summary' | 'section';
   retrievalPolicyVersion: string;
+  primaryIntentMode: IntentMode;
+  intentFacets: IntentMode[];
+  queryDisclosureReasonCodes?: string[];
   conflictGroupId?: string;
 };
 ```
@@ -1558,10 +1840,10 @@ type InfluenceRecord = {
 | TX | none required |
 | Allowed | query text, attachment ids, prior snapshot ids |
 | Forbidden | granting trust; selecting ambiguous entity/project |
-| Failure | medium/low confidence broad plan |
+| Failure | medium/low confidence broad plan; primary + facets |
 | Idempotency | same turn fingerprint → same plan under planner version |
 | Current code | replaces ad hoc intent+always retrieve in Think/Chat |
-| Stage 9/11 | consumes entity/project resolvers |
+| Stage 9/11 | consumes entity/project resolvers; runs after query disclosure; identity short-circuit uses canonical consistency check |
 
 #### `HybridCandidateRetriever`
 
@@ -1573,9 +1855,9 @@ type InfluenceRecord = {
 | Credential | user |
 | TX | read snapshots |
 | Allowed | ids, ranks, scores |
-| Forbidden | remote authoritative text; cross-user |
+| Forbidden | remote authoritative text; cross-user; external calls when query disclosure denies |
 | Failure | per-channel degrade |
-| Relationship | wraps EmbeddingIndexPort, FTS, Document retriever, EntityQueryPort, ExternalMemoryIndexPort |
+| Relationship | wraps EmbeddingIndexPort, FTS, Document retriever, EntityQueryPort, ExternalMemoryIndexPort; respects QueryDisclosureDecision |
 
 #### `CanonicalEligibilityService`
 
@@ -1597,7 +1879,8 @@ type InfluenceRecord = {
 | Output | `FusedCandidate[]` |
 | Owner | Retrieval |
 | Failure | empty list |
-| Reproducibility | pinned `rp-v1.0` |
+| Reproducibility | pinned `rp-v1.0`; multiplicative Final formula |
+| Invariant | Policy cannot invent candidates; |Final − WRRF| ≤ 0.15 × WRRF |
 
 #### `RetrievalReranker`
 
@@ -1638,14 +1921,24 @@ type InfluenceRecord = {
 | Relationship | Stage 9 `conversation_turns` |
 | Failure | empty history + degrade |
 
+#### `QueryDisclosureService`
+
+| | |
+| --- | --- |
+| Input | rawQuery + user policy |
+| Output | `QueryDisclosureDecision` |
+| Owner | Disclosure |
+| Failure | deny external purposes (fail closed for external; continue local) |
+| Forbidden | logging secret query text |
+
 #### `DisclosureContextPlanner`
 
 | | |
 | --- | --- |
-| Input | finalists + available provider classes + model capabilities |
-| Output | selected provider class constraints + filtered candidates + withhold notices |
+| Input | finalists + available provider classes + model capabilities + queryDisclosure |
+| Output | selected provider class constraints + filtered candidates + withhold notices + influence stubs for withheld |
 | Owner | Disclosure + Routing |
-| Failure | prefer safer provider / reduced context |
+| Failure | prefer safer provider / reduced context; persist withhold reasons |
 
 #### `ContextPacker`
 
@@ -1666,16 +1959,27 @@ type InfluenceRecord = {
 | Current code | replaces `buildSystemPrompt` interpolation pattern |
 | Failure | plain-text safe fallback |
 
+#### `IdentityConsistencyChecker`
+
+| | |
+| --- | --- |
+| Input | userId + identity field hint |
+| Output | `{ ok: true, value }` or `{ ok: false, reason }` |
+| Owner | Identity / Stage 11 self entity + CAS |
+| Failure | disable short-circuit |
+| Forbidden | using memory_exact miss as proof of no conflict |
+
 #### `InfluenceRecorder`
 
 | | |
 | --- | --- |
-| Input | packing decision + rendered sent set + conflicts |
-| Output | `InfluenceRecord[]` persisted |
+| Input | packing decision + rendered sent set + withheld finalists + budget drops + conflicts + direct-answer fields |
+| Output | `InfluenceRecord[]` persisted with finalState vocabulary |
 | Owner | Explainability / Turn completion |
 | TX | with `complete_replied_turn` |
-| Forbidden | raw prompt dumps; other users’ data |
+| Forbidden | raw prompt dumps; secret raw query; other users’ data |
 | Relationship | Stage 9 `response_influence_records` (+ amendment snapshot fields) |
+| Integrity | withhold UI ⇒ withheld row; sent ⇒ sent_to_provider |
 
 ---
 
@@ -1687,11 +1991,11 @@ Do **not** edit Stage 9 or Stage 11 documents. Requests below are for owners to 
 
 | | |
 | --- | --- |
-| Missing capability | `response_influence_records` lacks explicit fields for fused rank, multi-channel ranks, score features, drop reason, tokens consumed, disclosure decision, citation label, policy version, conflict group id, identity/history targeting |
-| Why insufficient | Stage 12 must explain ranking, eligibility, dedupe, conflicts, budget drops; current columns (`channel`, `eligibility_snapshot`, `relevance`, `selected`) are too narrow if interpreted strictly |
-| Smallest compatible change | Extend `eligibility_snapshot` usage **or** add `explainability_snapshot jsonb` + widen `channel` check to include `conversation` / `relationship` / `conflict` / `ambiguity`; add `selected` already exists — use `selected=false` for budget drops; add `retrieval_policy_version text` on turn or influence row |
+| Missing capability | `response_influence_records` lacks explicit fields for fused rank, WRRF/Final, multi-channel ranks, score features, drop reason, tokens consumed, disclosure decision, citation label, policy version, conflict group id, identity/history targeting, and **final-state vocabulary** beyond a single `selected` boolean (sent / withheld / budget-drop / deterministic local answer) |
+| Why insufficient | Stage 12 must explain ranking, eligibility, dedupe, conflicts, budget drops, and **disclosure-withheld** finalists; user-facing withhold claims require durable rows; `selected` alone cannot distinguish `sent_to_provider` vs `withheld_before_pack` vs `dropped_for_budget` vs `used_in_deterministic_local_answer` |
+| Smallest compatible change | Add `explainability_snapshot jsonb` (or extend eligibility_snapshot) carrying finalState, drop_reason (`disclosure_denied` / `provider_restricted` / `no_compatible_provider` / `query_disclosure_denied` / budget codes), WRRF/Final, provider class, queryDisclosure reason codes (not raw query), user_visible_withhold_notice; widen `channel` check; keep `selected=false` for non-sent rows; store `retrieval_policy_version` on turn or influence |
 | Proceed without it? | **Yes** for design; implementation needs the JSONB snapshot convention |
-| Security/privacy | Snapshot must remain ids/flags/scores/codes — no raw private content |
+| Security/privacy | Snapshot must remain ids/flags/scores/codes — no raw private content, no secret raw query |
 | Approval | Stage 9 owner |
 
 ### 31.2 Stage 9 amendment request — Conversation turn eligibility for history
@@ -1752,47 +2056,47 @@ Stage 10/11 already requested Stage 9 processing-run tables, entity tables, etc.
 
 ## 32. Worked scenarios
 
-Format per scenario: plan → channels → candidates → eligibility → fusion → dedupe/conflict → disclosure → packing → representation → influence → degradation.
+Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query disclosure → channels → candidates → eligibility → fusion (`Final = WRRF × (1+λPolicy)`) → dedupe/conflict → evidence disclosure → packing → representation → influence (finalState) → degradation.
 
 ### 32.1 “What is my name?”
 
-- **Plan:** `identity`, temporal `[current]`, `directAnswerHint=identity_name`, `requiresPersonalContext=true`, expensive channels optional off if no conflict.  
-- **Channels:** identity; light memory_exact for conflicting identity assertions.  
-- **Eligibility:** display_name allowlisted; conflicting trusted identity assertion → cancel short-circuit.  
-- **Path:** clean → deterministic answer; influence records identity field; no LLM required.  
-- **Conflict path:** conflict group identity_conflict; pack both labeled conflicted; no single settled name.
+- **Plan:** `primaryIntentMode='identity'`, `intentFacets=[]`, temporal `[current]`, `directAnswerHint='identity_name'`, `requiresPersonalContext=true`.  
+- **Query disclosure:** local-only fine; no external required.  
+- **Short-circuit gate:** canonical identity consistency check (profile + self entity + trusted current self-grounded identity assertions + succession/conflict + current revision + Stage 11 primary-name) — **not** `memory_exact`.  
+- **Clean path:** deterministic answer; influence `used_in_deterministic_local_answer` for display_name; no LLM / no expensive retrieval.  
+- **Disable path:** conflicted/stale/unresolved self/multiple names → `identity_short_circuit_disabled`; full local retrieval; conflict group; no single settled name.
 
 ### 32.2 “Where do I live now?”
 
-- **Plan:** `current_state` + `personal_recall`, temporal `[current]`.  
-- **Channels:** memory semantic/FTS/exact; entity self; no historical boost.  
-- **Eligibility:** only current trusted residence; historical city → temporal_mode_mismatch or eligible_historical excluded from settled.  
+- **Plan:** `primaryIntentMode='current_state'`, `intentFacets=['personal_recall']`, temporal `[current]`.  
+- **Channels:** memory semantic/FTS/exact (if query disclosure allows semantic); entity self.  
+- **Eligibility:** only current trusted residence; historical city → temporal_mode_mismatch or excluded from settled (`eligible_historical` only if separately authorized as historical assertion — not an old revision of the current home assertion).  
 - **Pack:** top residence assertion(s); if two current conflict → conflict group.
 
 ### 32.3 “Where did I live before Athens?”
 
-- **Plan:** `historical`, temporal `[historical,ended]`.  
+- **Plan:** `primaryIntentMode='historical'`, `intentFacets=['personal_recall']`, temporal `[historical,ended]`.  
 - **Channels:** memory + entity place.  
-- **Eligibility:** historical/superseded residence eligible_historical; current Athens may appear as comparison anchor.  
+- **Eligibility:** historical/ended-phase assertions; superseded assertions via succession; distinct period assertions; **not** earlier wording revisions of the Athens assertion.  
 - **Presentation:** historical_change, not current.
 
 ### 32.4 “What medication do I take?”
 
-- **Plan:** `current_state`, personal; sensitivity likely highly_sensitive.  
-- **Eligibility + disclosure:** may be `local_only` / provider_restricted.  
-- **Disclosure planner:** pick compatible provider or withhold with notice.  
-- **Pack:** trusted current meds only; uncertain plans labeled.
+- **Plan:** `primaryIntentMode='current_state'`, `intentFacets=['personal_recall']`; highly_sensitive likely.  
+- **Query disclosure:** may deny external semantic/index if query itself highly sensitive / restricted → local channels only.  
+- **Evidence disclosure:** may be `local_only` / provider_restricted.  
+- **Withhold path:** influence `withheld_before_pack` + `drop_reason=disclosure_denied|provider_restricted|no_compatible_provider` + user notice.  
+- **Pack:** trusted current meds only when disclosable; uncertain plans labeled.
 
 ### 32.5 “What projects am I currently working on?”
 
-- **Plan:** `project_scoped` / `current_state`, graph optional.  
+- **Plan:** `primaryIntentMode='project_scoped'`, `intentFacets=['current_state']`, graph optional.  
 - **Channels:** project entity list via Stage 11 + assertions.  
-- **Eligibility:** active projects; ended excluded as current.  
-- **Ambiguity:** none unless labels collide in answer set — list distinct project entities.
+- **Eligibility:** active projects; ended excluded as current.
 
 ### 32.6 “What did we decide for Project Atlas?”
 
-- **Plan:** `project_scoped` + `conversation_recall` + personal.  
+- **Plan:** `primaryIntentMode='project_scoped'`, `intentFacets=['conversation_recall','personal_recall']` (sorted).  
 - **Resolve project:** if unique Atlas → bind; if ambiguous → §32.7.  
 - **Channels:** project assertions, relationship/decision episodes, conversation turns.  
 - **Pack:** decisions as assertions; conversation turns supporting; conflict_open marked.
@@ -1800,146 +2104,142 @@ Format per scenario: plan → channels → candidates → eligibility → fusion
 ### 32.7 Two Project Atlas entities under different organisations
 
 - **resolveProjectScopeLabel → ambiguous**.  
-- **Plan flags:** `ambiguous_project`; `projectEntityIds=[]`.  
-- **Behaviour:** ambiguity_notice; require clarification; **do not** merge evidence across both as one project.
+- **Plan:** `primaryIntentMode='project_scoped'`, facets as needed; flags `ambiguous_project`; `projectEntityIds=[]`.  
+- **Behaviour:** ambiguity_notice; require clarification; influence records notice; **do not** merge.
 
 ### 32.8 “Who is my manager?”
 
-- **Plan:** `relationship_focused` + `current_state`.  
-- **Channels:** relationship series/episodes `reports_to`/`managed_by` (types per Stage 11), supporting assertions.  
-- **One hop** to supporting assertions.  
+- **Plan:** `primaryIntentMode='relationship_focused'`, `intentFacets=['current_state']`.  
+- **Channels:** relationship series/episodes; one hop to supporting assertions.  
 - **Pack:** current episode supporting assertions; not graph edge as truth.
 
 ### 32.9 Current and former managers
 
-- **Plan:** may include historical if asked “current and former”; else current primary.  
-- **Episodes:** separate episodes; labels current vs historical.  
-- **Never collapse**.
+- **Plan:** `primaryIntentMode='relationship_focused'`, `intentFacets=['current_state','historical']` when both asked.  
+- **Episodes:** separate; labels current vs historical; never collapse; not revision archaeology.
 
 ### 32.10 Conflicting current managers
 
-- **conflict_open** episode and/or assertion conflict links.  
-- **Presentation:** needs_user_decision conflict group; both supporting assertions conflicted labels.
+- **conflict_open** / assertion conflicts → needs_user_decision group; influence conflict notice.
 
 ### 32.11 Returning to a previous employer
 
-- **Multiple episodes** same series different periods.  
-- **Pack:** distinct temporal labels; not one employment fact.
+- **Multiple Stage 11 episodes** / distinct period assertions; distinct temporal labels.
 
 ### 32.12 “What do I know about Sarah?”
 
-- **Plan:** `entity_focused`.  
-- **Resolve entity:** if one Sarah → bind; if two → ambiguity.
+- **Plan:** `primaryIntentMode='entity_focused'`, `intentFacets=['personal_recall']`.  
+- **Resolve:** one Sarah → bind; two → §32.13.
 
 ### 32.13 Two people named Sarah
 
-- **ambiguous_entity** notice; ask which Sarah; do not blend assertions.
+- **ambiguous_entity** notice; ask which Sarah.
 
 ### 32.14 “Summarise this PDF.”
 
-- **Plan:** `document_focused`; `requiresDocumentEvidence=true`.  
-- **Channels:** document semantic diversity across sections; ready required.  
-- **Pack:** max chunks/doc with section diversity; untrusted document records.
+- **Plan:** `primaryIntentMode='document_focused'`, `intentFacets=[]`, `documentRetrievalScope='whole_document'`, `requiresDocumentEvidence=true`.  
+- **Decision tree §19.3:** complete ordered coverage if fits; else current derived summary if eligible; else labelled partial / section / clarify / request staged workflow.  
+- **Forbidden:** claiming full summary from four top chunks (`normal_q_and_a_max_chunks_per_document`).  
+- **Influence:** documentCoverageLabel `complete`|`partial`|`derived_summary`.
 
 ### 32.15 “What does the PDF say about cancellation?”
 
-- **Document Q&A precision:** semantic+FTS on chunks; filename boost if referenced.
+- **Plan:** `primaryIntentMode='document_focused'`, `documentRetrievalScope='targeted_passage'`.  
+- **Q&A caps apply;** semantic+FTS; filename boost.
 
 ### 32.16 Same fact as memory and document
 
-- **Dedupe:** prefer trusted assertion for personal fact; optional one citation chunk if document asked; else drop duplicate chunk.
+- **Dedupe** across channels; prefer trusted assertion for personal fact unless document-focused citation needed.
 
 ### 32.17 Three overlapping document chunks
 
-- **Overlap penalties + merge adjacent;** pack ≤2/section.
+- **Overlap penalties + merge;** pack ≤ `max_chunks_per_section`.
 
 ### 32.18 “What is the capital of France?”
 
-- **Plan:** `general`, `requiresPersonalContext=false`.  
-- **Channels:** skip memory/doc/graph; minimal history if needed.  
-- **Pack:** empty personal context.
+- **Plan:** `primaryIntentMode='general'`, `intentFacets=[]`, `requiresPersonalContext=false`.  
+- **Skip** personal/doc/graph; empty personal pack.
 
 ### 32.19 “What did we discuss earlier?”
 
-- **Plan:** `conversation_recall`.  
-- **Channels:** history semantic + recent turns.  
-- **Exclude** incomplete turns.
+- **Plan:** `primaryIntentMode='conversation_recall'`, `intentFacets=[]`.  
+- **Eligible complete turns only.**
 
 ### 32.20 Very long conversation
 
-- **Reserved recent turns;** older via recall/summary; budget drops recorded.
+- **Reserved recent turns;** older via recall/summary; influence `dropped_for_budget` for truncated history.
 
 ### 32.21 Orphaned failed prior user turn
 
-- **Eligibility:** `turn_failed` / incomplete → excluded.
+- **Excluded** (`turn_failed` / incomplete).
 
 ### 32.22 Highly sensitive trusted memory denied to selected provider
 
-- **Disclosure:** withhold; user notice; answer without that evidence or refuse specifics.
+- **Evidence disclosure withhold;** user notice; influence `withheld_before_pack` + drop_reason; no raw text in logs.
 
 ### 32.23 Provider-restricted with compatible alternative provider
 
-- **Planner Option B:** route to compatible provider; pack evidence.
+- **Route** to compatible provider; pack evidence; influence sent_to_provider.
 
 ### 32.24 External index returns deleted assertion
 
-- **Reconcile:** missing/purged/deleted → drop; stale index mark; no remote text.
+- Runs only if `externalIndexSearchAllowed`; reconcile drop; no remote text; never send secret raw query.
 
-### 32.25 Embedding service unavailable
+### 32.25 Embedding service unavailable **or** query disclosure denies embedding
 
-- **Degrade:** FTS/exact/entity/history; `embeddings_unavailable`.
+- **Degrade:** FTS/exact/entity/history; `embeddings_unavailable` or `query_disclosure_denied`.
 
 ### 32.26 Graph projection `rebuild_pending`
 
-- **Skip graph;** `graph_incomplete`; other channels continue.
+- **Skip graph;** `graph_incomplete`.
 
 ### 32.27 Relationship episode `conflict_open`
 
-- **Include with conflict badge;** supporting assertions conflicted; not incompleteness.
+- Include with conflict badge; not incompleteness.
 
 ### 32.28 Historical query with superseded assertions
 
-- **eligible_historical;** presentation historical_change.
+- Superseded assertion via succession → `eligible_historical`; **not** prior wording revision of current assertion.
 
 ### 32.29 Uncertain prospective plan
 
-- **Modality planned/uncertain;** trustLabel uncertain; not settled.
+- **Plan:** `primaryIntentMode='prospective'`, `intentFacets=['uncertain_or_options']`; trustLabel uncertain.
 
 ### 32.30 Explicit correction request
 
-- **Plan:** `memory_management` / correction; retrieval grounds existing assertions; writes Deferred to Gateway (not Stage 12 write design beyond retrieval grounding).
+- **Plan:** `primaryIntentMode='memory_management'`, `intentFacets=['personal_recall']`, `memoryManagementAction='correct'`; retrieval grounds existing assertions.
 
 ### 32.31 Pinned but irrelevant memory
 
-- **Pin boost** insufficient vs low semantic/FTS; may not pack; pin cannot force.
+- Pin multiplies Final by at most 1.15 over WRRF; low channel rank stays low; cannot force pack; cannot grant trust.
 
 ### 32.32 Relevant low-confidence candidate assertion
 
-- **Eligibility:** candidate_not_trusted for settled truth → ineligible as trusted fact; may appear in review UX not ordinary context.
+- Hard eligibility: `candidate_not_trusted` for settled truth.
 
 ### 32.33 Relevant trusted assertion with stale embedding
 
-- **stale_embedding / stale_index** from vector channel; may still appear via FTS/exact if those indexes current.
+- Vector hit `stale_index`; may still appear via FTS/exact current indexes.
 
 ### 32.34 No relevant personal context
 
-- **Empty personal pack;** general answer; influence may record empty selected set.
+- Empty personal pack; influence may record empty sent set.
 
 ### 32.35 Context budget too small
 
-- **Conflict notices + top utilities;** drops with reasons; user-visible limitation if needed.
+- Conflict notices + top utilities; `dropped_for_budget` rows.
 
 ### 32.36 Document contains “ignore previous instructions”
 
-- **Rendered as untrusted document content;** system policy separate; Stage 15 adversarial.
+- Untrusted document content; system policy separate.
 
 ### 32.37 Memory text “always answer X”
 
-- **Untrusted memory record;** no system authority.
+- Untrusted memory; no system authority.
 
 ### 32.38 Same assertion via semantic, FTS, entity, project
 
-- **Merge one candidate;** provenance lists all channels/ranks; packed once.
+- One candidate; WRRF sums channel terms; policy multiplies once; packed once; influence lists channels.
 
 ---
 
@@ -1966,11 +2266,18 @@ Format per scenario: plan → channels → candidates → eligibility → fusion
 19. Conversation history consists of valid complete turns.  
 20. Token packing is model-specific and token-based.  
 21. Memory assertions are not truncated in meaning-changing ways.  
-22. Every actually sent evidence record has an influence record.  
-23. No influence record claims selected evidence that was not sent.  
+22. Every actually sent evidence record has an influence record with `sent_to_provider`.  
+23. No influence record claims `sent_to_provider` for evidence that was not sent.  
 24. Ranking and packing are reproducible under a pinned retrieval policy version.  
 25. Failure of an optional channel causes explicit degradation, not a policy fail-open.  
-26. Provider/framework choice cannot redefine retrieval semantics.
+26. Provider/framework choice cannot redefine retrieval semantics.  
+27. `Final(c) = WRRF(c) × (1 + λ_policy × Policy(c))` with `λ_policy = 0.15`; policy adjusts fusion by at most ±15% and cannot dominate or invent candidates (`WRRF=0` ⇒ `Final=0`).  
+28. Query disclosure preflight completes before any external embedding, external-index, planner-model, or reranker call; stored `allow_embedding` does not authorize embedding the live query.  
+29. A prior assertion revision is provenance, not automatically a historical fact.  
+30. Whole-document summarisation must not claim complete coverage from ordinary Q&A chunk caps.  
+31. Identity short-circuit requires a complete canonical consistency check; `memory_exact` miss is not proof of non-conflict.  
+32. Every user-visible privacy-withholding explanation has a corresponding disclosure-withheld influence/snapshot record.  
+33. `primaryIntentMode` is unique; `intentFacets` never duplicates the primary and is deterministically ordered.
 
 ---
 
@@ -1983,7 +2290,9 @@ Format per scenario: plan → channels → candidates → eligibility → fusion
 | Planner misclassification | Low-confidence broad recall; ambiguity flags |
 | Under-filling due to atomic no-truncate rule | Prefer more short atomics; Stage 15 measure |
 | Complexity vs current thin pipeline | Modular interfaces; feature flags Deferred to implementation stages |
-| Influence storage growth | Selected + budget drops + aggregates only |
+| Influence storage growth | Sent + budget drops + disclosure-withheld + aggregates; still no raw text |
+| Additive scoring accidentally revived | Normative multiplicative formula + Stage 15 math regression |
+| Fake full-doc summaries | §19.3 decision tree + coverage labels |
 
 ---
 
@@ -1996,7 +2305,9 @@ Format per scenario: plan → channels → candidates → eligibility → fusion
 | Empirical weight calibration | 15 |
 | Full Thinking provenance UI | implementation / product |
 | Tool message history rules | when tools ship |
-| Rolling summary generation algorithm | 10/16 |
+| Rolling conversation summary generation algorithm | 10/16 |
+| Staged hierarchical whole-document summarisation workflow implementation | 16–17 |
+| Derived document summary materialization pipeline | 10/16 |
 | Feedback-based ranking signals | product / 15 |
 | Multiple parallel provider context plans (Option C) | later if needed |
 | Exact near-paraphrase model | 15 |
@@ -2010,8 +2321,8 @@ Format per scenario: plan → channels → candidates → eligibility → fusion
 | Unknown | Why open |
 | --- | --- |
 | Live latency of parallel channels at vault scale | Needs Stage 15 soak |
-| Optimal λ and channel weights | Calibration |
-| How often identity short-circuit conflicts with memories | Telemetry |
+| Optimal multiplicative λ_policy and channel weights | Calibration (keep ±15% bound unless version bump) |
+| How often identity consistency check disables short-circuit | Telemetry |
 | Tokenizer variance across providers | Capability matrix |
 | User comprehension of conflict notices in prompt | UX / 15 |
 | Whether document FTS table is worth v1 | Amendment 31.3 |
@@ -2024,31 +2335,31 @@ Format per scenario: plan → channels → candidates → eligibility → fusion
 | --- | --- | --- |
 | 1 | What retrieval channels exist? | **Met** — §8 |
 | 2 | Which channels authoritative? | **Met** — §6.2 |
-| 3 | How is query classified? | **Met** — §7 |
+| 3 | How is query classified (multi-intent)? | **Met** — §7 primary+facets |
 | 4 | Ambiguous entities/projects? | **Met** — §7, §15, §18 |
 | 5 | Canonical reconciliation? | **Met** — §9 |
 | 6 | Exact eligibility gate? | **Met** — §10 |
 | 7 | Candidate representation? | **Met** — §11 |
-| 8 | Fusion/reranking design? | **Met** — §12 Option B |
+| 8 | Fusion/reranking design? | **Met** — §12 Option B multiplicative policy |
 | 9 | Initial weights/thresholds/limits/version? | **Met** — §13 `rp-v1.0` |
 | 10 | Hard filters vs ranking features? | **Met** — §12.2 |
-| 11 | Signal combination? | **Met** — WRRF + policy |
+| 11 | Signal combination? | **Met** — WRRF × (1+λPolicy); policy ≤±15% |
 | 12 | Dedup? | **Met** — §14 |
 | 13 | Contradictions? | **Met** — §15 |
-| 14 | Temporal/uncertain separation? | **Met** — §16 |
+| 14 | Temporal/uncertain separation? | **Met** — §16 (revision≠history) |
 | 15 | Relationship episodes without independent truth? | **Met** — §8.D, §17 |
-| 16 | Document overlaps? | **Met** — §14.3, §19 |
+| 16 | Document overlaps / whole-doc honesty? | **Met** — §14.3, §19.3 |
 | 17 | Conversation history? | **Met** — §20 |
 | 18 | Token budget? | **Met** — §23 |
 | 19 | Allocation/packing? | **Met** — §24 |
 | 20 | Assertion truncation safety? | **Met** — §24.4 |
 | 21 | Data vs instructions? | **Met** — §25 |
 | 22 | Indirect injection reduced? | **Met** — §25, §29 |
-| 23 | Provider disclosure? | **Met** — §22 |
+| 23 | Query + evidence disclosure? | **Met** — §7.0, §22 |
 | 24 | Model context size packing? | **Met** — §23–24 |
 | 25 | Degradation? | **Met** — §28 |
-| 26 | Selected/dropped explained? | **Met** — §27 |
-| 27 | Influence data persisted? | **Met** — §27 |
+| 26 | Sent/withheld/budget-dropped explained? | **Met** — §27 finalState |
+| 27 | Influence data persisted (incl. withheld)? | **Met** — §27 |
 | 28 | Amendments? | **Met** — §31 |
 | 29 | Explicitly deferred? | **Met** — §35 |
 | 30 | Stage 13 needs? | **Met** — §38 |
@@ -2074,6 +2385,8 @@ Stage 13 must evaluate frameworks/vendors **against** this retrieval architectur
 4. Does adoption preserve PostgreSQL canonicality, disclosure flags, and influence recording?  
 5. Latency/cost vs Option B baseline.  
 6. Failure behaviour when external service down (must match §28).  
+7. External query calls must honour QueryDisclosureDecision.  
+8. Must not redefine Final = WRRF × (1+λPolicy) semantics.  
 
 Stage 13 must **not** redefine eligibility, trust, conflict packing, or untrusted rendering.
 
@@ -2083,19 +2396,25 @@ Stage 13 must **not** redefine eligibility, trust, conflict packing, or untruste
 
 Evaluate at least:
 
-1. All §29 threats with automated/adversarial tests.  
+1. All §29 threats with automated/adversarial tests (including 17a–17g, 15a).  
 2. Calibration of §13 constants on labeled personal-query sets.  
-3. Scenarios §32.1–32.38 as golden decision traces.  
+3. Scenarios §32.1–32.38 as golden decision traces with valid `primaryIntentMode`/`intentFacets`.  
 4. Determinism under `rp-v1.0`.  
-5. Injection suites (PDF, memory, filename).  
-6. Disclosure routing correctness.  
-7. History eligibility (orphans excluded).  
-8. Influence sent≡recorded invariant.  
-9. Graph rebuild_pending / conflict_open behaviours.  
-10. Token estimator under/over-flow tests.  
-11. Ambiguous Atlas / dual Sarah tests.  
-12. External deleted-id tests.  
-13. Embedding outage FTS fallback quality.
+5. **Math regression:** multiplicative policy cannot dominate (rank-1 exact ±Policy examples); additive domination must fail the test.  
+6. Injection suites (PDF, memory, filename).  
+7. Query disclosure preflight: forbidden-secret query never reaches external embed/index/planner/reranker; `allow_embedding` on assertions ≠ query auth.  
+8. Evidence disclosure routing + withheld influence rows ↔ user notices.  
+9. History eligibility (orphans excluded).  
+10. Influence `sent_to_provider` ≡ actually sent; withhold explanations require rows.  
+11. Graph rebuild_pending / conflict_open behaviours.  
+12. Token estimator under/over-flow tests.  
+13. Ambiguous Atlas / dual Sarah tests.  
+14. External deleted-id tests; no raw secret query to index.  
+15. Embedding outage / query-disclosure-denied FTS fallback quality.  
+16. Revision-vs-history: older wording revision not treated as historical fact.  
+17. Whole-document honesty: four-chunk path cannot claim complete summary.  
+18. Identity short-circuit: dual current names / conflicted identity disables shortcut; clean name does not require external semantic.  
+19. Pin/policy relevance-only: cannot grant eligibility/trust; cannot create zero-WRRF candidates.
 
 ---
 
@@ -2113,7 +2432,7 @@ Evaluate at least:
 
 ### Questions for Stage 14 (red-team)
 
-1. Can WRRF+policy be gamed by bulk pinned paraphrases?  
+1. Can WRRF×policy (±15%) be gamed by bulk pinned paraphrases?  
 2. Are conflict notices sufficient to stop model side-taking?  
 3. Is Option B disclosure order attackable via sensitivity flooding?  
 4. Any amendment missing for safe implementation?
@@ -2138,6 +2457,13 @@ Evaluate at least:
 | Stage 5 documents failures | Addressed by design; code unchanged |
 | Stage 9 influence columns narrow | **Amendment request** §31.1 — not silent rewrite |
 | Stage 11 hop depth deferred | **Closed** here: zero default / one bounded |
+| Earlier Stage 12 draft: additive `Final = WRRF + λ·Policy` | **Superseded** — multiplicative `Final = WRRF × (1+λ·Policy)` so policy cannot dominate |
+| Earlier Stage 12 draft: single `intentMode` | **Superseded** — `primaryIntentMode` + `intentFacets` |
+| Earlier Stage 12 draft: disclosure only after retrieval | **Superseded** — query disclosure preflight before external calls |
+| Earlier Stage 12 draft: older revision as eligible_historical | **Superseded** — revision is provenance; history via phase/succession/episodes |
+| Earlier Stage 12 draft: summarise via Q&A chunk cap | **Superseded** — whole_document decision tree §19.3 |
+| Earlier Stage 12 draft: identity short-circuit via memory_exact | **Superseded** — canonical identity consistency check |
+| Earlier Stage 12 draft: influence = selected + budget drops only | **Superseded** — includes disclosure-withheld + finalState vocabulary |
 
 No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/graph rules bind.
 
@@ -2149,11 +2475,15 @@ No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/g
 - [x] No production implementation  
 - [x] Stages 0–11 not edited  
 - [x] Stage 13–17 not started  
-- [x] Option B selected with constants versioned  
+- [x] Option B selected with multiplicative policy constants versioned  
+- [x] Multi-intent plans (`primaryIntentMode` + `intentFacets`)  
+- [x] Query disclosure preflight before external calls  
+- [x] Revision≠history; whole-doc decision tree; identity consistency gate  
+- [x] Influence finalState incl. disclosure-withheld  
 - [x] Eligibility/disclosure/packing/graph/history/rendering specified  
 - [x] Amendments recorded  
-- [x] 38 scenarios traced  
-- [x] 26 invariants listed  
+- [x] 38 scenarios traced with valid plans  
+- [x] Invariants listed (incl. 27–33)  
 - [x] Acceptance criteria assessed  
 
 ---
