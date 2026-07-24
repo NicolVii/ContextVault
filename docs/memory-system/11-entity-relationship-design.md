@@ -20,7 +20,7 @@
 | Assertion grounding (`memory_assertion_entities`) | **Canonical operational role→entity links** for a revision (kept in sync with mention resolution; not a free-floating second identity store) |
 | Entity-resolution candidates / scope-label candidates | **Candidate operational data** |
 | Relationship **series** + **episodes** + support | **Derived and rebuildable** projections supported by assertions; multiple temporal episodes may coexist (exact-bounds episode keys §26) |
-| Pairwise **episode relations** (overlap/containment/adjacency/disjoint/unknown) | **Derived and rebuildable dense set** — table `memory_entity_relationship_episode_relations` (§26.3); `N(N-1)/2` rows; missing ≠ disjoint |
+| Pairwise **episode relations** (overlap/containment/adjacency/disjoint/unknown) | **Derived and rebuildable dense set** — table `memory_entity_relationship_episode_relations` (§26.3); `P(P-1)/2` for participating episodes (`active`∪`conflict_open`); missing ≠ disjoint |
 | Relationship **user decisions** (confirm/reject/suppress display) | **Canonical operational** — survive full series/episode rebuilds (§23.1); splits may mark `needs_review` |
 | Entity search indexes | **Derived and rebuildable** (Stage 7 derived layer) |
 
@@ -38,8 +38,9 @@ Binding product rules:
 10. Provisional entity creation is rate- and count-limited; overflow leaves mentions unresolved or queued for review.
 11. User relationship confirmations, rejections, and display preferences are stored as **canonical operational decisions**, never only on derived series/episode rows.
 12. Mentions have an explicit retention lifecycle (`active` / `archived` / …); archival and purge are schema-backed (§13.4).
-13. Pairwise temporal relations (incl. `disjoint`/`unknown`) live densely in `memory_entity_relationship_episode_relations` (`N(N-1)/2`), not a scalar on one episode; missing ≠ disjoint.  
-14. `series_identity_key` uses distinct asymmetric vs symmetric formulas (§23.1).
+13. Pairwise temporal relations (incl. `disjoint`/`unknown`) live densely in `memory_entity_relationship_episode_relations` (`P(P-1)/2` for `active`∪`conflict_open` episodes), not a scalar on one episode; missing ≠ disjoint.  
+14. `series_identity_key` uses distinct asymmetric vs symmetric formulas (§23.1).  
+15. `conflict_open` is a reconciled, queryable conflict flag — not incompleteness; `rebuild_pending` / `inactive` are non-participating for dense relations and Stage 12.
 
 This document answers Stage 10’s five handoff questions, defines exact tables/services/commands/jobs, and hands Stage 12 safe query contracts **without** ranking or packing.
 
@@ -900,7 +901,7 @@ Selected structure:
 
 1. `memory_entity_relationship_series` — derived identity of `(user, source_entity, target_entity, relationship_type)`.  
 2. `memory_entity_relationship_episodes` — one row per **exact temporal identity** episode (e.g. 2018–2020 and 2024–2026 coexist).  
-3. `memory_entity_relationship_episode_relations` — dense pairwise temporal relations among active episodes (`N(N-1)/2`; §26.3).  
+3. `memory_entity_relationship_episode_relations` — dense pairwise temporal relations among participating episodes (`active`∪`conflict_open`; `P(P-1)/2`; §26.3).  
 4. `memory_entity_relationship_support` — ties assertions/revisions to an **episode**.  
 5. `memory_entity_relationship_user_decisions` — **canonical operational** user confirm/reject/suppress/restore (§23.1).  
 6. Support cites assertion + revision + mentions.  
@@ -1206,9 +1207,43 @@ Scalar `overlap_status` on a single episode **cannot** represent “contains B, 
 
 **`memory_entity_relationship_episode_relations`** — fully derived and rebuildable.
 
+#### Participating episode states (normative)
+
+`memory_entity_relationship_graph_state` vocabulary:
+
+```text
+active | inactive | conflict_open | rebuild_pending
+```
+
+```text
+participating_episode_states =
+  active
+  conflict_open
+
+non_participating_episode_states =
+  inactive
+  rebuild_pending
+```
+
+Episodes in a **participating** state:
+
+1. Remain queryable.  
+2. Appear in relationship timelines.  
+3. Participate in pairwise temporal relation calculation.  
+4. Count toward dense-set completeness (`P`).  
+5. May support Stage 12 explainability (with conflict badge when `conflict_open`).  
+6. Are included when computing `has_temporal_overlap`.
+
+**Clarify:**
+
+- `conflict_open` is a **valid, queryable** episode with unresolved contradiction or cardinality conflict — **not** deleted, inactive, or incomplete.  
+- `inactive` episodes do **not** enter the current derived relation set.  
+- `rebuild_pending` episodes (or series) are **incomplete** and must **not** be consumed by Stage 12.  
+- Deleted or purged derived episodes are **absent rows** (removed by rebuild). `deleted` and `purged` are **not** values of `memory_entity_relationship_graph_state`.
+
 #### Dense pairwise rule (normative)
 
-For every unordered pair of **active** episodes within the same relationship series, store **exactly one** derived relation row. The closed vocabulary is:
+For every unordered pair of **participating** episodes within the same relationship series, store **exactly one** derived relation row. The closed vocabulary is:
 
 | `relation_type` (left relative to right) | Meaning |
 | --- | --- |
@@ -1222,40 +1257,83 @@ For every unordered pair of **active** episodes within the same relationship ser
 
 **Absence of a row must never mean `disjoint`.** Absence means the derived relation set is incomplete, stale, not yet rebuilt, or inconsistent.
 
-For a reconciled series with `N` active episodes (`episode_state='active'`; exclude inactive, deleted, purged, rebuild_pending):
-
 ```text
-episode_relation_count = N × (N - 1) / 2
+P = count of episodes where
+    episode_state IN ('active', 'conflict_open')
 ```
 
-Examples: 1→0, 2→1, 3→3, 4→6 relation rows.
+For a reconciled series:
+
+```text
+episode_relation_count = P × (P - 1) / 2
+```
+
+Examples: P=1→0, P=2→1, P=3→3, P=4→6 relation rows.  
+Case A: one `active` + one `conflict_open` ⇒ P=2 ⇒ 1 row.  
+Case B: one `active` + two `conflict_open` ⇒ P=3 ⇒ 3 rows.
 
 **Canonical orientation:** `left_episode_id < right_episode_id` (UUID order). `relation_type` describes **left relative to right**. Read-time may expose the inverse (`contains` ↔ `contained_by`, `adjacent_before` ↔ `adjacent_after`; `overlapping` / `disjoint` / `unknown` are self-inverse).
 
 **Uniqueness:** `(user_id, series_id, left_episode_id, right_episode_id)`.
 
+#### Reconciled series states (normative)
+
+A series may be **fully reconciled and queryable** when:
+
+```text
+series_state IN ('active', 'conflict_open')
+```
+
+`conflict_open` on a series means unresolved factual, temporal, or cardinality conflict in the **derived** relationship. It does **not** mean the projection is incomplete.
+
+A series is **not** safe for Stage 12 consumption when:
+
+```text
+series_state IN ('inactive', 'rebuild_pending')
+```
+
+**Reconciliation completeness** (no new completeness column in Stage 11):
+
+1. `series_state` is `active` or `conflict_open`.  
+2. All participating episodes use the current `relationship_projector_version`.  
+3. All episode-relation rows use that same projector version.  
+4. Dense pair count equals `P(P-1)/2`.  
+5. The reconciliation transaction completed successfully.
+
+A conflict flag (`conflict_open`) and a rebuild-completeness state (`rebuild_pending`) must **never** be confused.
+
+#### Conflict / participation rebuild behaviour
+
+| Transition | Behaviour |
+| --- | --- |
+| `active` → `conflict_open` | Remains participating; P unchanged; relation rows retained or deterministically recomputed; expected dense count does **not** decrease; Stage 12 may show conflict badge; assertion trust unchanged |
+| `conflict_open` → `active` | Remains participating; P unchanged; relations retained or recomputed; expected count unchanged merely because conflict closed |
+| participating → `inactive` | Remove all relation rows involving that episode; recalculate P; rebuild complete dense set for remaining participating episodes |
+| → `rebuild_pending` (series or episode) | Incomplete; Stage 12 must not consume until reconciliation finishes and final state is `active` or `conflict_open` |
+
 **Projector obligations:**
 
-1. Build or replace the **complete dense** relation set in the same reconciliation TX / versioned rebuild as the episode set.  
+1. Build or replace the **complete dense** relation set over **participating** episodes in the same reconciliation TX / versioned rebuild as the episode set.  
 2. Store `disjoint` and `unknown` explicitly — never omit.  
 3. Never interpret a missing row as a temporal relation.  
-4. Detect `episode_relation_count ≠ N(N-1)/2` as derived-state drift and rebuild.  
-5. Rebuild the complete set when an episode is added, removed, corrected, or changes temporal identity.  
-6. Delete stale relation rows when an episode disappears.  
+4. Detect `episode_relation_count ≠ P(P-1)/2` as derived-state drift and rebuild.  
+5. Rebuild the complete set when an episode is added, removed, corrected, changes temporal identity, or changes participation (`inactive` ↔ participating).  
+6. Delete stale relation rows when an episode leaves the participating set or disappears.  
 7. Use the same `relationship_projector_version` as the episode set.  
-8. Stage 12 must consume only reconciled series (matching projector version / completeness), or be given an explicit completeness flag.
+8. Opening or closing `conflict_open` alone must not drop pairs or shrink the expected dense count.  
+9. Stage 12 must consume only reconciled series (`series_state IN (active, conflict_open)` with matching projector version / `P(P-1)/2` completeness), or be given an explicit incompleteness signal — never treat `rebuild_pending` as reconciled.
 
 **Constraints:**
 
 1. Both episodes same `user_id` and same `series_id` (composite FKs — §38.7c).  
 2. `left_episode_id < right_episode_id` (implies ≠).  
-3. Only active episodes participate.  
+3. Only **participating** episodes (`active`, `conflict_open`) enter the dense set.  
 4. No user decisions or assertion trust stored here.  
 5. Does not grant or alter assertion trust.
 
-**Reconciliation invariant:** for each reconciled series, `episode_relation_count = active_episode_count × (active_episode_count - 1) / 2`.
+**Reconciliation invariant:** for each reconciled series, `episode_relation_count = P × (P - 1) / 2` where `P` counts episodes with `episode_state IN ('active','conflict_open')`.
 
-**Optional episode cache:** `has_temporal_overlap boolean` — derived convenience (`true` if any pairwise row is `overlapping|contains|contained_by`). **Not authoritative.**
+**Optional episode cache:** `has_temporal_overlap boolean` — derived convenience over the participating dense set (`true` if any pairwise row is `overlapping|contains|contained_by`). **Not authoritative.**
 
 Identical `undated_current` keys collapse to one episode (same key); they do not create a self-pair.
 
@@ -1263,20 +1341,21 @@ Identical `undated_current` keys collapse to one episode (same key); they do not
 
 | Level | Rule |
 | --- | --- |
-| Episode | `conflict_open` if ≥1 active `conflicts_with` among member assertions, or contradictory trusted supports under same key |
-| Series | `conflict_open` if any episode conflict_open **or** >1 trusted `temporal_class=current` episode when type has single-current cardinality hint |
+| Episode | `conflict_open` if ≥1 active `conflicts_with` among member assertions, or contradictory trusted supports under same key — **still participating** in dense relations |
+| Series | `conflict_open` if any episode conflict_open **or** >1 trusted `temporal_class=current` participating episode when type has single-current cardinality hint — **still reconciled/queryable** when projector complete |
 
-Never auto-distrust assertions for graph cardinality.
+Never auto-distrust assertions for graph cardinality. Never treat `conflict_open` as `rebuild_pending` incompleteness.
 
 ### 26.5 Stage 12 presentation
 
-1. List episodes separately with bounds + support counts.  
-2. Load pairwise relations via `listEpisodeRelations` / `listRelationsForEpisode` (dense set; never treat missing as disjoint; never infer one period from overlap).  
+1. List **participating** episodes separately with bounds + support counts; surface `conflict_open` with a conflict badge.  
+2. Load pairwise relations via `listEpisodeRelations` / `listRelationsForEpisode` (dense set over `active`∪`conflict_open`; never treat missing as disjoint; never infer one period from overlap).  
 3. Do not present historical/`ended` as current.  
 4. Show user decision badges from canonical decision table (`application_state='active'` only).  
 5. Evidence per period = that episode’s support assertions (explainability).  
 6. Never apply `needs_review` decisions as active confirmations.  
-7. Never use archived/purged mentions for live retrieval or reconstruct purged text.
+7. Never use archived/purged mentions for live retrieval or reconstruct purged text.  
+8. Reject or mark incomplete any series with `series_state IN ('inactive','rebuild_pending')` or denseness/version mismatch.
 
 ### 26.6 Worked temporal patterns
 
@@ -1289,6 +1368,8 @@ Never auto-distrust assertions for graph cardinality.
 | Friend without dates | One `undated_current` |
 | Office Athens→London | Two `located_in` episodes (different targets ⇒ different series; if same place with changed_over_time phases, distinct keys) |
 | Correction | Rebuild from new revision identities only |
+| Active + conflict_open pair | Both count in P; one relation row; conflict badge on conflict_open |
+| Series rebuild_pending | Not Stage 12–safe until active or conflict_open |
 
 ---
 
@@ -1517,6 +1598,9 @@ memory_entity_mention_resolution_state:
 memory_entity_relationship_type: <closed set from §24>
 memory_entity_relationship_authority: candidate | trusted
 memory_entity_relationship_graph_state: active | inactive | conflict_open | rebuild_pending
+  # participating for dense relations / Stage 12: active | conflict_open
+  # non-participating: inactive | rebuild_pending
+  # deleted/purged are NOT values of this enum (absent derived rows only)
 memory_entity_relationship_temporal_class:
   current | historical | prospective | ended | unknown
 memory_entity_relationship_decision_type:
@@ -1745,7 +1829,8 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 **Rebuildable:** **Yes** (re-apply user decisions after rebuild).  
 **Note:** Uniqueness is on the **series identity**, not on a single temporal period.  
 **Canonical user decisions:** `memory_entity_relationship_user_decisions` only.  
-**Dense relations:** after reconcile, episode_relations row count must equal `N(N-1)/2` for N active episodes.
+**Dense relations:** after reconcile, episode_relations row count must equal `P(P-1)/2` for P participating episodes (`episode_state IN (active, conflict_open)`).  
+**Reconciled series states:** `series_state IN (active, conflict_open)` may be queryable when denseness/version match; `inactive`/`rebuild_pending` are not Stage 12–safe.
 
 ### 38.7b `memory_entity_relationship_episodes` — **derived temporal periods**
 
@@ -1775,7 +1860,9 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
 **Rebuildable:** **Yes** (row UUIDs may change; `episode_key` stable for same identity+projector version).  
 **Writers:** EntityRelationshipProjector only.  
 **Join rule:** supports attach only when their computed `episode_key` matches — **no soft overlap merge**.  
-**Pairwise overlap:** dense `memory_entity_relationship_episode_relations` (not a scalar here).  
+**Pairwise overlap:** dense `memory_entity_relationship_episode_relations` over participating states (`active`∪`conflict_open`; not a scalar here).  
+**Participating:** `episode_state IN ('active','conflict_open')` — `conflict_open` remains queryable and counts toward dense completeness.  
+**Non-participating:** `inactive`, `rebuild_pending` — excluded from dense set; `rebuild_pending` incomplete for Stage 12.  
 **Allows:** multiple episodes per series (e.g. works_at 2018–2020 and 2024–2026).
 
 ---
@@ -1807,7 +1894,7 @@ deletion_scope_type += entity   # optional single-entity deletion workflow
   → memory_entity_relationship_episodes(user_id, series_id, id)
 ```
 These structurally guarantee same user, same series, no cross-series/cross-user pairs, and no self-pairs (with the CHECK).  
-**Dense completeness:** for N active episodes on the series, exactly `N(N-1)/2` rows; `disjoint` and `unknown` stored explicitly; missing row ≠ disjoint.  
+**Dense completeness:** for P participating episodes (`active`∪`conflict_open`), exactly `P(P-1)/2` rows; `disjoint` and `unknown` stored explicitly; missing row ≠ disjoint; opening/closing conflict alone does not change P.  
 **Rebuildable:** **Yes** — deleted and recreated on series/episode rebuild (same projector version as episodes).  
 **Writers:** EntityRelationshipProjector only.  
 **No** user decisions, trust, or assertion authority stored here.  
@@ -1965,7 +2052,7 @@ Reuse Stage 9 `deletion_workflows` / steps; add steps in §56. Optional `memory_
 10. `primary_label` may only change via primary-alias sync TX.  
 11. Relationship user decisions are same-user only; workers cannot insert owner confirmations.  
 12. Mention archive/purge commands enforce eligibility (§13.4).  
-13. Episode_relations both episodes same user and same series; left < right; dense completeness `N(N-1)/2` after reconcile.  
+13. Episode_relations both episodes same user and same series; left < right; dense completeness `P(P-1)/2` over participating (`active`∪`conflict_open`) after reconcile.  
 14. `series_identity_key` recomputed after merge/split; never includes assertion/episode/trust.  
 15. CHECK `source_entity_id <> target_entity_id` for nonsensical self-loops except allowed types none in v1 for person-self loops on reports_to etc. Self may appear as source of reports_to.  
 16. Composite FK parents expose compatible unique keys: series `UNIQUE (user_id, id)`; episodes `UNIQUE (user_id, series_id, id)`; entities/aliases/mentions `UNIQUE (user_id, id)`.
@@ -2016,8 +2103,9 @@ EntityAliasStore
 
 EntityRelationshipProjector
   → reads grounding + assertions + disclosure
-  → writes series + episodes + support + dense episode_relations (rebuildable; exact episode_key; `N(N-1)/2`)
+  → writes series + episodes + support + dense episode_relations (rebuildable; exact episode_key; `P(P-1)/2` over active∪conflict_open)
   → stores disjoint/unknown explicitly; missing row = drift, never disjoint
+  → keeps conflict_open episodes in the participating set; inactive drops pairs and rebuilds
   → sets optional has_temporal_overlap cache from pairwise rows
   → reapplies active user decisions onto series caches
 
@@ -2109,8 +2197,10 @@ interface EntityRelationshipProjector {
   reconcileForAssertion(userId: string, assertionId: string, revisionId: string): Promise<void>;
   rebuildForEntity(userId: string, entityId: string): Promise<void>;
   // Writes series + episodes + support + dense episode_relations (§26.3) using exact temporal identity;
-  // never merges non-identical episode_keys; stores disjoint/unknown explicitly;
-  // enforces episode_relation_count = N(N-1)/2 for active episodes; then reapplies active user decisions
+  // participating = episode_state IN (active, conflict_open); never merges non-identical episode_keys;
+  // stores disjoint/unknown explicitly; enforces episode_relation_count = P(P-1)/2;
+  // conflict_open remains participating (P unchanged on open/close conflict alone);
+  // then reapplies active user decisions
 }
 
 interface RelationshipUserDecisionStore {
@@ -2188,8 +2278,8 @@ Workers **must not** set `user_confirmed` / confirm merge/split / invent trusted
 | --- | --- | --- | --- | --- |
 | `resolve_assertion_entities` | assertion | assertion_id, revision_id, resolver_version | per revision+version | stale revision abort |
 | `resolve_document_entity_mentions` | document | document_id, content_sha256 | per fingerprint | cancel on delete |
-| `project_entity_relationships` | assertion | assertion_id, revision_id, relationship_projector_version | per revision | rebuilds series/episodes + dense episode_relations (`N(N-1)/2`) + reapply decisions |
-| `rebuild_entity_relationships` | entity | entity_id, reason | per entity+version | sole normative name; former draft `rebuild_entity_projection` superseded — do not dual-register; rebuilds complete dense relation set |
+| `project_entity_relationships` | assertion | assertion_id, revision_id, relationship_projector_version | per revision | rebuilds series/episodes + dense episode_relations (`P(P-1)/2` over active∪conflict_open) + reapply decisions |
+| `rebuild_entity_relationships` | entity | entity_id, reason | per entity+version | sole normative name; former draft `rebuild_entity_projection` superseded — do not dual-register; rebuilds complete dense relation set over participating episodes |
 | `reapply_relationship_user_decisions` | relationship_series or user | series_identity_key | per key+updated_at | cache only |
 | `archive_eligible_mentions` | user | soft_cap, as_of | per user+day | §13.4 |
 | `reconcile_self_entity_profile` | user | profile_updated_at | per profile version | |
@@ -2233,7 +2323,7 @@ Evidence required for user questions:
 | Hidden from provider? | disclosure policy on supporting assertions / sensitivity_floor |
 | Why hidden / rejected / confirmed in UX? | `memory_entity_relationship_user_decisions` row (survives rebuild) |
 | Why needs review after split? | `application_state=needs_review` + `entity_split_ambiguous` |
-| How do these periods relate? | `episode_relations` pairwise rows (which other episode + relation_type) |
+| How do these periods relate? | `episode_relations` pairwise rows over participating episodes (which other episode + relation_type); include `conflict_open` pairs |
 | Why was this mention archived/purged? | `retention_state` + reason codes; purged has no reconstructible text |
 
 ---
@@ -2318,7 +2408,8 @@ interface EntityQueryPort {
   explainRelationshipEpisode(userId, episodeId): RelationshipEpisodeExplanation;
   explainRelationshipSeries(userId, seriesId): RelationshipSeriesExplanation;
   listEpisodeRelations(userId, seriesId): RelationshipEpisodeRelationRef[];
-  // Requires reconciled series: episode_relation_count = N(N-1)/2; never treat missing as disjoint
+  // Requires reconciled series: series_state IN (active, conflict_open);
+  // episode_relation_count = P(P-1)/2 for participating episodes; never treat missing as disjoint
   listRelationsForEpisode(userId, episodeId): RelationshipEpisodeRelationRef[];
   listRelationshipUserDecisions(userId, seriesIdentityKey): DecisionRef[]; // active only for display caches
 
@@ -2334,8 +2425,10 @@ interface EntityQueryPort {
   // - not present historical episodes as current
   // - not collapse multiple episodes into one fact
   // - not merge overlapping non-identical temporal identities
-  // - present dense pairwise episode_relations (never one scalar; never infer missing=disjoint)
-  // - use only reconciled series (matching projector version / completeness) or explicit incomplete flag
+  // - present dense pairwise episode_relations over active∪conflict_open (never one scalar; never infer missing=disjoint)
+  // - use only reconciled series: series_state IN (active, conflict_open) with matching projector version / P(P-1)/2
+  // - reject or mark incomplete series_state IN (inactive, rebuild_pending)
+  // - surface conflict_open with conflict badge; do not confuse conflict with incompleteness
   // - not pick an arbitrary project when scope label is ambiguous
   // - surface user decision badges from application_state=active only (exclude needs_review)
   // - ignore mentions with retention_state != active for live retrieval
@@ -2357,8 +2450,12 @@ Filters allowed: entity_id, kind, relationship_type, series_id, episode_id, temp
 | Deleted source mid-job | Mark source_deletion_state; continue on assertion |
 | Duplicate retry | Idempotent command_results |
 | Episode/series drift | rebuild_entity_relationships |
-| Episode relation count ≠ N(N-1)/2 | derived-state drift → rebuild complete dense set in same TX/version; never treat missing as disjoint |
-| Missing relation row interpreted as disjoint | forbidden; Stage 12 uses reconciled series only |
+| Episode relation count ≠ P(P-1)/2 | derived-state drift → rebuild complete dense set over participating episodes; never treat missing as disjoint |
+| Missing relation row interpreted as disjoint | forbidden; Stage 12 uses reconciled active∪conflict_open series only |
+| conflict_open treated as incomplete | forbidden; conflict remains participating/queryable when projector complete |
+| rebuild_pending consumed by Stage 12 | reject / mark incomplete until active or conflict_open |
+| active→conflict_open drops relation rows | forbidden; P and dense count unchanged by conflict open alone |
+| conflict_open→inactive leaves stale pairs | remove pairs involving episode; rebuild dense set for remaining P |
 | User decision cache drift | reapply_relationship_user_decisions (decisions win) |
 | Primary label drift | reconcile_entity_primary_label (alias wins) |
 | Self/profile drift | reconcile_self_entity_profile (profile wins primary) |
@@ -2418,11 +2515,13 @@ Filters allowed: entity_id, kind, relationship_type, series_id, episode_id, temp
 | 37 | Soft-overlap merges distinct jobs | Exact episode_key only | Projector v1 algorithm | Future clustering misuse | Partial-overlap → two episodes + relations test | 15 |
 | 38 | Soft-cap archives grounded mentions | §13.4 eligibility checks | Retention service | Race with grounding | Archive blocked_grounding test | 15 |
 | 39 | Archived/purged mentions re-enter resolution | retention_state='active' filter | Resolver queries active only | Missing filter | Purged excluded + null text test | 15 |
-| 40 | Scalar overlap loses multi-neighbour facts | dense episode_relations (`N(N-1)/2`) | Projector writes complete pair set incl. disjoint/unknown | Cache-only has_temporal_overlap misuse; missing≠disjoint | Contains+overlaps+adjacent dense count test | 15 |
+| 40 | Scalar overlap loses multi-neighbour facts | dense episode_relations (`P(P-1)/2` over active∪conflict_open) | Projector writes complete pair set incl. disjoint/unknown | Cache-only has_temporal_overlap misuse; missing≠disjoint | Contains+overlaps+adjacent dense count test | 15 |
 | 41 | Split duplicates confirmations | needs_review policy | DecisionStore split handler | Bug copies both | Ambiguous split test | 15 |
 | 42 | Asymmetric key min/max collapse | Separate formulas §23.1 | Type registry symmetric flag | Wrong symmetry metadata | reports_to direction test | 15 |
 | 43 | Cross-series/cross-user episode pair | Composite FKs to series `(user_id,id)` and episodes `(user_id,series_id,id)` + left<right | Projector same-series only | Miswritten DEFINER | Cross-series/cross-user insert fails | 15 |
 | 44 | Incomplete dense relation set | Count invariant + same projector version | Rebuild jobs / Stage 12 reconciled-only | Lag before rebuild | Count mismatch → drift rebuild test | 15 |
+| 45 | conflict_open excluded from dense set | Participating = active∪conflict_open | Projector includes conflict_open in P | Treated as inactive | Case A/B/C Stage 15 fixtures | 15 |
+| 46 | Stage 12 reads rebuild_pending as complete | series_state gate | Query port rejects inactive/rebuild_pending | Missing gate | Case E incomplete-series test | 15 |
 
 ---
 
@@ -2604,13 +2703,28 @@ PDF yields >50 name-like mentions; after document cap, further mentions `review_
 User `relationship_suggestion_reject` writes canonical decision; later `rebuild_entity_relationships` recreates series/episodes; rejection remains; cache shows suppressed; explainability cites decision row.
 
 ### E55 — Partially overlapping employment dates
-Supports 2018–2021 and 2020–2022 → **two active episodes** (different exact keys); dense set has **exactly 1** `episode_relations` row (`N=2` ⇒ `2×1/2=1`) with `relation_type=overlapping`, `left_episode_id < right_episode_id`; not merged; series may be conflict_open if cardinality requires; no auto-distrust. Missing row would mean drift, not disjoint.
+Supports 2018–2021 and 2020–2022 → **two participating episodes** (different exact keys); dense set has **exactly 1** `episode_relations` row (`P=2` ⇒ `2×1/2=1`) with `relation_type=overlapping`, `left_episode_id < right_episode_id`; not merged; series may be `conflict_open` if cardinality requires (still reconciled/queryable); no auto-distrust. Missing row would mean drift, not disjoint.
 
 ### E56 — Soft-cap archives old unresolved mention
 Eligible unresolved mention archived: `retention_state=archived`, `mention_text_raw` null, **normalized retained**; fingerprint retained; excluded from resolution; still explainable to owner; grounded/confirmed mentions untouched.
 
 ### E57 — One episode contains B, overlaps C, adjacent D
-Four active episodes on one series ⇒ dense set has **exactly 6** relation rows (`4×3/2=6`), including the three neighbour relations from A plus the other pairs among B/C/D (each classified, including any `disjoint`/`unknown` explicitly). Optional `has_temporal_overlap=true` cache; Stage 12 lists each neighbour distinctly and never treats a missing pair as disjoint.
+Four participating episodes on one series ⇒ dense set has **exactly 6** relation rows (`P=4` ⇒ `4×3/2=6`), including the three neighbour relations from A plus the other pairs among B/C/D (each classified, including any `disjoint`/`unknown` explicitly). Optional `has_temporal_overlap=true` cache; Stage 12 lists each neighbour distinctly and never treats a missing pair as disjoint.
+
+### E60 — Active + conflict_open pair (Case A)
+Episode A `active`, Episode B `conflict_open` ⇒ `P=2`, exactly **1** relation row; both queryable; Stage 12 shows B with conflict badge; missing row ≠ disjoint.
+
+### E61 — One active + two conflict_open (Case B)
+Episodes A `active`, B/C `conflict_open` ⇒ `P=3`, exactly **3** relation rows; all three pairs present.
+
+### E62 — active → conflict_open (Case C)
+Episode opens conflict: participating count unchanged; dense relation count unchanged; relations retained or deterministically rebuilt; conflict badge shown; assertion trust unchanged.
+
+### E63 — conflict_open → inactive (Case D)
+Episode leaves participating set: all relation rows involving it removed; P recalculated; dense set rebuilt for remaining participating episodes.
+
+### E64 — Series rebuild_pending (Case E)
+`series_state=rebuild_pending` ⇒ Stage 12 rejects or marks relationship set incomplete; missing relations never interpreted as disjoint.
 
 ### E58 — Ambiguous split of confirmed “friend_of Sarah”
 Mentions split across two Sarahs without clear evidence → decision `application_state=needs_review`, `reason_code=entity_split_ambiguous`; caches not confirmed; user `relationship_decision_reassign`.
@@ -2663,7 +2777,7 @@ flowchart LR
     MR[Mention retention lifecycle]
   end
   subgraph derived [Derived rebuildable]
-    P[Series + episodes + support / search / scope candidates]
+    P[Series + episodes + dense episode_relations + support / search / scope candidates]
   end
   A --> E
   E --> C
@@ -2714,7 +2828,7 @@ flowchart TB
   G2 --> Ser
   Ser --> Ep[episode by exact episode_key]
   Sup --> Ep
-  Ep --> Rel[episode_relations pairwise]
+  Ep --> Rel[dense episode_relations over active∪conflict_open]
   Dec[user decisions active only] -.-> Ser
 ```
 
@@ -2924,14 +3038,18 @@ flowchart LR
 73. Archived mentions are excluded from active resolution and Stage 12 live retrieval.  
 74. Explainability APIs distinguish relationship **series** from relationship **episodes**.  
 75. Job name `rebuild_entity_relationships` is normative; former draft name `rebuild_entity_projection` is superseded and must not be dual-registered.  
-76. Pairwise temporal relations are stored densely in `memory_entity_relationship_episode_relations` (`N(N-1)/2` for N active episodes), not as a scalar `overlap_status` on episodes.  
+76. Pairwise temporal relations are stored densely in `memory_entity_relationship_episode_relations` (`P(P-1)/2` for participating episodes), not as a scalar `overlap_status` on episodes.  
 77. Asymmetric `series_identity_key` preserves endpoint order; symmetric keys normalize with min/max entity ids.  
 78. Ambiguous entity splits set relationship user decisions to `needs_review` and never auto-duplicate confirmations.  
 79. Purged mentions have NULL `mention_text_normalized` and `mention_text_raw` and cannot participate in resolution or Stage 12 retrieval.  
 80. `disjoint` and `unknown` episode relations are stored explicitly; absence of a row never means disjoint.  
-81. For each reconciled series, `episode_relation_count = active_episode_count × (active_episode_count - 1) / 2`.  
+81. For each reconciled series, `episode_relation_count = P × (P - 1) / 2` where `P` counts `episode_state IN ('active','conflict_open')`.  
 82. Series exposes `UNIQUE (user_id, id)`; episodes expose `UNIQUE (user_id, series_id, id)` so episode_relations composite FKs structurally enforce same-user/same-series pairs.  
-83. Stage 12 consumes only reconciled dense relation sets (or an explicit incompleteness signal).  
+83. Stage 12 consumes only reconciled series with `series_state IN ('active','conflict_open')` and matching dense completeness (or an explicit incompleteness signal).  
+84. Participating episode states are exactly `active` and `conflict_open`; non-participating are exactly `inactive` and `rebuild_pending`.  
+85. Opening or closing `conflict_open` does not by itself change P or drop pairwise rows; inactivating an episode does.  
+86. `conflict_open` must never be confused with `rebuild_pending` incompleteness.  
+87. `deleted`/`purged` are not values of `memory_entity_relationship_graph_state`; removed derived episodes are absent rows.  
 
 ---
 
@@ -2953,6 +3071,8 @@ flowchart LR
 | Third-party privacy | Floors + disclosure |
 | Graph join cost | Indexed FKs; rebuild async |
 | Projection rebuild cost | Job-scoped, not global by default |
+| Confusing conflict_open with incompleteness | Normative participating states; Stage 12 gates rebuild_pending only |
+| Dense relation count after conflict open | P includes conflict_open; open/close conflict must not drop pairs |
 | Merge redirect complexity | Max hop + cycle checks |
 | Historical relationships | temporal_class mandatory |
 | User confusion | Calm UX vocabulary |
@@ -2987,7 +3107,7 @@ flowchart LR
 | 9M | Mention retention lifecycle | Soft-cap archive claimed without schema | Add `retention_state`/`archived_at`/`purged_at` on mentions + archive job | Design yes; **required** | Privacy + history | Stage 9 |
 | 9N | Job rename | Former draft `rebuild_entity_projection` ambiguous | Add **only** `rebuild_entity_relationships`; do not register the old name | Design yes | Clarity | Stage 9 |
 | 9O | Deletion purge of decisions | Account purge incomplete | `purge_relationship_user_decisions` step | **No** for account safety | Privacy | Stage 9 |
-| 9P | Pairwise episode relations | Scalar overlap cannot model multi-neighbour relations | Add dense `memory_entity_relationship_episode_relations` (`N(N-1)/2`) | Design yes; **required** | Derived only; missing≠disjoint | Stage 9 |
+| 9P | Pairwise episode relations | Scalar overlap cannot model multi-neighbour relations | Add dense `memory_entity_relationship_episode_relations` (`P(P-1)/2` over active∪conflict_open) | Design yes; **required** | Derived only; missing≠disjoint; conflict≠incomplete | Stage 9 |
 | 9Q | Decision application_state | Split ambiguity not representable | Add `application_state` + reason codes on user_decisions | Design yes; **required** | No dual confirm | Stage 9 |
 | 9R | Nullable mention_text_normalized | Purge privacy blocked by NOT NULL | Make nullable + lifecycle CHECKs §13.4 | Design yes; **required** | Privacy | Stage 9 |
 
@@ -3104,13 +3224,14 @@ Stage 11 does **not** edit Stage 10. Freeze/authority/disclosure unchanged.
 | 48 | Exact deterministic episode construction | **Met** — §26 Option A |
 | 49 | Mention archival schema-backed | **Met** — §13.4 / §38.4 |
 | 50 | Series vs episode APIs unambiguous | **Met** — §42 / §49 |
-| 51 | Dense pairwise episode_relations model | **Met** — §26.3 / §38.7c (`N(N-1)/2`; missing≠disjoint) |
+| 51 | Dense pairwise episode_relations model | **Met** — §26.3 / §38.7c (`P(P-1)/2` over active∪conflict_open; missing≠disjoint) |
 | 52 | Asymmetric/symmetric series_identity_key | **Met** — §23.1 |
 | 53 | Split-safe relationship decisions | **Met** — §23.1.1 |
 | 54 | Purged mention null normalized text | **Met** — §13.4 |
 | 55 | Job rename consistency | **Met** — `rebuild_entity_relationships` only |
 | 56 | Composite FK parent unique keys | **Met** — series `(user_id,id)`; episodes `(user_id,series_id,id)` |
 | 57 | Stage 9 amendments ordered 9A–9R | **Met** — §56 |
+| 58 | Participating vs non-participating graph states | **Met** — §26.3 (`conflict_open` participates; `rebuild_pending` incomplete) |
 
 ---
 
@@ -3187,7 +3308,8 @@ No disagreement that assertions are canonical or that Stage 10 annotations are n
 - [x] Stage 12 contracts without ranking; multi-episode + ambiguous project aware  
 - [x] Relationship user decisions canonical; series flags are caches  
 - [x] Exact episode_key; no silent merge of different bounds  
-- [x] Dense pairwise episode_relations (`N(N-1)/2`); disjoint/unknown explicit; missing≠disjoint  
+- [x] Dense pairwise episode_relations (`P(P-1)/2` over active∪conflict_open); disjoint/unknown explicit; missing≠disjoint  
+- [x] Participating states exactly active+conflict_open; non-participating inactive+rebuild_pending; conflict≠incomplete  
 - [x] Series `UNIQUE (user_id, id)`; episodes `UNIQUE (user_id, series_id, id)`; episode_relations FKs target those keys  
 - [x] Asymmetric vs symmetric series_identity_key formulas  
 - [x] Split decisions: transfer or needs_review; never dual-confirm  
