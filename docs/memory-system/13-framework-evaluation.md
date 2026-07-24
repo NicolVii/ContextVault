@@ -1266,7 +1266,7 @@ Unchanged in spirit: 14 red-teams B; 15 tests before any adapter; 16 sequences n
 
 ## 23. Acceptance questions (delta answers)
 
-Weighted totals corrected (§8–9). Roles separated (§2.4, §9). Gates enum-clean (§7). Native target vs impl (§4.3). Sources auditable (§3). Evidence % from ledgers (§10). TCO workload math (§12). Benchmarks field-complete or `unknown` (§13). Supermemory OSS/managed split (§14). Port contracts complete for plausible adapters (§11). PoC-gated outcomes for Mem0 OSS, Graphiti, rerankers (§16, §19). Recommendation B retained with **no provider selected now** (§20).
+Weighted totals corrected (§8–9). Roles separated (§2.4, §9). Gates enum-clean (§7). Native target vs impl (§4.3). Sources auditable (§3). Evidence completeness % from ledgers (§10). TCO workload math (§12). Benchmarks field-complete or `unknown` (§13). Supermemory OSS/managed split (§14). Port contracts complete for plausible adapters (§11). PoC-gated outcomes for Mem0 OSS, Graphiti, rerankers (§16, §19). Recommendation B retained with **no provider selected now** (§20).
 
 ---
 
