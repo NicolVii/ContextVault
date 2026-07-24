@@ -2971,7 +2971,7 @@ flowchart LR
 6. Candidate assertions cannot create trusted relationship episodes.  
 7. Historical trusted assertions may support historical relationship episodes.  
 8. Distrusted assertions cannot support active trusted episodes.  
-9. Deleted and purge-pending assertions cannot support active episodes.  
+9. Deleted and purge-pending assertions cannot support participating relationship episodes.  
 10. Purged assertions leave no private graph support.  
 11. Entity records are user-scoped.  
 12. Entity aliases are user-scoped.  
