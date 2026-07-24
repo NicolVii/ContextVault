@@ -2326,7 +2326,7 @@ Do **not** edit Stage 9 or Stage 11 documents. Requests below are for owners to 
 
 | | |
 | --- | --- |
-| Missing capability | `response_influence_records` lacks explicit fields for fused rank, WRRF/Final, multi-channel ranks, score features, drop reason, tokens consumed, disclosure decision, citation label, policy version, conflict group id, identity/history targeting, and **final-state vocabulary** beyond a single `selected` boolean (sent / withheld / budget-drop / deterministic local answer) |
+| Missing capability | `response_influence_records` lacks explicit fields for fused rank, WRRF/Final, multi-channel ranks, score features, drop reason, tokens consumed, disclosure decision, citation label, policy version, conflict group id, identity/history targeting, **final-state vocabulary**, **evidence_requirement**, and **chosen provider plan snapshot** (sendable/withheld IDs, requiredEvidenceSatisfied, attainable utility) |
 | Why insufficient | Stage 12 must explain ranking, eligibility, dedupe, conflicts, budget drops, and **disclosure-withheld** finalists; user-facing withhold claims require durable rows; `selected` alone cannot distinguish `sent_to_provider` vs `withheld_before_pack` vs `dropped_for_budget` vs `used_in_deterministic_local_answer` |
 | Smallest compatible change | Add `explainability_snapshot jsonb` (or extend eligibility_snapshot) carrying finalState, drop_reason (`disclosure_denied` / `provider_restricted` / `no_compatible_provider` / `query_disclosure_denied` / budget codes), WRRF/Final, provider class, queryDisclosure reason codes (not raw query), user_visible_withhold_notice; widen `channel` check; keep `selected=false` for non-sent rows; store `retrieval_policy_version` on turn or influence |
 | Proceed without it? | **Yes** for design; implementation needs the JSONB snapshot convention |
@@ -2391,7 +2391,7 @@ Stage 10/11 already requested Stage 9 processing-run tables, entity tables, etc.
 
 ## 32. Worked scenarios
 
-Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query disclosure → channels → candidates → eligibility → fusion (`Final = WRRF × (1+λPolicy)`) → dedupe/conflict → evidence disclosure → packing → representation → influence (finalState) → degradation.
+Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query disclosure → channels → candidates → eligibility → fusion (`Final = WRRF × (1+λPolicy)`) → dedupe/conflict → evidence disclosure + EvidenceRequirement → per-provider plans → chosen outcome → packing → representation → influence (finalState) → degradation.
 
 ### 32.1 “What is my name?”
 
