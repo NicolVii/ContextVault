@@ -2500,8 +2500,6 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 28. Query disclosure preflight completes before any external embedding, external-index, planner-model, or reranker call; stored `allow_embedding` does not authorize embedding the live query.  
 29. A prior assertion revision is provenance, not automatically a historical fact.  
 30. Whole-document and section summarisation must not claim complete coverage from ordinary targeted-passage Q&A chunk caps.  
-36. Fixed 4/2 chunk counts are `targeted_passage` diversity caps only; section and whole-document completeness are coverage-based.  
-37. A derived summary labelled complete must have complete section/chunk provenance for the current document fingerprint; packed citation caps must not limit production coverage.  
 31. Identity short-circuit requires a complete canonical consistency check; `memory_exact` miss is not proof of non-conflict.  
 32. Every user-visible privacy-withholding explanation has a corresponding disclosure-withheld influence/snapshot record.  
 33. `primaryIntentMode` is unique; `intentFacets` never duplicates the primary and is deterministically ordered.  
