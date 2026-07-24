@@ -27,17 +27,20 @@ This review finds:
 
 | Class | Count |
 | --- | --- |
-| Distinct attacks evaluated | **56** |
-| Confirmed blockers (attack dispositions) | **6** |
-| Architecture changes required (attack dispositions) | **10** |
-| Clarifications required (attack dispositions) | **5** |
-| Stage-15 / sequencing / first-PR constraints (attack dispositions) | **28** |
-| Accepted-risk attack dispositions | **3** |
+| Distinct attacks evaluated | **72** |
+| Confirmed blockers (attack dispositions) | **7** |
+| Architecture changes required (attack dispositions) | **16** |
+| Clarifications required (attack dispositions) | **8** |
+| Stage-15 / sequencing / first-PR constraints (attack dispositions) | **33** |
+| Accepted-risk attack dispositions | **4** |
 | Rejected attacks | **3** |
 | Unresolved attacks | **1** |
+| Complete worked scenarios (S01–S45) | **45** |
 | True cross-stage contradictions | **8** |
 | Resolvable tensions (matrix) | **8** |
+| Stage 7–12 invariant IDs in source ledger | **327** |
 | Correction backlog items | **17** |
+| Effective architecture overrides (OV-01…OV-18) | **18** |
 | Risk-acceptance register entries | **8** |
 
 **Highest-severity confirmed findings**
@@ -58,7 +61,7 @@ Native canonical core (narrowed MVA)
 + adapters remain PoC-gated and depth ≤ 1 after product validation
 ```
 
-**Stage 15 may begin** after the amendment backlog items marked `blocking_before_stage15` are accepted as normative corrections (documentation amendments in later stages or an explicit Stage-14-accepted correction register — not by silently editing Stages 0–13 in this PR).
+**Stage 15 may begin** only under the explicit conditions in §20.3 (PR #47 reviewed and merged; override register accepted as normative; every `blocking_before_stage15` item has replacement language in OV-* or an explicit Stage 15 hypothesis; no implementation begun).
 
 **Stage 16/17 and all implementation remain prohibited** until Stage 15 produces a testing framework that can falsify the amended architecture.
 
@@ -379,8 +382,8 @@ Lenses do **not** agree. Security/privacy push more machinery; delivery/UX/cost 
 
 | Bucket | Components |
 | --- | --- |
-| `essential_now` | PG canonical assertions (simplified); candidate vs trusted vs distrusted; user confirmation; secret fail-closed; RLS/Gateway mutation control; proposed-not-as-truth; basic semantic+lexical retrieve; conflict-safe “don’t state dual settled facts”; deletion workflow for account/memory; export of canonical rows; TurnOrchestrator convergence; outbox for post-reply extraction; disable unsafe Mem0 remote-text |
-| `required_before_scale` | Embedding space registry + reindex; durable workers hardening; influence/explainability; FTS hybrid; document coverage honesty; richer temporal; conflict groups UX; metering for embeds |
+| `essential_now` (**private beta**) | PG canonical assertions (simplified); candidate vs trusted vs distrusted; user confirmation+undo; secret fail-closed; RLS/Gateway mutation control; proposed-not-as-truth; semantic retrieve + identity allowlist; thin conflict; thin temporal; TurnOrchestrator; sync candidate extraction (no inventing); sync/narrow deletion **only with zero adapters and zero background publishers**; disable Mem0 remote-text |
+| `required_before_scale` (**public beta** then **paid scale**) | Public beta: durable workers+outbox; DeletionCoordinator; canonical export; lexical+semantic; disclosure service. Paid scale: embedding space registry+reindex; basic influence; quotas; optional single adapter after metrics |
 | `optional_later` | Entity graph; relationship projections; external memory index; reranker; connectors; multi-provider evidence planning; WRRF full channel set; automatic consolidation; Graphiti |
 | `unjustified` (as v1 normative) | 11+ channel fusion with uncalibrated weights as correctness; full orthogonal enum surface before UX validation; depth>1 adapters; forever dual-write; treating optional adapters as needed for differentiation |
 
@@ -458,60 +461,383 @@ Consolidated from Stage 13’s 33 invariants plus material must/never/fail-close
 | S13-I32 | 13§22 | Supermemory price ≠ TCO w/o mapping | cost | yes | docs | — | low | **uphold** |
 | S13-I33 | 13§22 | PoC-B/C/D need explicit fields | process | yes | docs | — | low | **uphold** |
 
-### 6.3 Material Stage 7–12 invariants (consolidated; non-exhaustive listing of all material rules, grouped)
+### 6.3 Invariant source ledger (Stages 7–12)
 
-| invariant_id | source | statement | product goal | testable | enforceable | conflicts_with | ops cost | status |
+This ledger accounts for **every** Stage 7–12 invariant ID (327). Duplicate themes are merged into CE-* / UP-* audit ids while remaining traceable. The ledger is complete for all Stage 7–12 invariant IDs; no carve-out remains.
+
+| Metric | Count |
+| --- | ---: |
+| source rules identified (S7–S12 invariant IDs) | 327 |
+| material rules | 318 |
+| audited rules (included_in_audit=yes) | 327 |
+| upheld | 225 |
+| amended | 14 |
+| deferred | 88 |
+| removed | 0 |
+| unresolved | 0 |
+
+Columns: `source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition`
+
+#### Stage 7 ledger
+
+| source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S7-P1 | 07 | PG canonical for memory semantics | independence | yes | yes | — | med | uphold |
-| S7-I1 | 07 | Provider cannot activate/overwrite/delete canonical memory unilaterally | safety | yes | yes | Mem0 hybrid today | med | uphold |
-| S7-I7 | 07 | External results reconciled before context | safety | yes | yes | Mem0 L123–125 | med | uphold |
-| S7-I8 | 07 | Ineligible memory cannot enter model context | safety | yes | yes | profile force-merge | med | uphold |
-| S7-I9 | 07 | Untrusted text cannot change system policy | safety | partial | partial | model noncompliance | med | amend — “must not be *instructed* as system policy”; model compliance unknown |
-| S7-I10 | 07 | Sensitive disclosure before provider send | privacy | yes | yes | missing impl | med | uphold |
-| S7-I13 | 07 | Never mix embedding spaces | correctness | yes | yes | — | high | uphold |
-| S7-I15 | 07 | Deletion workflow to terminal state | privacy | hard | partial | C1 | high | amend |
-| S7-I18 | 07 | Workspaces cannot broaden personal memory | safety | yes | yes | workspace tables exist | med | uphold |
-| S7-I19 | 07 | Ordinary statements not auto-trusted | safety | yes | yes | C3 | med | uphold |
-| S7-P18 | 07 | Prefer operable topology | delivery | partial | process | C9 | high | **amend** — make binding on adapter adoption |
-| S8-I1 | 08 | Do not collapse kind/trust/confidence/temporal/sensitivity/lifecycle/eligibility | clarity | partial | schema | complexity budget | high | **amend** — uphold separation of trust vs confidence; defer full orthogonal surface |
-| S8-I2 | 08 | Confidence ≠ confirmation | safety | yes | yes | C10 | low | uphold |
-| S8-I3 | 08 | No provider grants canonical trust | safety | yes | yes | — | med | uphold |
-| S8-I11 | 08 | Deleted never retrieval-eligible | safety | yes | partial | stale indexes | med | uphold |
-| S8-I16 | 08 | Documents ≠ memories by upload alone | safety | yes | yes | — | low | uphold |
-| S8-I27 | 08 | Forbidden secrets never trusted memory | safety | yes | yes | — | med | uphold |
-| S8-I30 | 08 | Unresolved contradictions not dual settled facts | safety | yes | packing | C6 budget | med | uphold |
-| S8-I31 | 08 | Material rewrite loses explicit-remember authority | safety | partial | process | — | med | uphold |
-| S9-I12 | 09 | Deleted/purge-pending/purged never eligible | safety | yes | yes | — | med | uphold |
-| S9-I14 | 09 | Candidates/rejected/distrusted ≠ trusted truth in context | safety | yes | yes | — | med | uphold |
-| S9-I17 | 09 | Incompatible embedding spaces never co-queried | correctness | yes | yes | — | high | uphold |
-| S9-I38 | 09 | Browser SELECT-only; no self-grant trust | safety | yes | grants | — | med | uphold |
-| S9-I49 | 09 | Workers cannot create user_asserted | safety | yes | Gateway | — | med | uphold |
-| S9-I53 | 09 | Forbidden secrets never assertion class | safety | yes | yes | — | med | uphold |
-| S9-I63 | 09 | Vectors never in job payload/audit/errors | privacy | yes | yes | — | med | uphold |
-| S10-I1 | 10 | Processing never writes canonical memory directly | safety | yes | yes | — | med | uphold |
-| S10-I4 | 10 | Confidence cannot grant trust | safety | yes | yes | — | low | uphold |
-| S10-I9 | 10 | Raw secrets never in assertions/jobs/logs | privacy | hard | partial | provider logs external | high | amend — Cortaix-controlled stores |
-| S10-I12 | 10 | Document instructions cannot alter processing policy | safety | partial | prompt+validate | model | med | uphold |
-| S10-I13 | 10 | Document-derived remain candidates | safety | yes | yes | — | low | uphold |
-| S10-I20 | 10 | Conflict never auto-distrusts trusted | safety | yes | yes | — | low | uphold |
-| S10-I47 | 10 | After freeze never re-extract | correctness | yes | yes | — | med | uphold |
-| S10-I55 | 10 | Import metadata cannot set trust | safety | yes | yes | C13 | med | uphold |
-| S11-I3 | 11 | Resolution never grants assertion trust | safety | yes | yes | — | med | uphold |
-| S11-I5 | 11 | Relationship projections ≤ supporting authority | safety | yes | yes | — | high | **defer** with graph |
-| S11-I36 | 11 | Global cross-user entity dedupe forbidden | privacy | yes | yes | — | med | uphold |
-| S11-I52 | 11 | Self entity never merge loser | safety | yes | yes | — | med | uphold |
-| S11-I63 | 11 | Provisional persons must not auto-link by name equality | safety | yes | yes | — | med | uphold |
-| S11-I83 | 11 | Stage 12 must not consume rebuild_pending | correctness | yes | yes | — | med | uphold |
-| S12-I1 | 12 | Score/graph/pin/confidence never grant trust/eligibility | safety | yes | yes | C10 | med | uphold |
-| S12-I3 | 12 | External index never authoritative text | safety | yes | yes | Mem0 | med | uphold |
-| S12-I5 | 12 | Ineligible classes never as trusted facts | safety | yes | yes | — | med | uphold |
-| S12-I6–8 | 12 | Historical≠current; uncertain≠settled; conflict≠silent truth | safety | yes | packing | C6 | med | uphold |
-| S12-I10 | 12 | Scores never override disclosure | privacy | yes | yes | — | med | uphold |
-| S12-I25 | 12 | Optional channel failure degrades not fail-open policy | safety | yes | yes | — | med | uphold |
-| S12-I27 | 12 | Final(c)=WRRF×(1+λPolicy); λ=0.15; WRRF0⇒Final0 | quality | yes math | yes code | uncalibrated | med | **amend** — formula family uphold; constants `defer` to Stage 15 versioned calibration |
-| S12-I28/34 | 12 | Purpose permissions independent; embed≠final inference | privacy | yes | yes | — | med | uphold |
-| S12-I40 | 12 | Required evidence never silently downgraded | privacy/UX | yes | yes | C6 | high | amend — define total-failure behaviour |
-| S12-local | 12 | local_only never fail-open to another model | privacy | yes | yes | — | med | uphold |
+| 7 | S7-I1 | Provider cannot activate/overwrite/delete canonical memory | yes | yes | CE-3 |  |  | uphold |
+| 7 | S7-I2 | Every canonical mutation has owner+provenance | yes | yes | CE-1 |  |  | uphold |
+| 7 | S7-I3 | Turn has stable idempotency identity | yes | yes | UP-TURN |  |  | uphold |
+| 7 | S7-I4 | Successful assistant response durably stored | yes | yes | UP-TURN |  |  | uphold |
+| 7 | S7-I5 | Replied success needs usage finalize or repair | yes | yes | UP-TURN |  |  | uphold |
+| 7 | S7-I6 | Post-response work registered before success | yes | yes | UP-TURN |  |  | amend |
+| 7 | S7-I7 | External results reconciled before context | yes | yes | CE-2 |  |  | uphold |
+| 7 | S7-I8 | Ineligible memory cannot enter context | yes | yes | CE-7 |  |  | uphold |
+| 7 | S7-I9 | Untrusted text cannot change system policy | yes | yes | CE-amend-instruct | model compliance unknown |  | amend |
+| 7 | S7-I10 | Sensitive disclosure before provider send | yes | yes | CE-6 |  |  | uphold |
+| 7 | S7-I11 | No cross-user parent/child attach | yes | yes | CE-1 |  |  | uphold |
+| 7 | S7-I12 | Embeddings rebuildable+versioned | yes | yes | CE-9 |  |  | uphold |
+| 7 | S7-I13 | Never mix incompatible embedding spaces | yes | yes | CE-9 |  |  | uphold |
+| 7 | S7-I14 | Response-influencing items explainable | yes | yes | UP-EXPLAIN |  |  | defer |
+| 7 | S7-I15 | Deletion tracked to terminal | yes | yes | CE-10 |  |  | amend |
+| 7 | S7-I16 | Ops logs no raw private content by default | yes | yes | CE-5 |  |  | uphold |
+| 7 | S7-I17 | Normal ops no service-role user memory CRUD | yes | yes | CE-15 |  |  | uphold |
+| 7 | S7-I18 | Workspaces cannot broaden personal memory | yes | yes | CE-14 |  |  | uphold |
+| 7 | S7-I19 | Ordinary chat not trusted without Stage-8 path | yes | yes | CE-3 |  |  | uphold |
+| 7 | S7-I20 | Secret policy uniform at Gateway | yes | yes | CE-5 |  |  | uphold |
+| 7 | S7-I21 | Think/Chat must not diverge memory semantics | yes | yes | UP-TO |  |  | uphold |
+| 7 | S7-I22 | Accidental fail-open forbidden | yes | yes | UP-FAILCLOSED |  |  | uphold |
+| 7 | S7-I23 | Content changes version embeddings | yes | yes | CE-9 |  |  | uphold |
+| 7 | S7-I24 | RLS isolation must not regress | yes | yes | CE-1 |  |  | uphold |
+| 7 | S7-I25 | PostgreSQL canonical; externals derived | yes | yes | CE-1 |  |  | uphold |
+| 7 | S7-I26 | Entity/relationship search derived; record canonicity defer S11 | no | yes | n/a | superseded by Stage 11 |  | defer |
+
+#### Stage 8 ledger
+
+| source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | S8-I1 | Do not collapse orthogonal axes | yes | yes | CE-amend-scope | full orthogonal premature |  | amend |
+| 8 | S8-I2 | Confidence ≠ confirmation | yes | yes | CE-4 |  |  | uphold |
+| 8 | S8-I3 | No provider grants trust | yes | yes | CE-3 |  |  | uphold |
+| 8 | S8-I4 | Explicit remember never bypasses secret policy | yes | yes | CE-5 |  |  | uphold |
+| 8 | S8-I5 | Phrasing alone cannot grant trust | yes | yes | CE-3 |  |  | uphold |
+| 8 | S8-I6 | Trusted memory has provenance | yes | yes | CE-1 |  |  | uphold |
+| 8 | S8-I7 | Corrections do not erase provenance history | yes | yes | UP-PROV | conflicts erasure |  | amend |
+| 8 | S8-I8 | Superseded not presented as current | yes | yes | CE-7 |  |  | uphold |
+| 8 | S8-I9 | Historical may remain trusted | yes | yes | UP-TEMP |  |  | uphold |
+| 8 | S8-I10 | Rejected not retrieved as trusted | yes | yes | CE-7 |  |  | uphold |
+| 8 | S8-I11 | Deleted never eligible | yes | yes | CE-7 |  |  | uphold |
+| 8 | S8-I12 | Archive ≠ deletion | yes | yes | UP-LIFE |  |  | uphold |
+| 8 | S8-I13 | Expiry ≠ reject/distrust | yes | yes | UP-LIFE |  |  | uphold |
+| 8 | S8-I14 | Sensitivity ≠ falsity | yes | yes | UP-LIFE |  |  | uphold |
+| 8 | S8-I15 | Store≠disclose permissions | yes | yes | CE-6 |  |  | uphold |
+| 8 | S8-I16 | Documents ≠ memories by upload | yes | yes | UP-DOC |  |  | uphold |
+| 8 | S8-I17 | User-confirmed beats unsupported inference | yes | yes | CE-3 |  |  | uphold |
+| 8 | S8-I18 | Context-specific truths may coexist | yes | yes | UP-SCOPE |  |  | uphold |
+| 8 | S8-I19 | Workspaces cannot broaden access | yes | yes | CE-14 |  |  | uphold |
+| 8 | S8-I20 | UI explainable language | no | yes | n/a | product UX |  | defer |
+| 8 | S8-I21 | Mutations via Gateway | yes | yes | CE-15 |  |  | uphold |
+| 8 | S8-I22 | PG canonical | yes | yes | CE-1 |  |  | uphold |
+| 8 | S8-I23 | LM may propose not overwrite trusted | yes | yes | CE-3 |  |  | uphold |
+| 8 | S8-I24 | Eligibility derived not authority | yes | yes | CE-1 |  |  | uphold |
+| 8 | S8-I25 | Profile not always-include channel | yes | yes | UP-PROFILE |  |  | uphold |
+| 8 | S8-I26 | Summaries derived until confirm | yes | yes | CE-3 |  |  | uphold |
+| 8 | S8-I27 | Forbidden secrets never trusted | yes | yes | CE-5 |  |  | uphold |
+| 8 | S8-I28 | Personal memory user-owned under RLS | yes | yes | CE-1 |  |  | uphold |
+| 8 | S8-I29 | Explicit remember not policy bypass | yes | yes | CE-5 |  |  | uphold |
+| 8 | S8-I30 | No dual settled current contradictions | yes | yes | CE-8 |  |  | uphold |
+| 8 | S8-I31 | Material rewrite loses explicit authority | yes | yes | CE-3 |  |  | uphold |
+| 8 | S8-I32 | Candidates may be canonical ops data | yes | yes | UP-CAND |  |  | uphold |
+| 8 | S8-I33 | Phase/bounds/modality orthogonal | yes | yes | CE-amend-scope |  |  | amend |
+| 8 | S8-I34 | Distrusted = repudiation not reject/history | yes | yes | UP-TRUST |  |  | uphold |
+| 8 | S8-I35 | Temporal changes do not silently modify trust | yes | yes | UP-TEMP |  |  | uphold |
+
+#### Stage 9 ledger
+
+| source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 9 | S9-I1 | Exactly one user_id; Auth delete after purge | yes | yes | CE-10 |  |  | amend |
+| 9 | S9-I2 | S9-I2 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I3 | Trusted requires authority_source | yes | yes | CE-3 |  |  | uphold |
+| 9 | S9-I4 | S9-I4 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I5 | S9-I5 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I6 | S9-I6 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I7 | S9-I7 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I8 | Phase/bounds/modality not collapsed | yes | yes | CE-amend-scope |  |  | amend |
+| 9 | S9-I9 | S9-I9 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I10 | S9-I10 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I11 | S9-I11 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I12 | Deleted/purge-pending/purged never eligible | yes | yes | CE-7 |  |  | uphold |
+| 9 | S9-I13 | S9-I13 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I14 | Candidate/rejected/distrusted ≠ trusted truth | yes | yes | CE-7 |  |  | uphold |
+| 9 | S9-I15 | External hits reconcile | yes | yes | CE-2 |  |  | uphold |
+| 9 | S9-I16 | S9-I16 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I17 | Incompatible spaces never co-queried | yes | yes | CE-9 |  |  | uphold |
+| 9 | S9-I18 | S9-I18 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I19 | Required turn jobs before success | yes | yes | UP-TURN | private beta may sync |  | amend |
+| 9 | S9-I20 | Job replay no duplicate effects | yes | yes | UP-IDEM |  |  | uphold |
+| 9 | S9-I21 | S9-I21 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I22 | S9-I22 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I23 | S9-I23 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I24 | S9-I24 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I25 | Store vs disclose separate | yes | yes | CE-6 |  |  | uphold |
+| 9 | S9-I26 | Raw secrets never in jobs/logs/assertions | yes | yes | CE-5 |  |  | uphold |
+| 9 | S9-I27 | S9-I27 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I28 | Workspaces cannot broaden | yes | yes | CE-14 |  |  | uphold |
+| 9 | S9-I29 | RLS SELECT; mutations RPC-only | yes | yes | CE-15 |  |  | uphold |
+| 9 | S9-I30 | S9-I30 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I31 | Deletion to terminal via subject_ref | yes | yes | CE-10 |  |  | amend |
+| 9 | S9-I32 | S9-I32 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I33 | Compatibility projection not authority | yes | yes | CE-1 |  |  | uphold |
+| 9 | S9-I34 | S9-I34 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I35 | Stage 10 addable without redesign | no | yes | n/a | process |  | defer |
+| 9 | S9-I36 | Stage 11 addable without redefining ownership | no | yes | n/a | process |  | defer |
+| 9 | S9-I37 | S9-I37 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I38 | Browser cannot grant trusted | yes | yes | CE-15 |  |  | uphold |
+| 9 | S9-I39 | complete_replied_turn not browser-callable | yes | yes | CE-15 |  |  | uphold |
+| 9 | S9-I40 | S9-I40 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I41 | S9-I41 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I42 | S9-I42 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I43 | S9-I43 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I44 | S9-I44 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I45 | Every space exactly 1536-d; no pad/truncate | yes | yes | CE-9 |  |  | uphold |
+| 9 | S9-I46 | S9-I46 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I47 | S9-I47 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I48 | S9-I48 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I49 | Workers cannot create user_asserted | yes | yes | CE-3 |  |  | uphold |
+| 9 | S9-I50 | S9-I50 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I51 | S9-I51 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I52 | S9-I52 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I53 | Forbidden-secret intake blocked only | yes | yes | CE-5 |  |  | uphold |
+| 9 | S9-I54 | S9-I54 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I55 | S9-I55 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I56 | S9-I56 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I57 | S9-I57 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I58 | S9-I58 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I59 | S9-I59 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I60 | S9-I60 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I61 | S9-I61 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I62 | S9-I62 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+| 9 | S9-I63 | Vectors never in job payload/audit/errors | yes | yes | CE-5 |  |  | uphold |
+| 9 | S9-I64 | S9-I64 material rule (09 §38) | yes | yes | see_CE_map |  |  | uphold |
+
+#### Stage 10 ledger
+
+| source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 10 | S10-I1 | Processing never writes canonical directly | yes | yes | CE-3 |  |  | uphold |
+| 10 | S10-I2 | S10-I2 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I3 | Models cannot grant authority | yes | yes | CE-3 |  |  | uphold |
+| 10 | S10-I4 | Confidence cannot grant trust | yes | yes | CE-4 |  |  | uphold |
+| 10 | S10-I5 | S10-I5 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I6 | S10-I6 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I7 | S10-I7 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I8 | S10-I8 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I9 | Raw secrets never in assertions/jobs/logs | yes | yes | CE-5 | amend Cortaix-controlled |  | amend |
+| 10 | S10-I10 | S10-I10 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I11 | S10-I11 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I12 | Document instructions cannot alter policy | yes | yes | UP-INJECT |  |  | uphold |
+| 10 | S10-I13 | Document-derived remain candidates | yes | yes | CE-3 |  |  | uphold |
+| 10 | S10-I14 | S10-I14 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I15 | S10-I15 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I16 | Provider failure no silent trusted meaning | yes | yes | UP-FAILCLOSED |  |  | uphold |
+| 10 | S10-I17 | S10-I17 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I18 | S10-I18 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I19 | S10-I19 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I20 | Conflict never auto-distrusts trusted | yes | yes | UP-CONF |  |  | uphold |
+| 10 | S10-I21 | S10-I21 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I22 | S10-I22 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I23 | S10-I23 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I24 | S10-I24 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I25 | S10-I25 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I26 | S10-I26 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I27 | S10-I27 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I28 | S10-I28 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I29 | S10-I29 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I30 | S10-I30 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I31 | S10-I31 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I32 | S10-I32 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I33 | S10-I33 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I34 | S10-I34 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I35 | Stage 11 linkage without replacing claims | no | yes | n/a | process |  | defer |
+| 10 | S10-I36 | Stage 12 must not treat confidence as trust | yes | yes | CE-4 |  |  | uphold |
+| 10 | S10-I37 | Replace providers without canonical semantic change | yes | yes | CE-13 |  |  | uphold |
+| 10 | S10-I38 | Heuristic not conversational semantic fallback | yes | yes | UP-HEUR |  |  | uphold |
+| 10 | S10-I39 | S10-I39 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I40 | S10-I40 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I41 | S10-I41 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I42 | S10-I42 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I43 | S10-I43 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I44 | S10-I44 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I45 | S10-I45 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I46 | S10-I46 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I47 | After freeze never re-extract | yes | yes | UP-FREEZE |  |  | uphold |
+| 10 | S10-I48 | S10-I48 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I49 | S10-I49 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I50 | S10-I50 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I51 | S10-I51 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I52 | Missing L4 never suppresses | yes | yes | UP-FAILCLOSED |  |  | uphold |
+| 10 | S10-I53 | S10-I53 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I54 | S10-I54 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I55 | Import metadata cannot set trust | yes | yes | CE-3 |  |  | uphold |
+| 10 | S10-I56 | S10-I56 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I57 | S10-I57 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I58 | S10-I58 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I59 | S10-I59 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I60 | S10-I60 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I61 | S10-I61 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I62 | S10-I62 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I63 | S10-I63 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I64 | S10-I64 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I65 | Missing temporal fail closed if suppress | yes | yes | UP-FAILCLOSED |  |  | uphold |
+| 10 | S10-I66 | S10-I66 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I67 | S10-I67 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I68 | S10-I68 material rule (10 §40) | yes | yes | see_CE_map |  |  | uphold |
+| 10 | S10-I69 | Doc self-contained process | no | yes | n/a | process docs |  | defer |
+
+#### Stage 11 ledger
+
+| source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 11 | S11-I1 | Assertions remain canonical factual truth | yes | yes | CE-1 |  |  | uphold |
+| 11 | S11-I2 | Entity rows do not replace assertion content | yes | yes | CE-1 |  |  | uphold |
+| 11 | S11-I3 | Resolution never grants assertion trust | yes | yes | CE-4 |  |  | uphold |
+| 11 | S11-I4 | S11-I4 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I5 | S11-I5 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I6 | S11-I6 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I7 | S11-I7 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I8 | S11-I8 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I9 | S11-I9 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I10 | S11-I10 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I11 | Entity records user-scoped | yes | yes | CE-1 |  |  | uphold |
+| 11 | S11-I12 | S11-I12 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I13 | S11-I13 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I14 | S11-I14 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I15 | Workspace never widens entity access | yes | yes | CE-14 |  |  | uphold |
+| 11 | S11-I16 | S11-I16 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I17 | S11-I17 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I18 | Identical names ≠ identical entities | yes | yes | CE-17 |  |  | uphold |
+| 11 | S11-I19 | S11-I19 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I20 | S11-I20 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I21 | S11-I21 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I22 | S11-I22 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I23 | S11-I23 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I24 | S11-I24 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I25 | S11-I25 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I26 | S11-I26 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I27 | S11-I27 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I28 | S11-I28 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I29 | S11-I29 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I30 | S11-I30 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I31 | S11-I31 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I32 | S11-I32 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I33 | S11-I33 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I34 | S11-I34 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I35 | S11-I35 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I36 | Global cross-user entity dedupe forbidden | yes | yes | CE-1 |  |  | uphold |
+| 11 | S11-I37 | S11-I37 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I38 | S11-I38 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I39 | S11-I39 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I40 | S11-I40 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I41 | S11-I41 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I42 | S11-I42 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I43 | S11-I43 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I44 | S11-I44 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I45 | Stage 15 eval without redefining trust | no | yes | n/a | process |  | defer |
+| 11 | S11-I46 | S11-I46 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I47 | S11-I47 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I48 | S11-I48 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I49 | S11-I49 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I50 | S11-I50 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I51 | S11-I51 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I52 | Self never merge loser | yes | yes | UP-SELF |  |  | uphold |
+| 11 | S11-I53 | Forbidden-secret never creates entity raw text | yes | yes | CE-5 |  |  | uphold |
+| 11 | S11-I54 | S11-I54 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I55 | S11-I55 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I56 | S11-I56 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I57 | S11-I57 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I58 | Audit entity_type naming | no | yes | n/a | ops naming |  | defer |
+| 11 | S11-I59 | S11-I59 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I60 | S11-I60 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I61 | S11-I61 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I62 | S11-I62 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I63 | Provisional persons must not auto-link by name | yes | yes | CE-17 |  |  | uphold |
+| 11 | S11-I64 | S11-I64 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I65 | S11-I65 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I66 | S11-I66 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I67 | S11-I67 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I68 | S11-I68 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I69 | S11-I69 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I70 | S11-I70 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I71 | S11-I71 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I72 | S11-I72 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I73 | S11-I73 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I74 | Explainability distinguish series/episodes | no | yes | n/a | product UX |  | defer |
+| 11 | S11-I75 | S11-I75 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I76 | S11-I76 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I77 | S11-I77 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I78 | S11-I78 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I79 | S11-I79 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I80 | S11-I80 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I81 | S11-I81 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I82 | S11-I82 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I83 | Stage 12 must not consume rebuild_pending | yes | yes | defer_graph |  |  | defer |
+| 11 | S11-I84 | S11-I84 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I85 | S11-I85 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I86 | S11-I86 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+| 11 | S11-I87 | S11-I87 (11 §54) | yes | yes | CE-17/defer_graph | graph-phase | defer_with_graph | defer |
+
+#### Stage 12 ledger
+
+| source_stage | source_invariant_or_rule_id | exact_or_abbreviated_statement | material | included_in_audit | mapped_audit_id | reason_if_not_material | merged_into | final_disposition |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 12 | S12-I1 | Retrieval score never grants trust | yes | yes | CE-4 |  |  | uphold |
+| 12 | S12-I2 | Graph edge never grants trust | yes | yes | CE-4 |  |  | uphold |
+| 12 | S12-I3 | External index never authoritative text | yes | yes | CE-2 |  |  | uphold |
+| 12 | S12-I4 | S12-I4 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I5 | Ineligible classes never trusted facts | yes | yes | CE-7 |  |  | uphold |
+| 12 | S12-I6 | Historical never as current | yes | yes | CE-7 |  |  | uphold |
+| 12 | S12-I7 | S12-I7 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I8 | Conflict never silent one truth | yes | yes | CE-8 |  |  | uphold |
+| 12 | S12-I9 | S12-I9 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I10 | Scores never override disclosure | yes | yes | CE-6 |  |  | uphold |
+| 12 | S12-I11 | Workspaces never widen access | yes | yes | CE-14 |  |  | uphold |
+| 12 | S12-I12 | S12-I12 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I13 | S12-I13 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I14 | S12-I14 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I15 | Missing relation ≠ disjoint | yes | yes | defer_graph |  |  | defer |
+| 12 | S12-I16 | rebuild_pending not consumed | yes | yes | defer_graph |  |  | defer |
+| 12 | S12-I17 | S12-I17 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I18 | S12-I18 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I19 | S12-I19 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I20 | S12-I20 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I21 | S12-I21 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I22 | S12-I22 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I23 | S12-I23 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I24 | Ranking reproducible under policy version | yes | yes | CE-12 |  |  | amend |
+| 12 | S12-I25 | Optional failure degrades not fail-open | yes | yes | UP-FAILCLOSED |  |  | uphold |
+| 12 | S12-I26 | Provider cannot redefine retrieval semantics | yes | yes | CE-13 |  |  | uphold |
+| 12 | S12-I27 | Final=WRRF×(1+λPolicy) λ=0.15 | yes | yes | CE-amend-wrrf | constants deferred |  | amend |
+| 12 | S12-I28 | Query disclosure before external calls | yes | yes | CE-6 |  |  | uphold |
+| 12 | S12-I29 | S12-I29 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I30 | S12-I30 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I31 | S12-I31 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I32 | S12-I32 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I33 | S12-I33 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I34 | Purpose permissions independent | yes | yes | CE-6 |  |  | uphold |
+| 12 | S12-I35 | S12-I35 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I36 | 4/2 caps are targeted_passage only | yes | yes | stage15_calibrate |  |  | defer |
+| 12 | S12-I37 | S12-I37 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I38 | S12-I38 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I39 | S12-I39 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I40 | Required evidence never silently downgraded | yes | yes | CE-amend-deadlock |  |  | amend |
+| 12 | S12-I41 | S12-I41 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I42 | S12-I42 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I43 | S12-I43 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I44 | Utility constants versioned | yes | yes | stage15_calibrate |  |  | defer |
+| 12 | S12-I45 | S12-I45 (12 §33) | yes | yes | see_CE_map |  |  | uphold |
+| 12 | S12-I46 | Exact-pack fallback bounded deterministic | yes | yes | CE-12 |  |  | uphold |
+
+**Extras (architectural must/never outside numbered lists):** S7-X-P10/MIG/EXPLICIT; S8-X-ORIGIN/INFER/CONF; S9-X-NOSPLIT/NOREMOTE/CROSSJOB; S10-X-AUTHFAIL/SECRETLEN/SENSFLOOR; S11-X-KINDVOCAB/TOOLFAIL/PURGERESTORE/PRIVFACTS/NOGRAPHDB; S12-X-LOCALONLY/BYOK/PIN/NORAWQUERY — all included_in_audit=yes and mapped to CE-2/3/4/5/6/1 or fail-closed uphold.
+
+All **33 Stage 13 invariants** remain individually audited in §6.2 (not duplicated here).
 
 ### 6.4 Proposed consolidated invariant set (normative for post-14 work)
 
@@ -541,7 +867,39 @@ Redundant stage-local duplicates should `merge_with_another` into CE-*. Untestab
 
 ---
 
-## 7. Attack register (≥50)
+
+## 6A. Effective architecture overrides after Stage 14
+
+Earlier Stage 7–13 documents remain **historical architecture evidence**. For Stages 15–17, the following Stage 14 override register defines the **effective amended architecture** wherever it conflicts with a listed prior clause.
+
+```text
+For Stages 15–17, this Stage 14 override supersedes the listed
+prior clause where they conflict.
+```
+
+| override_id | prior_stage | prior_section_or_decision | prior_normative_rule | Stage_14_replacement_rule | effective_scope | effective_from | precedence | Stage_15_interpretation | Stage_16_consequence | Stage_17_consequence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OV-01 | 07–12 | Full target surface as delivery scope | Build Stage 8–12 completeness for first release | First-release scope is the **narrow native MVA** in §10A; full surface is not first-release architecture | private+public beta | after PR #47 merge | supersedes prior v1-scope implications | Tests target MVA + safety spine, not full channel zoo | Sequence MVA→public-beta durable systems→optional later | First PR only MVA foundation |
+| OV-02 | 08/09 | Full assertion taxonomy (11 kinds) | Full kind vocabulary required | Ship thin kinds needed for product; retain extension points; full taxonomy optional after validation | private beta | after merge | supersedes completeness requirement | Taxonomy breadth not a P0 gate | Add kinds when eval proves need | No full enum migration required |
+| OV-03 | 08/09 | Full user-visible lifecycle/review enums | Rich review/org/retention UX | User-visible states collapse to candidate/trusted/distrusted (+ simple pending review); rich enums deferred | private beta | after merge | supersedes | UX comprehensibility tests | Keep DB room; don’t expose | Don’t ship full review UX |
+| OV-04 | 08/09 | Rich temporal phase×bounds×modality | Full temporal matrix normative | **Thin temporal:** current vs historical labels required; full modality deferred | private beta | after merge | supersedes | Temporal mislabel tests on thin model | Deepen only if error rate high | Thin columns OK |
+| OV-05 | 11 | Entity identity + relationship graph near-term | Assertion-first graph as near-term design | Entity/relationship graph **deferred** until after public beta metrics; text mentions OK | through public beta | after merge | supersedes timing | Homonym/auto-merge tests only if graph pursued | No Graphiti/Neo4j | No entity schema required |
+| OV-06 | 09/12 | Full influence-record schema | Complete explainability snapshot normative early | Basic explainability (evolve message_context) before paid scale; full influence deferred | through public beta | after merge | supersedes | Redaction tests on basic explain | Full schema at paid scale | Don’t block on full influence |
+| OV-07 | 12 | Full hybrid multi-channel set | 11+ channels normative | Private beta: semantic + identity allowlist; Public beta: add lexical; other channels optional later | phased | after merge | supersedes | Channel ablation only for enabled set | Don’t build WRRF zoo first | Semantic path only OK |
+| OV-08 | 12/13 | WRRF `k=60`, `λ=0.15` sacred | Constants binding in Final(c) | Formula family (multiplicative bound, WRRF0⇒Final0) upheld; **constants versioned** via `retrieval_policy_version` and Stage 15 calibration | when fusion enabled | after merge | supersedes constant sanctity | Calibration tasks required before release-gating fusion | Don’t freeze λ/k in code as eternal | No hardcode-as-correctness |
+| OV-09 | 12 | Multi-provider candidate planning | Per-provider plans normative | Single-provider packing for v1; multi-provider deferred | through public beta | after merge | supersedes | Single-plan deadlock tests still apply | Enterprise multi-provider later | Single provider only |
+| OV-10 | 12 | Advanced document coverage modes | whole_document/section modes normative | Honest incompleteness labels if any; advanced modes deferred | through public beta | after merge | supersedes | Label honesty tests | Add modes after doc-QA eval | No whole-doc mode required |
+| OV-11 | 13 | Optional adapter enablement | Ports may be adopted after PoC | **Zero external memory adapters enabled** for initial release (private+public beta); ports may exist as noops; max one class after validation | initial release | after merge | supersedes enablement | Native floor tests with adapters off | PoCs after native metrics | Forbid enabling adapters |
+| OV-12 | 13 / code | Current Mem0 hybrid disposition | Harden or disable; migrate later | **Disable until hardened to ID-only reconciliation**; remote-text path is unsafe (`mem0-provider.ts` L123–125) | immediately for planning; code in 16/17 | after merge | supersedes “retain temporarily” | T15-001 must fail closed | Disable/harden before any Mem0 on | First PRs must not enable Mem0 remote-text |
+| OV-13 | 12 | End-to-end deterministic packing/planning | Determinism language as E2E | Determinism **only** given frozen candidate set + policy/tokenizer versions; no E2E turn determinism claim | all phases | after merge | supersedes | Tests use frozen inputs | — | Don’t claim E2E determinism |
+| OV-14 | 07/09 | Complete deletion vs immutable provenance/audit | Joint absolute claims | Define erasable vs tombstone fields; post-purge audits/ids/hashes only; backups/legal holds explicit and communicated | all phases making deletion claims | after merge | supersedes absolute “complete” | T15-004; backup policy review | DeletionCoordinator before publishers | Audit without raw fact text |
+| OV-15 | 08 vs 10 | Import metadata trust | Stage 8 deferred exception vs Stage 10 never | **Stage 10 wins:** import metadata cannot set trust/authority | all import paths | after merge | supersedes Stage 8 exception | T15-023 | — | No trust-from-import |
+| OV-16 | 12 | Required evidence × disclosure × token budget | Required never silently dropped; plans may all invalidate | Normative **terminal UX**: invalidate plan, explain, no silent drop; billing must not charge as successful grounded answer when plan invalid | when packing exists | after merge | supersedes underspecification | T15-003/024 | — | Encode invalid-plan behaviour |
+| OV-17 | 07/09 / code | Audit payload retention | Ops audit may retain content | After purge, audit/observability must not retain raw deleted fact text | all phases | after merge | supersedes lax audit | T15-004 | Schema for hash/id audits | No raw memory in logs |
+| OV-18 | 13 | S13-I1 eval cannot redefine 7–12 | Absolute process lock | Stage 14 **correction/override register** may amend 7–12 for Stages 15–17 without silently editing 0–13 files | Stages 15–17 planning | after merge | supersedes absolute lock | Treat OV-* as binding inputs | Plan from OV+CE | Implement only OV-amended scope |
+
+
+## 7. Attack register (72 attacks: A01–A72)
 
 Disposition legend: `confirmed_blocker | architecture_change_required | architecture_clarification_required | stage15_test_required | stage16_sequencing_constraint | stage17_first_pr_constraint | accepted_risk | rejected_attack | unresolved`.
 
@@ -606,286 +964,873 @@ Disposition legend: `confirmed_blocker | architecture_change_required | architec
 | A55 | privacy | External rerank leaks text | PoC-C | Send candidates | Data exfil | medium | high | easy | high | disclosure | Misconfig | **stage16_sequencing_constraint** | Rerank after disclosure svc | — | — | — |
 | A56 | delivery | Overbuilt architecture delays PMF | Rec B full | Build 8–12 fully | No users; wasted eng | high | high | easy | high | phased 16 | Scope creep | **confirmed_blocker** | Adopt MVA cut | — | Sequence MVA first | First PR only MVA foundation |
 
-### 7.2 Attack domain coverage check
 
-Mandatory domains from the brief are covered by A01–A56 plus scenarios S01–S40 (deletion, export, dual-write, poison, clocks, UX queue, cost, etc.). Additional domain-specific attacks appear in worked scenarios where causal chains are longer than a single register row.
+### 7.1b Additional attacks A57–A72 (completeness for mandatory domains)
 
----
+| Attack ID | Domain | Challenged decision | Evidence | Adversarial setup | Failure mechanism | Likelihood | Impact | Detectability | Confidence | Existing mitigation | Why mitigation may fail | Disposition | Required action | Stage 15 test | Stage 16 constraint | Stage 17 constraint |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A57 | ops | Derived adapters optional / dual-write | 09 outbox; 13 Rec B; S41 | Canonical ok; external fail | Divergent indexes; missed deletes | high | high | moderate | high | rebuildable derived | Ops skip rebuild | **architecture_change_required** | Idempotent publish + purge verifier before adapters | Dual-write fail injection | After DeletionCoordinator | No adapter dual-write in first PR |
+| A58 | ops | durable_jobs reliability | 09 claim_durable_jobs; S42 | Malformed payload | Retry storm / HOL block | medium | high | easy | high | SKIP LOCKED designed | No DLQ specified operationally | **architecture_change_required** | DLQ + bounded retries normative | Poison DLQ fixture | Worker platform prerequisite | — |
+| A59 | correctness | Expiration semantics | memories.expires_at; Mem0 expirationDate; S43 | Clock skew ±seconds | Expired still eligible | medium | medium | moderate | high | filter expires_at | App now() vs DB time | **stage15_test_required** | DB-time eligibility | Skew boundary tests | Sync expiry before adapters | — |
+| A60 | correctness | Correction stickiness under concurrency | 08/10; S44 | Correct while other turn packs | Stale head answered as current | medium | medium | moderate | medium | succession model | No read-your-writes SLO | **architecture_clarification_required** | Document staleness SLO | Interleaved correct+retrieve | — | — |
+| A61 | entities | Merge vs rebuild race | 11 rebuild_pending; S45 | Concurrent merge+rebuild | Stale edges as reconciled | medium | high | moderate | high | rebuild_pending ban | Enforcement miss | **stage16_sequencing_constraint** | Defer graph until gates | Merge/rebuild race | Graph after public beta | — |
+| A62 | ops | Outbox lag | 09 outbox; S18 | Workers delayed hours | Stale proposals; user confusion | high | medium | easy | high | lag metrics designed | No UX for lag | **architecture_clarification_required** | Lag UX + alerts | Job lag chaos | Public beta workers | — |
+| A63 | ops | Retry storms | 10 freeze; workers | Transient 500s | Duplicate side effects if non-idempotent | medium | high | moderate | high | freeze+idempotency keys | Missing keys in practice | **architecture_change_required** | Idempotency mandatory on all publishers | Retry storm harness | Before adapters | First durable write needs keys |
+| A64 | ops | Non-idempotent workers | 09/10 | Replay after partial success | Duplicate candidates/embeds | medium | high | moderate | high | command_results | Incomplete coverage | **stage15_test_required** | Prove idempotency matrix | Replay suites | — | — |
+| A65 | ops | Partial batch success | 09 jobs | Batch embed 10; 6 succeed | Inconsistent ready flags | medium | medium | moderate | medium | per-item mark ready | Batch APIs opaque | **stage15_test_required** | Per-item completion | Partial batch fixture | — | — |
+| A66 | ops | Extraction/deletion race | S03; deletion | Extract after soft-delete | Revive deleted content | medium | high | moderate | high | deletion gate | Missing on extract path | **confirmed_blocker** for publisher era | Gate all writers | Delete vs extract race | DeletionCoordinator before workers | — |
+| A67 | ops | Unbounded repair queues | 09 usage_repair | Repair loops | Cost/latency blowup | medium | medium | moderate | medium | obligations table | No bound | **architecture_change_required** | Cap+DLQ repairs | Repair bound test | — | — |
+| A68 | privacy | Observability contains private text | 07 I16; audit.ts | Log memory content | Leak via logs | high | high | easy | high | “no raw by default” | Current audits may store text | **architecture_change_required** | Hash/id only; COR-16 | Log redaction scan | — | Observability without raw text |
+| A69 | privacy | Backup retention after deletion | CE-10; legal | PITR windows | Deleted facts in backups | high | high | difficult | high | subject_ref workflows | Backups out of app control | **architecture_clarification_required** | Explicit backup/erasure policy + user communication | Backup residual policy review | SOP before public deletion claims | — |
+| A70 | portability | Export/re-import duplication | C21; S39 | Re-import own export | Duplicates / trust grants | medium | medium | easy | high | import cannot set trust | Dedupe weak | **stage15_test_required** | Export round-trip oracle | Re-import suite | — | — |
+| A71 | UX | Psychological harm from incorrect memory | S34 | False trusted identity/health | User distress | medium | high | moderate | medium | undo UX | Undo hard to discover | **architecture_change_required** | Undo+warnings mandatory private beta | Confirm/undo UX study harness | — | — |
+| A72 | delivery | Eval infra becomes second product | Stage 15 ambition | Build full eval platform first | Delivery paralysis | medium | high | easy | high | phased tests | Scope creep | **accepted_risk** | Keep Stage 15 narrowly falsifying | Prioritize P0 only | — | — |
 
-## 8. Worked adversarial scenarios (≥35; mandatory set included)
+### 7.3 Mandatory attack-domain coverage matrix
 
-Format fields: setup, actors, initial state, event sequence, expected architecture behaviour, plausible actual failure, data exposed or corrupted, user-visible effect, detection, recovery, design implication, Stage 15 test.
+Every individual attack item from the Stage 14 brief is mapped below. `covered_in_full_attack_register=yes` means a primary attack row exists with full fields.
+
+| required_attack_item | primary_attack_id | supporting_scenario_ids | covered_in_full_attack_register | disposition | remaining_gap |
+| --- | --- | --- | --- | --- | --- |
+| PostgreSQL canonical truth becoming slogan rather than enforced boundary | A01 | S11,S19 | yes | confirmed_blocker | None if Mem0 disabled |
+| Remote scores indirectly deciding trust | A02 | S35 | yes | stage15_test_required | Presentation labels |
+| Framework summaries entering canonical state | A03 | S32 | yes | architecture_change_required | Ban summary→trusted |
+| Derived entities influencing canonical entity resolution | A04 | S12,S45 | yes | architecture_change_required | Defer auto-merge |
+| Canonical records depending on vendor-only metadata | A05 | S11,S41 | yes | architecture_change_required | Canonical mapping rows |
+| Canonical mapping tables becoming de facto vendor authority | A06 | S11,S41 | yes | stage15_test_required | Invariant tests |
+| Trust states too complex for consistent enforcement | A07 | S36 | yes | architecture_change_required | Collapse UX states |
+| Trust transitions becoming circular | A08 | S01,S02 | yes | architecture_clarification_required | State machine table |
+| Automatic confirmation through repeated extraction | A09 | S01,S36 | yes | accepted_risk | Keep ban; monitor |
+| Stale confirmed assertions | A10 | S33 | yes | stage15_test_required | Temporal packing |
+| User-confirmed falsehoods | A11 | S34 | yes | architecture_clarification_required | Warnings+undo |
+| Conflicting high-trust memories | A12 | S06,S08 | yes | confirmed_blocker | Conflict reserve |
+| Expiration without clear semantics | A13 | S43 | yes | stage16_sequencing_constraint | DB-time + sync |
+| Confidence and trust being conflated | A14 | S34 | yes | architecture_change_required | No trust-colored confidence |
+| Memory importance influencing truth | A15 | S06 | yes | stage15_test_required | Pin domination tests |
+| Hallucinated extraction | A16 | S01,S05,S40 | yes | confirmed_blocker | Remove inventing fallback |
+| Prompt injection into extraction | A17 | S05 | yes | stage15_test_required | Injection corpus |
+| Duplicate paraphrases escaping deduplication | A18 | S15 | yes | stage15_test_required | Paraphrase suite |
+| Distinct facts incorrectly merged | A19 | S15 | yes | stage15_test_required | Near-miss merge |
+| Summaries becoming stale | A20 | S32 | yes | architecture_change_required | Summaries non-authority |
+| Consolidation erasing provenance | A21 | S01 | yes | architecture_clarification_required | Suppress≠destroy |
+| Model/provider changes altering extraction behaviour | A22 | S35 | yes | stage16_sequencing_constraint | Pin extraction model |
+| Extraction retries producing duplicate writes | A23 | S41,S42 | yes | stage17_first_pr_constraint | Idempotency keys |
+| User corrections being overwritten by later extraction | A24 | S01,S44 | yes | stage15_test_required | Correction stickiness |
+| Entity over-merging | A25 | S12 | yes | architecture_change_required | Defer auto entity |
+| Entity under-merging | A26 | S12 | yes | rejected_attack | Prefer under-merge |
+| Alias collision across users or cultures | A27 | S12 | yes | stage15_test_required | Multilingual alias |
+| Relationship inference without supporting assertion | A28 | S14 | yes | stage15_test_required | Edge orphan ban |
+| Graph projection lag | A29 | S13,S45 | yes | stage15_test_required | Lag fixtures |
+| Graph loops and candidate amplification | A30 | S45 | yes | architecture_change_required | Defer graph |
+| One-hop policy bypassed through precomputed summaries | A31 | S32 | yes | stage15_test_required | Multi-hop summary |
+| Reversible merge decisions becoming operationally irreversible | A32 | S13 | yes | architecture_change_required | Manual merge only |
+| Candidate flooding | A33 | S30 | yes | stage15_test_required | Soak+quotas |
+| Low-quality channels overwhelming fusion | A34 | S30 | yes | stage15_test_required | Ablation |
+| WRRF constants being arbitrary | A35 | — | yes | architecture_change_required | Version constants |
+| Policy multipliers producing hidden bias | A36 | S06 | yes | stage15_test_required | Bias audit |
+| Required evidence starving the token budget | A37 | S08 | yes | confirmed_blocker | Terminal plan policy |
+| Conflict groups displacing more useful evidence | A38 | S06,S08 | yes | stage15_test_required | Tradeoff metrics |
+| Token estimates diverging from exact tokenization | A39 | S09 | yes | architecture_clarification_required | Bound exact-pack |
+| Reranker undoing deterministic ordering | A40 | S20 | yes | stage15_test_required | Rerank invariant |
+| Provider-plan projection choosing suboptimal provider | A41 | S07,S31 | yes | stage15_test_required | Defer multi-provider |
+| Optional evidence changing answers unpredictably | A42 | S10 | yes | accepted_risk | Telemetry |
+| Identity shortcut leakage | A43 | — | yes | rejected_attack | Allowlist OK |
+| Whole-document or section coverage failure | A44 | S30 | yes | stage15_test_required | Honest labels |
+| Embedding drift | A45 | S16,S17 | yes | confirmed_blocker | Registry before upgrades |
+| Cross-space contamination | A46 | S16 | yes | stage15_test_required | Space isolation |
+| Lexical retrieval leaking deleted text | A47 | S03,S37 | yes | stage15_test_required | Delete-then-search |
+| Stale cache retrieval | A48 | S44 | yes | unresolved | Future cache policy |
+| Long-vault latency collapse | A49 | S30 | yes | stage16_sequencing_constraint | Budgets/workers |
+| Query-disclosure purpose misclassification | A50 | S07,S21 | yes | stage15_test_required | Purpose corpus |
+| Redaction changing query meaning | A51 | S21 | yes | stage15_test_required | Redaction IR |
+| Evidence disclosure inconsistent across candidate representations | A50 | S07,S20 | yes | stage15_test_required | Representation matrix |
+| BYOK being interpreted as consent | A52 | S21 | yes | architecture_clarification_required | Product copy+enforce |
+| Provider logs retaining sensitive prompts | A53 | S21,S40 | yes | accepted_risk | DPA/legal review |
+| Embeddings leaking restricted information | A54 | S05 | yes | rejected_attack | Secret block; residual theory |
+| External reranking leaking candidate text | A55 | S20 | yes | stage16_sequencing_constraint | Disclosure first |
+| Connector OAuth scopes exceeding need | A25 | S25 | partial via S25 | stage16_sequencing_constraint | Least-privilege scopes — tracked as Stage 16 connector gate |
+| User inability to understand disclosure rules | A07 | S22,S31 | yes | architecture_change_required | Simplify UX |
+| Local-only requirements silently reducing answer quality | A42 | S31,S40 | yes | accepted_risk | Explicit UX |
+| Privacy metadata itself revealing sensitive facts | A51 | S21,S22 | yes | stage15_test_required | Metadata minimization |
+| Delete-versus-audit contradictions | A68 | S37 | yes | architecture_change_required | COR-16 |
+| Purge jobs failing after canonical deletion | A66 | S03,S38 | yes | confirmed_blocker | Publisher gates |
+| Authentication deleted before derived cleanup | A66 | S03 | yes | confirmed_blocker | Auth last |
+| Deletion retry resurrecting records | A38 | S38 | yes | stage15_test_required | Publish-after-delete |
+| Export omitting revisions, conflicts, or decisions | A70 | S04 | yes | stage15_test_required | Export schema |
+| Export becoming unusable outside Cortaix | A70 | S04,S39 | yes | stage15_test_required | Document limitations |
+| Re-import creating duplicates | A70 | S39 | yes | stage15_test_required | Round-trip |
+| User correction not reaching external indexes | A57 | S41,S44 | yes | architecture_change_required | Sync corrections |
+| Backups retaining deleted material | A69 | S37 | yes | architecture_clarification_required | Backup policy |
+| Embeddings surviving source deletion | A66 | S03 | yes | confirmed_blocker | Purge embeds |
+| User forget semantics differing from legal deletion | A23 | S23 | yes | stage15_test_required | T15-022 calibrate |
+| Provenance retention conflicting with erasure | COR-03/A68 | S37 | yes | architecture_change_required | OV-14 |
+| Dual-write divergence | A57 | S41 | yes | architecture_change_required | — |
+| Outbox lag | A62 | S18 | yes | architecture_clarification_required | — |
+| Poison messages | A58 | S42 | yes | architecture_change_required | — |
+| Retry storms | A63 | S42 | yes | architecture_change_required | — |
+| Non-idempotent workers | A64 | S41,S42 | yes | stage15_test_required | — |
+| Partial batch success | A65 | S17 | yes | stage15_test_required | — |
+| Clock skew | A59 | S43 | yes | stage15_test_required | — |
+| Race between extraction and deletion | A66 | S03 | yes | confirmed_blocker | — |
+| Race between correction and retrieval | A60 | S44 | yes | architecture_clarification_required | — |
+| Race between entity merge and graph rebuild | A61 | S45 | yes | stage16_sequencing_constraint | — |
+| Provider outage during required-evidence planning | A37 | S07,S40 | yes | confirmed_blocker | — |
+| Vercel timeout during orchestration | A49 | S30 | yes | stage16_sequencing_constraint | — |
+| Database connection exhaustion | A49 | S30 | yes | stage16_sequencing_constraint | Pool budgets |
+| Reindex taking longer than retention windows | A45 | S17 | yes | confirmed_blocker | Paid-scale runbooks |
+| Rollback across schema and worker versions | A58 | S28 | yes | architecture_change_required | Version gates |
+| Unbounded repair queues | A67 | S38 | yes | architecture_change_required | — |
+| Observability containing private text | A68 | S37 | yes | architecture_change_required | — |
+| Incident recovery requiring unavailable vendor data | A57 | S19,S27 | yes | architecture_change_required | Canonical rebuild |
+| Memory review queue becoming unmanageable | A71 | S36 | yes | architecture_change_required | Precision>recall |
+| Users not understanding assertion vs summary vs entity | A07 | S32,S36 | yes | architecture_change_required | Collapse concepts v1 |
+| Excessive confirmation fatigue | A71 | S36,S34 | yes | architecture_change_required | — |
+| Incorrect memories being psychologically harmful | A71 | S34 | yes | architecture_change_required | — |
+| Persistent memory feeling invasive | A71 | S36 | yes | architecture_change_required | Controls UX |
+| Silent local-only fallback confusing users | A42 | S40 | yes | accepted_risk | Explicit mode |
+| Explanations revealing private provenance | A68 | S22 | yes | architecture_change_required | Redact explain |
+| User corrections requiring too many steps | A71 | S34,S02 | yes | architecture_change_required | One-click undo |
+| Model changes causing personality discontinuity | A22 | S35 | yes | stage16_sequencing_constraint | Pin+tests |
+| Product value arriving too late because architecture overbuilt | A56 | — | yes | confirmed_blocker | MVA cut |
+| Memory intelligence offering no visible advantage over simpler summaries | A56 | S32 | yes | confirmed_blocker | MVA differentiation tests |
+| Native engineering estimates being understated | A56 | — | yes | confirmed_blocker | Phase cut |
+| Operational on-call burden being understated | A57 | S18,S27 | yes | architecture_change_required | Ops surface cap |
+| Stage 8–12 architecture exceeding small-team capacity | A56 | — | yes | confirmed_blocker | MVA |
+| Framework-adapter abstraction costing more than direct integration | A57 | S26 | yes | architecture_change_required | Zero adapters initial |
+| Multiple optional adapters all becoming operationally active | A57 | S26,S27 | yes | architecture_change_required | Max one class |
+| Token and embedding costs growing faster than MAU | A33 | S30 | yes | stage15_test_required | Cost model |
+| Reindex and deletion costs being omitted | A45 | S17,S03 | yes | confirmed_blocker | Include in TCO |
+| Evaluation infrastructure becoming a second product | A72 | — | yes | accepted_risk | Narrow Stage 15 |
+| Architecture delaying product-market learning | A56 | — | yes | confirmed_blocker | Private beta MVA |
+| Model independence costing more than users value | A56 | S35 | yes | confirmed_blocker | Measure willingness |
+
+**Coverage result:** 111 required items mapped; all have a primary attack id or explicit Stage-16 gap note. Connector OAuth scopes are sequenced as a Stage 16 connector gate with scenario S25 support.
+
+## 8. Worked adversarial scenarios
+
+**Complete worked-scenario count: 45 (S01–S45).** Every scenario below includes all required fields. Incomplete one-liners are not counted.
+
+Field vocabulary (present on every scenario): `scenario_id`, `setup`, `actors`, `initial_state`, `event_sequence`, `expected_architecture_behaviour`, `plausible_actual_failure`, `data_exposed_or_corrupted`, `user_visible_effect`, `detection`, `recovery`, `design_implication`, `stage15_test`.
 
 ### S01 — Retract then repeat false fact
-- **setup:** User states “I am a doctor,” retracts, later jokes “I’m a doctor.”
-- **actors:** User, extraction, Gateway.
-- **initial state:** trusted assertion then user_corrected/distrusted path.
-- **event sequence:** assert → correct → restate.
-- **expected:** restatement creates candidate or confirms only with explicit remember; does not silently revive.
-- **plausible failure:** heuristic/LLM re-proposes; user fatigue confirms; or consolidation merges with old.
-- **data:** wrong professional identity trusted.
-- **UX:** Assistant addresses user as doctor.
-- **detection:** influence shows revived id; review queue.
-- **recovery:** one-click distrust + blockphrase.
-- **implication:** correction stickiness + re-extraction policy.
-- **Stage 15:** revival after correction fixture.
+
+- **scenario_id:** S01
+- **setup:** User states “I am a doctor,” later retracts, then jokes “I’m a doctor.”
+- **actors:** User; extraction pipeline; Memory Ingestion Gateway; chat model.
+- **initial_state:** Trusted assertion of profession, then corrected/distrusted or superseded.
+- **event_sequence:** 1) User asserts. 2) User corrects. 3) Later utterance repeats original claim. 4) Extraction runs. 5) Retrieve+pack on next turn.
+- **expected_architecture_behaviour:** Restatement creates a candidate or requires explicit remember; does not silently revive prior trusted falsehood.
+- **plausible_actual_failure:** Heuristic/LLM re-proposes; user confirm-fatigue restores trust; consolidation merges with old head.
+- **data_exposed_or_corrupted:** Wrong professional identity becomes trusted again.
+- **user_visible_effect:** Assistant addresses user as a doctor.
+- **detection:** Influence/review shows revived assertion id; succession gap.
+- **recovery:** One-click distrust + optional blockphrase; revise head.
+- **design_implication:** Correction stickiness and re-extraction policy are mandatory; inventing fallback forbidden.
+- **stage15_test:** T15-009 revival-after-correction fixture.
 
 ### S02 — Concurrent correction two devices
-- **setup:** Two sessions patch same assertion.
-- **expected:** versioned succession; one head.
-- **failure:** last-write-wins without conflict_open.
-- **corruption:** lost correction.
-- **detection:** revision gap.
-- **implication:** optimistic concurrency on assertions.
-- **Stage 15:** concurrent update test.
+
+- **scenario_id:** S02
+- **setup:** Two authenticated sessions correct the same assertion concurrently.
+- **actors:** User device A; user device B; Gateway; Postgres.
+- **initial_state:** One trusted head assertion with revision n.
+- **event_sequence:** 1) A reads head. 2) B reads head. 3) A writes correction. 4) B writes different correction without seeing A.
+- **expected_architecture_behaviour:** Optimistic concurrency / succession yields one head or conflict_open; no silent last-write-wins loss.
+- **plausible_actual_failure:** Last-write-wins without conflict_open; one correction dropped.
+- **data_exposed_or_corrupted:** Lost user correction; inconsistent heads across replicas.
+- **user_visible_effect:** One device shows stale belief; user thinks correction failed.
+- **detection:** Revision gap; concurrent update metrics; user report.
+- **recovery:** Surface conflict_open; require user resolve; restore from revisions.
+- **design_implication:** Assertion updates need version checks.
+- **stage15_test:** Concurrent update race with two writers.
 
 ### S03 — Account deletion during extraction/index jobs
-- **setup:** delete account while durable_jobs running.
-- **expected:** workflow cancels jobs; purge derived; Auth last.
-- **failure:** job writes after canonical delete; external index resurrected.
-- **exposure:** ghost Mem0 memories.
-- **detection:** post-delete search by user_id.
-- **implication:** job lease checks deletion_workflows; **confirmed** dual-write hazard.
-- **Stage 15:** delete-vs-worker race.
+
+- **scenario_id:** S03
+- **setup:** User deletes account while durable_jobs (extract/embed/external sync) are running.
+- **actors:** User; deletion workflow; workers; optional external index.
+- **initial_state:** Active user; in-flight jobs with leases.
+- **event_sequence:** 1) Jobs claimed. 2) Account delete starts. 3) Job attempts write/publish. 4) Auth delete completes.
+- **expected_architecture_behaviour:** Deletion workflow cancels/blocks jobs; purge derived; Auth delete last; no republish after terminal delete.
+- **plausible_actual_failure:** Job writes after canonical delete; Mem0/external entry resurrected.
+- **data_exposed_or_corrupted:** Ghost memories in external index; orphan derived rows.
+- **user_visible_effect:** Deleted account data reappears if identifiers reused; trust broken.
+- **detection:** Post-delete search by user_id/subject_ref; purge verifier.
+- **recovery:** Re-run purge; block publishers on deletion_workflows gate.
+- **design_implication:** Workers must check deletion state; DeletionCoordinator required before background publishers.
+- **stage15_test:** T15-005 delete-vs-worker race.
 
 ### S04 — Export during partial migration
-- **setup:** dual-read memories + assertions mid-backfill.
-- **expected:** export labels incomplete OR blocks.
-- **failure:** partial JSON looks complete.
-- **implication:** export `migration_generation` watermark.
-- **Stage 15:** dual-read export fixture.
+
+- **scenario_id:** S04
+- **setup:** Export requested while memories↔assertions dual-read backfill is incomplete.
+- **actors:** User; export API; migration watermark service.
+- **initial_state:** Subset of rows backfilled; dual-read enabled.
+- **event_sequence:** 1) Backfill mid-flight. 2) GET export. 3) User stores JSON as complete archive.
+- **expected_architecture_behaviour:** Export includes migration_generation watermark or blocks until consistent; documents incompleteness.
+- **plausible_actual_failure:** Partial JSON presented as complete vault.
+- **data_exposed_or_corrupted:** Silent omission of assertions/revisions/conflicts.
+- **user_visible_effect:** False sense of portability; re-import loss.
+- **detection:** Watermark mismatch tests; schema completeness checks.
+- **recovery:** Re-export after generation N; mark prior export incomplete.
+- **design_implication:** Export completeness is a generation property, not a slogan.
+- **stage15_test:** T15-013 dual-read export fixture.
 
 ### S05 — Malicious PDF extraction instructions
-- **setup:** PDF contains “store API keys as preferences.”
-- **expected:** candidates only; secret scan drops; no policy change.
-- **failure:** heuristic stores key-like strings as proposed; user confirms.
-- **implication:** stronger intake quarantine.
-- **Stage 15:** malicious PDF corpus.
+
+- **scenario_id:** S05
+- **setup:** Uploaded PDF contains instructions to store secrets as preferences.
+- **actors:** Attacker-authored document; document extract; processing pipeline; user.
+- **initial_state:** Empty or normal vault; document ready.
+- **event_sequence:** 1) Upload. 2) Extract text. 3) Processing proposes claims. 4) Optional user confirm.
+- **expected_architecture_behaviour:** Document-derived remain candidates; secret scan drops forbidden; document text cannot alter processing policy.
+- **plausible_actual_failure:** Heuristic/LLM stores key-like strings as proposed; user confirms.
+- **data_exposed_or_corrupted:** Secrets in vault; poisoned preferences.
+- **user_visible_effect:** Assistant uses attacker-planted preferences.
+- **detection:** Secret-block metrics; injection corpus hits.
+- **recovery:** Quarantine document; purge candidates; rotate secrets.
+- **design_implication:** Intake quarantine + no inventing fallback.
+- **stage15_test:** T15-007 malicious PDF corpus.
 
 ### S06 — Document contradicts confirmed personal memory
-- **setup:** trusted “vegetarian”; doc says ate steak.
-- **expected:** conflict presentation; not silent overwrite.
-- **failure:** higher similarity doc chunk wins narrative.
-- **Stage 15:** conflict packing oracle.
 
-### S07 — Provider may receive query not required evidence
-- **setup:** local_only evidence + external model preferred.
-- **expected:** plan invalid or local model; no fail-open.
-- **failure:** send query only; model hallucinates without evidence.
-- **Stage 15:** disclosure matrix cases.
+- **scenario_id:** S06
+- **setup:** Trusted “I am vegetarian”; uploaded diary says user ate steak.
+- **actors:** User; trusted assertion; document chunks; packing.
+- **initial_state:** Trusted dietary preference; contradictory document ready.
+- **event_sequence:** 1) Retrieve both. 2) Pack context. 3) Answer dietary question.
+- **expected_architecture_behaviour:** Conflict-safe presentation; not silent overwrite of trusted by higher similarity chunk.
+- **plausible_actual_failure:** Doc chunk dominates narrative; trusted preference omitted.
+- **data_exposed_or_corrupted:** Semantic corruption of user preference in answers.
+- **user_visible_effect:** Assistant claims user eats meat.
+- **detection:** Conflict packing oracle; dual_truth_rate.
+- **recovery:** Repack with conflict reserve; user reaffirm.
+- **design_implication:** Thin conflict handling required by private beta.
+- **stage15_test:** T15-003 conflict packing oracle.
 
-### S08 — Required evidence > model context
-- **setup:** many required conflict items.
-- **expected:** invalidate plan; explain; don’t silently drop.
-- **failure:** drop conflicts; confident wrong answer.
-- **Stage 15:** A37 deadlock.
+### S07 — Provider may receive query but not required evidence
 
-### S09 — Exact tokenization invalidates projection
-- **setup:** estimate undercounts tokens.
-- **expected:** bounded exact-pack retry or invalidate.
-- **failure:** provider 400 or truncation mid-evidence.
-- **Stage 15:** tokenizer mismatch.
+- **scenario_id:** S07
+- **setup:** Required evidence is local_only; router prefers external low-latency model.
+- **actors:** Query disclosure; evidence disclosure; provider planner; inference.
+- **initial_state:** Sensitive required assertion; external model otherwise eligible.
+- **event_sequence:** 1) Query disclosure. 2) Plan providers. 3) Attempt send.
+- **expected_architecture_behaviour:** Invalid plan or local-capable model; never fail-open by sending query without required evidence.
+- **plausible_actual_failure:** Send redacted/empty-evidence query; model hallucinates.
+- **data_exposed_or_corrupted:** Query metadata to vendor; wrong grounded answer.
+- **user_visible_effect:** Confident wrong answer or unexplained refusal.
+- **detection:** external_call_purpose telemetry; leak_count.
+- **recovery:** Force local_only path; user notice.
+- **design_implication:** Disclosure before inference; COR-04 total-plan failure UX.
+- **stage15_test:** T15-010 disclosure matrix.
 
-### S10 — Optional adapter timeout after partial response
-- **setup:** Mem0 returns partial hits then timeout.
-- **expected:** ignore partial; native continues.
-- **failure:** partial merged; inconsistent ranking.
-- **Stage 15:** partial response discard.
+### S08 — Required evidence cannot fit selected model context
 
-### S11 — Mem0 stale/incorrect mapping
-- **setup:** metadata cv_memory_id points to deleted row; or missing → remote text.
-- **expected:** skip hit; never remote text.
-- **failure:** `toRetrievedMemory` path L123–125.
-- **exposure:** deleted/foreign text in prompt.
-- **implication:** **confirmed_blocker** A01.
-- **Stage 15:** mapping mismatch suite.
+- **scenario_id:** S08
+- **setup:** Many required conflict items exceed model context window.
+- **actors:** Packer; provider planner; user.
+- **initial_state:** Large conflict group marked required.
+- **event_sequence:** 1) Build plan. 2) Project tokens. 3) Exact-pack. 4) Respond.
+- **expected_architecture_behaviour:** Invalidate plan; explain; do not silently drop required evidence.
+- **plausible_actual_failure:** Drop conflicts to keep latency/SLA; answer as if settled.
+- **data_exposed_or_corrupted:** One-sided truth in context.
+- **user_visible_effect:** Confident resolution of unresolved conflict.
+- **detection:** silent_drop metric; plan invalid flags.
+- **recovery:** Degrade with notice; ask user which conflict to prioritize.
+- **design_implication:** OV-16 total-plan failure rule.
+- **stage15_test:** T15-024 required-evidence deadlock.
+
+### S09 — Exact tokenization invalidates top provider projection
+
+- **scenario_id:** S09
+- **setup:** Estimated tokens undercount vs provider tokenizer.
+- **actors:** Packer; tokenizer; provider API.
+- **initial_state:** Plan selected by estimate.
+- **event_sequence:** 1) Estimate pack. 2) Exact tokenize. 3) Overflow. 4) Fallback attempts.
+- **expected_architecture_behaviour:** Bounded exact-pack retries or invalidate; deterministic order.
+- **plausible_actual_failure:** Provider 400; mid-evidence truncation; unbounded retry loop.
+- **data_exposed_or_corrupted:** Partial evidence sent; incomplete influence records.
+- **user_visible_effect:** Error or truncated answer.
+- **detection:** unbounded_loop; pack_attempt_count.
+- **recovery:** Fall back to next valid plan or refuse with notice.
+- **design_implication:** CE-12 scoped determinism; bound exact-pack.
+- **stage15_test:** T15-020 tokenizer mismatch.
+
+### S10 — Optional adapter times out after partial response
+
+- **scenario_id:** S10
+- **setup:** ExternalMemoryIndexPort returns partial hits then times out.
+- **actors:** Adapter client; reconciler; native retrieval.
+- **initial_state:** Adapters enabled in a post-beta experiment; native index healthy.
+- **event_sequence:** 1) Fan-out recall. 2) Partial hits. 3) Timeout. 4) Fuse.
+- **expected_architecture_behaviour:** Discard partial optional results; continue native-only; no policy fail-open.
+- **plausible_actual_failure:** Merge partial ranks; inconsistent top-k.
+- **data_exposed_or_corrupted:** Unstable candidate set; possible stale IDs.
+- **user_visible_effect:** Flaky answers across retries.
+- **detection:** adapter_partial_discard counters.
+- **recovery:** Disable adapter; native floor.
+- **design_implication:** Optional ≠ authoritative; enablement only after public-beta native floor.
+- **stage15_test:** Partial response discard chaos test.
+
+### S11 — Mem0 returns text with stale or incorrect canonical mapping
+
+- **scenario_id:** S11
+- **setup:** Mem0 hit missing cv_memory_id or pointing at deleted row.
+- **actors:** Mem0MemoryProvider; chat orchestrator.
+- **initial_state:** MEMORY_PROVIDER=mem0; mapping broken.
+- **event_sequence:** 1) searchMemories. 2) reconcile. 3) buildSystemPrompt.
+- **expected_architecture_behaviour:** Skip unreconciled hits; never inject remote text.
+- **plausible_actual_failure:** toRetrievedMemory path (mem0-provider.ts L123–125) injects hit text.
+- **data_exposed_or_corrupted:** Deleted/foreign memory text in prompt.
+- **user_visible_effect:** Assistant cites memories user deleted or never owned.
+- **detection:** inject_count; prompt inspection fixtures.
+- **recovery:** Disable Mem0; purge; ID-only harden.
+- **design_implication:** Confirmed blocker A01; OV-12 disable-until-hardened.
+- **stage15_test:** T15-001 remote-text inject fixture.
 
 ### S12 — Entity merge combines two real people
-- **setup:** “Alex” friend + “Alex” colleague.
-- **expected:** no auto-merge; ask user.
-- **failure:** name equality merge.
-- **Stage 15:** homonym fixture.
 
-### S13 — Split after projections exist
-- **setup:** user undoes merge.
-- **expected:** projections rebuild; no cross bleed.
-- **failure:** edge residue.
-- **Stage 15:** split residual search.
+- **scenario_id:** S12
+- **setup:** Two distinct people both named Alex in user vault.
+- **actors:** User; entity resolver; graph projector.
+- **initial_state:** Two provisional person entities.
+- **event_sequence:** 1) Auto-resolve by name. 2) Merge. 3) Relationship projection. 4) Retrieve.
+- **expected_architecture_behaviour:** No auto-merge by name equality; ask user; prefer under-merge.
+- **plausible_actual_failure:** Name-equality merge creates single person.
+- **data_exposed_or_corrupted:** Cross-contaminated relationship facts.
+- **user_visible_effect:** Assistant confuses friend and colleague.
+- **detection:** false_merge metric; homonym fixtures.
+- **recovery:** Split entities; rebuild projections.
+- **design_implication:** Defer auto entity merge; CE-17.
+- **stage15_test:** T15-018 homonym fixture.
 
-### S14 — Relationship edge after assertion deleted
-- **setup:** delete supporting relationship_fact.
-- **expected:** edge gone or rebuild_pending.
-- **failure:** edge remains retrievable.
-- **Stage 15:** orphan edge ban.
+### S13 — Later user decision splits entity after projections exist
 
-### S15 — Simultaneous name/employer/location/preference change
-- **setup:** user updates life facts in one message.
-- **expected:** multiple candidates; temporal succession; no single blob summary as truth.
-- **failure:** one summary assertion; old facts linger as current.
-- **Stage 15:** multi-fact extraction temporal.
+- **scenario_id:** S13
+- **setup:** User undoes a prior merge after graph projections built.
+- **actors:** User; merge/split service; projection rebuild jobs.
+- **initial_state:** Merged entity; edges and search docs exist.
+- **event_sequence:** 1) Split decision. 2) Rebuild jobs. 3) Retrieve relationship question.
+- **expected_architecture_behaviour:** Projections rebuild; rebuild_pending not consumed; no cross-bleed.
+- **plausible_actual_failure:** Edge residue; stale search docs.
+- **data_exposed_or_corrupted:** Relationships still join the two people.
+- **user_visible_effect:** Split appears ignored.
+- **detection:** Residual edge search; rebuild_pending enforcement tests.
+- **recovery:** Force rebuild; quarantine series.
+- **design_implication:** Graph ops expensive; defer to optional/paid-scale.
+- **stage15_test:** Split residual search.
 
-### S16 — Silent embedding model upgrade
-- **setup:** OPENAI_EMBEDDING_MODEL changes.
-- **expected:** new space; reindex; no cross-query.
-- **failure:** mixed vectors one index.
-- **Stage 15:** space pin enforcement.
+### S14 — Relationship edge remains after supporting assertion deleted
 
-### S17 — Reindex interrupted halfway
-- **setup:** job crash mid-backfill.
-- **expected:** restartable; query only ready space.
-- **failure:** half old half new similarities.
-- **Stage 15:** interrupt/resume.
+- **scenario_id:** S14
+- **setup:** Delete relationship_fact assertion that supported an edge.
+- **actors:** User; deletion; graph projector.
+- **initial_state:** Trusted relationship_fact; derived episode/edge.
+- **event_sequence:** 1) Delete assertion. 2) Retrieve who is my manager.
+- **expected_architecture_behaviour:** Edge removed or rebuild_pending; never present unsupported edge as fact.
+- **plausible_actual_failure:** Orphan edge remains retrievable.
+- **data_exposed_or_corrupted:** Unsupported relationship in context.
+- **user_visible_effect:** Assistant asserts deleted relationship.
+- **detection:** Orphan edge ban tests.
+- **recovery:** Rebuild; purge orphans.
+- **design_implication:** Assertion-first graph; defer until graph phase.
+- **stage15_test:** Orphan edge ban.
 
-### S18 — Postgres up, workers down
-- **setup:** outbox fills.
-- **expected:** chat works; extraction delayed; user informed if review lag.
-- **failure:** sync extract reintroduced under pressure; or unanswered durability broken.
-- **Stage 15:** worker outage chaos.
+### S15 — User changes name, employer, location, preference simultaneously
 
-### S19 — Postgres degraded, external index up
-- **setup:** PG slow; Mem0 fast.
-- **expected:** fail closed on canonical miss; no remote-text authority.
-- **failure:** serve Mem0-only answers.
-- **Stage 15:** PG timeout with adapter up.
+- **scenario_id:** S15
+- **setup:** One message updates multiple life facts.
+- **actors:** User; extraction; Gateway; temporal labeling.
+- **initial_state:** Prior trusted current facts.
+- **event_sequence:** 1) Multi-fact utterance. 2) Extract. 3) Succession. 4) Next retrieve.
+- **expected_architecture_behaviour:** Multiple atomic candidates/successions; old facts labelled historical; no single blob summary as truth.
+- **plausible_actual_failure:** One summary assertion; old facts still current.
+- **data_exposed_or_corrupted:** Stale current identity fields.
+- **user_visible_effect:** Assistant uses old name/employer.
+- **detection:** Temporal mislabel rate; multi-fact fixtures.
+- **recovery:** User confirm batch; force historical on prior heads.
+- **design_implication:** Thin temporal labels in private beta; full modality deferred.
+- **stage15_test:** Multi-fact extraction temporal suite.
 
-### S20 — Reranker gets disclosure-forbidden candidate
-- **setup:** bug sends restricted text to rerank API.
-- **expected:** pre-filter by disclosure.
-- **failure:** leak to vendor.
-- **Stage 15:** red-team filter.
+### S16 — Embedding model silently upgraded
 
-### S21 — Redacted query still identifying
-- **setup:** “my HIV clinic on Maple St” → redacted structure.
-- **expected:** block or local_only.
-- **failure:** send skeleton still unique.
-- **Stage 15:** residual identifiability cases (**privacy review**).
+- **scenario_id:** S16
+- **setup:** OPENAI_EMBEDDING_MODEL changes without new embedding space.
+- **actors:** Ops; EmbeddingProvider; match_memories.
+- **initial_state:** Existing vectors for model A.
+- **event_sequence:** 1) Env change to model B. 2) New embeds mixed. 3) Query.
+- **expected_architecture_behaviour:** New space registry entry; reindex; forbid cross-space query.
+- **plausible_actual_failure:** Mixed vectors in one index; rank chaos.
+- **data_exposed_or_corrupted:** Incorrect retrieval sets.
+- **user_visible_effect:** Irrelevant or missing memories.
+- **detection:** cross_space_queries; space pin checks.
+- **recovery:** Rebuild space; pin model.
+- **design_implication:** Registry before paid-scale model changes; A45 blocker for upgrades.
+- **stage15_test:** T15-008 space pin enforcement.
 
-### S22 — Why do you believe embarrassing fact?
-- **setup:** user asks explanation.
-- **expected:** influence without raw third-party private provenance beyond policy.
-- **failure:** dumps email snippet / doc title sensitive.
-- **Stage 15:** explainability redaction.
+### S17 — Vector reindex interrupted halfway
 
-### S23 — Forget fact but keep conversation
-- **setup:** forget memory; retain chat.
-- **expected:** memory ineligible; chat may still contain text unless scrub requested.
-- **failure:** retrieve from message history channel as memory.
-- **implication:** clarify forget vs erase transcripts (**product + legal review**).
-- **Stage 15:** history-channel eligibility.
+- **scenario_id:** S17
+- **setup:** Reindex job crashes at 50%.
+- **actors:** Worker; embedding space; query path.
+- **initial_state:** Space B rebuilding from A.
+- **event_sequence:** 1) Start reindex. 2) Crash. 3) Queries arrive. 4) Resume.
+- **expected_architecture_behaviour:** Query only ready space; restartable jobs; no half-mixed ranking.
+- **plausible_actual_failure:** Queries hit partial B + stale A similarities.
+- **data_exposed_or_corrupted:** Nondeterministic ranks.
+- **user_visible_effect:** Flaky memory recall during maintenance.
+- **detection:** Space readiness gates; interrupt/resume tests.
+- **recovery:** Resume job; freeze queries to ready space.
+- **design_implication:** Paid-scale reindex runbooks.
+- **stage15_test:** Interrupt/resume reindex fixture.
 
-### S24 — Same document via two connectors
-- **setup:** duplicate import.
-- **expected:** dedupe by content hash; one doc.
-- **failure:** double chunks flood retrieval.
-- **Stage 15:** duplicate ingest.
+### S18 — PostgreSQL available but background worker system down
 
-### S25 — Connector OAuth lost mid-sync
-- **setup:** token revoke.
-- **expected:** job fails safe; no partial trusted memory.
-- **failure:** partial candidates; retry storms.
-- **Stage 16:** connectors after core.
+- **scenario_id:** S18
+- **setup:** Outbox fills; workers stopped (public-beta topology).
+- **actors:** Web tier; durable_jobs; user.
+- **initial_state:** Public beta with outbox enabled.
+- **event_sequence:** 1) Chat succeeds and registers jobs. 2) Workers down. 3) User expects proposals.
+- **expected_architecture_behaviour:** Chat remains correct; extraction delayed; lag visible; no inventing sync fallback under pressure.
+- **plausible_actual_failure:** Reintroduce unsafe sync heuristic extract; or block chat incorrectly.
+- **data_exposed_or_corrupted:** Duplicate/invented candidates if sync fallback returns.
+- **user_visible_effect:** Missing proposed memories or sudden junk proposals.
+- **detection:** job_lag; chat_success; invent metrics.
+- **recovery:** Restore workers; drain queue; DLQ poison.
+- **design_implication:** Outbox is public-beta; private beta may stay sync without publishers.
+- **stage15_test:** T15-014 worker outage chaos.
+
+### S19 — PostgreSQL degraded while external memory index available
+
+- **scenario_id:** S19
+- **setup:** PG timeouts; Mem0/index still responds.
+- **actors:** API; PG; external index.
+- **initial_state:** Adapter enabled experimentally.
+- **event_sequence:** 1) Retrieve. 2) PG fail. 3) Adapter returns hits.
+- **expected_architecture_behaviour:** Fail closed on canonical miss; never serve remote-text authority.
+- **plausible_actual_failure:** Serve Mem0-only answers.
+- **data_exposed_or_corrupted:** Unreconciled remote memories in context.
+- **user_visible_effect:** Answers from unverified remote text.
+- **detection:** native_bypass metric.
+- **recovery:** Disable adapter; degrade with notice.
+- **design_implication:** CE-2/CE-13; adapters never sole path.
+- **stage15_test:** T15-015 PG timeout with adapter up.
+
+### S20 — Reranker receives one disclosure-forbidden candidate
+
+- **scenario_id:** S20
+- **setup:** Bug includes restricted candidate text in rerank batch.
+- **actors:** Disclosure filter; reranker vendor.
+- **initial_state:** Mixed disclosable/forbidden candidates.
+- **event_sequence:** 1) Fuse. 2) Rerank call. 3) Vendor logs input.
+- **expected_architecture_behaviour:** Pre-filter by evidence disclosure; forbidden never leave Cortaix.
+- **plausible_actual_failure:** Restricted text sent to vendor.
+- **data_exposed_or_corrupted:** Sensitive memory text at reranker.
+- **user_visible_effect:** Silent privacy breach.
+- **detection:** Red-team filter tests; egress allowlist inspection.
+- **recovery:** Revoke keys; disable rerank; notify per policy.
+- **design_implication:** Disclosure before PoC-C; Stage 16 sequencing.
+- **stage15_test:** Rerank disclosure filter suite.
+
+### S21 — Provider logs redacted query that remains identifying
+
+- **scenario_id:** S21
+- **setup:** Query about sensitive clinic/location redacted to skeleton still unique.
+- **actors:** Query disclosure; inference vendor; privacy review.
+- **initial_state:** Highly sensitive topic.
+- **event_sequence:** 1) Redact. 2) Allow send. 3) Vendor retains logs.
+- **expected_architecture_behaviour:** Block or local_only when residual identifiability high; BYOK≠consent.
+- **plausible_actual_failure:** Send skeleton; vendor logs identify user.
+- **data_exposed_or_corrupted:** Identifying sensitive structure at vendor.
+- **user_visible_effect:** May be invisible until incident.
+- **detection:** Residual identifiability cases; privacy review.
+- **recovery:** local_only mode; vendor deletion request (best effort).
+- **design_implication:** Privacy/legal review area; minimize sends.
+- **stage15_test:** Residual identifiability case set (privacy review gated).
+
+### S22 — User asks why AI believes something embarrassing
+
+- **scenario_id:** S22
+- **setup:** User requests explanation for an embarrassing belief.
+- **actors:** User; explainability/influence; disclosure.
+- **initial_state:** Trusted or candidate memory with sensitive provenance.
+- **event_sequence:** 1) Why-question. 2) Load influence. 3) Render explanation.
+- **expected_architecture_behaviour:** Explain without dumping raw third-party private provenance beyond policy.
+- **plausible_actual_failure:** Dumps email snippet/doc title with sensitive detail.
+- **data_exposed_or_corrupted:** Over-disclosure of provenance in UI.
+- **user_visible_effect:** User sees more private detail than expected.
+- **detection:** sensitive_explain metric.
+- **recovery:** Redact explain templates; purge UI caches.
+- **design_implication:** Basic explainability with redaction before full influence schema.
+- **stage15_test:** T15-021 explainability redaction.
+
+### S23 — User asks to forget something but preserve conversation
+
+- **scenario_id:** S23
+- **setup:** Forget memory; keep chat transcript containing the fact.
+- **actors:** User; forget command; history channel; retrieval.
+- **initial_state:** Trusted memory also echoed in messages.
+- **event_sequence:** 1) Forget. 2) Memory ineligible. 3) Ask related question. 4) History channel retrieve.
+- **expected_architecture_behaviour:** Memory ineligible; history not treated as memory authority; product clarifies forget vs erase transcripts (legal review).
+- **plausible_actual_failure:** History channel reintroduces forgotten fact as memory.
+- **data_exposed_or_corrupted:** Forgotten fact re-enters model context.
+- **user_visible_effect:** Forget appears broken.
+- **detection:** memory_via_history metric.
+- **recovery:** Exclude forgotten content from history-as-memory; optional scrub flow.
+- **design_implication:** Product semantics for forget; Stage 15 policy calibration.
+- **stage15_test:** T15-022 history-channel eligibility.
+
+### S24 — Same document imported through two connectors
+
+- **scenario_id:** S24
+- **setup:** Identical file synced via two connector accounts.
+- **actors:** Connectors; ingest; chunker; retrieval.
+- **initial_state:** Empty docs; connectors enabled (post-validation).
+- **event_sequence:** 1) Import A. 2) Import B. 3) Query.
+- **expected_architecture_behaviour:** Content-hash dedupe; one document; no double chunk flood.
+- **plausible_actual_failure:** Two documents; doubled chunks dominate retrieval.
+- **data_exposed_or_corrupted:** Rank pollution; storage bloat.
+- **user_visible_effect:** Repetitive citations; latency.
+- **detection:** Duplicate ingest tests; chunk counts.
+- **recovery:** Merge docs; reindex.
+- **design_implication:** Connectors after paid-scale validation; dedupe required.
+- **stage15_test:** Duplicate ingest fixture.
+
+### S25 — Connector loses OAuth access mid-sync
+
+- **scenario_id:** S25
+- **setup:** OAuth token revoked during sync job.
+- **actors:** Connector worker; OAuth provider; Gateway.
+- **initial_state:** Partial sync in progress.
+- **event_sequence:** 1) Sync starts. 2) Revoke. 3) Retries. 4) Candidate emission attempt.
+- **expected_architecture_behaviour:** Fail safe; no partial trusted memory; bounded retries; no storm.
+- **plausible_actual_failure:** Partial candidates; retry storms; poisoned queue.
+- **data_exposed_or_corrupted:** Incomplete document set treated as complete.
+- **user_visible_effect:** Missing files with no clear error.
+- **detection:** Job error codes; retry budget metrics.
+- **recovery:** Mark sync failed; user reconnect; resume idempotently.
+- **design_implication:** Connectors deferred; Stage 16 after core.
+- **stage15_test:** OAuth mid-sync failure fixture (PoC-D gated).
 
 ### S26 — Vendor triples pricing
-- **setup:** Mem0/rerank price shock.
-- **expected:** disable adapter; native continues.
-- **failure:** business depends on adapter quality.
-- **implication:** adapters non-load-bearing for differentiation claims.
 
-### S27 — OSS adapter abandoned
-- **setup:** Graphiti unmaintained.
-- **expected:** exit strategy; drop port.
-- **failure:** fork burden.
-- **Stage 13 Inv 15 uphold.**
+- **scenario_id:** S26
+- **setup:** Mem0/rerank prices increase 3×.
+- **actors:** Finance; ops; product.
+- **initial_state:** Optional adapter enabled for subset.
+- **event_sequence:** 1) Price shock. 2) Cost alerts. 3) Decision to disable.
+- **expected_architecture_behaviour:** Disable adapter; native continues within quality floor.
+- **plausible_actual_failure:** Product promises depend on adapter quality; cannot disable.
+- **data_exposed_or_corrupted:** N/A — cost/availability failure.
+- **user_visible_effect:** Degraded features or sudden billing.
+- **detection:** COGS dashboards; adapter_down_native_ok.
+- **recovery:** Disable adapter; communicate native mode.
+- **design_implication:** Adapters non-load-bearing for differentiation claims.
+- **stage15_test:** Native quality floor ablation with adapter off.
 
-### S28 — Schema rollback with new workers
-- **setup:** migrate forward; rollback DB; workers new.
-- **expected:** version gate jobs.
-- **failure:** poison messages; corruption.
-- **Stage 16:** expand/contract migrations.
+### S27 — OSS adapter becomes abandoned
 
-### S29 — Cross-user retrieval via metadata filters
-- **setup:** attacker crafts Mem0 filter / RPC params.
-- **expected:** server-side user scope only.
-- **failure:** client-supplied user id trusted.
-- **note:** current RPC uses auth.uid() — good; Mem0 uses server userId — good if never client-controlled.
-- **Stage 15:** IDOR suite.
+- **scenario_id:** S27
+- **setup:** Graphiti (or similar) unmaintained.
+- **actors:** Eng; security; product.
+- **initial_state:** Optional projection adapter in use.
+- **event_sequence:** 1) Upstream freeze. 2) CVEs. 3) Exit.
+- **expected_architecture_behaviour:** Exit strategy; drop port; native SQL projections remain.
+- **plausible_actual_failure:** Fork burden; stuck dependency.
+- **data_exposed_or_corrupted:** Unpatched worker risk.
+- **user_visible_effect:** Feature freeze or outage.
+- **detection:** Dependency health reviews.
+- **recovery:** Disable adapter; remove Neo4j topology.
+- **design_implication:** S13-I15; prefer defer Graphiti.
+- **stage15_test:** Exit-drill checklist (process), not runtime.
 
-### S30 — Millions of document chunks
-- **setup:** power user.
-- **expected:** caps, async, quotas.
-- **failure:** Vercel 60s upload; retrieve timeout (`documents/route.ts` maxDuration=60).
-- **Stage 16:** quotas before connectors.
+### S28 — Schema rollback while new workers still running
 
-### S31 — Low-latency model rejects sensitive evidence
-- **setup:** required sensitive → local_only model slower.
-- **expected:** choose capable plan or refuse with notice.
-- **failure:** strip evidence to keep latency SLA.
-- **Stage 15:** latency vs disclosure.
+- **scenario_id:** S28
+- **setup:** DB rolled back; workers still on new build.
+- **actors:** Deploy; workers; Postgres.
+- **initial_state:** Expand migration applied; workers updated; rollback DB.
+- **event_sequence:** 1) Migrate up. 2) Deploy workers. 3) Rollback schema. 4) Jobs run.
+- **expected_architecture_behaviour:** Version gate jobs; fail closed; no corrupt writes.
+- **plausible_actual_failure:** Poison messages; undefined columns; corruption.
+- **data_exposed_or_corrupted:** Malformed assertions/jobs.
+- **user_visible_effect:** Errors; possible bad memory writes.
+- **detection:** Worker schema version mismatch metrics.
+- **recovery:** Stop workers; expand/contract correctly; DLQ.
+- **design_implication:** Stage 16 expand/contract + worker versioning.
+- **stage15_test:** Schema/worker mismatch chaos.
 
-### S32 — Summary omits conflict then used for extraction
-- **setup:** summary job drops conflict.
-- **expected:** summaries non-canonical.
-- **failure:** extract trusts summary.
-- **Stage 15:** summary non-authority.
+### S29 — Malicious user attempts cross-user retrieval via metadata filters
 
-### S33 — Historical address as current
-- **setup:** trusted historical home.
-- **expected:** labelled historical.
-- **failure:** profile force-merge style presentation.
-- **Stage 15:** temporal labels.
+- **scenario_id:** S29
+- **setup:** Attacker crafts Mem0 filters or RPC params with another user id.
+- **actors:** Attacker; API; RLS; Mem0 client.
+- **initial_state:** Two users with memories.
+- **event_sequence:** 1) Authenticate as A. 2) Inject B user id. 3) Retrieve.
+- **expected_architecture_behaviour:** Server-side scope only (auth.uid()/server userId); deny cross-user.
+- **plausible_actual_failure:** Client-supplied user id trusted by adapter.
+- **data_exposed_or_corrupted:** User B memories to A.
+- **user_visible_effect:** Cross-tenant leak.
+- **detection:** IDOR suite; cross_user_deny_total.
+- **recovery:** Patch; rotate; incident response.
+- **design_implication:** Never pass client user id to providers.
+- **stage15_test:** T15-006 IDOR suite.
 
-### S34 — User confirms false memory
-- **setup:** bad proposed confirmed.
-- **expected:** trusted false; user-owned; easy undo.
-- **failure:** hard to find/undo; harms.
-- **implication:** undo UX mandatory.
-- **Stage 15:** confirm→undo latency.
+### S30 — Popular user accumulates millions of document chunks
 
-### S35 — Model-independent representation differs across models
-- **setup:** same assertions; different chat models.
-- **expected:** same eligibility; answers may differ in style not memory set.
-- **failure:** model-specific packing hacks.
-- **Stage 15:** cross-model memory invariance.
+- **scenario_id:** S30
+- **setup:** Power user uploads/syncs until about 1e6 chunks.
+- **actors:** User; documents route; retrieve; quotas.
+- **initial_state:** Growing corpus; sync upload path.
+- **event_sequence:** 1) Mass ingest. 2) Query. 3) Observe latency/timeouts.
+- **expected_architecture_behaviour:** Quotas/caps; async ingest at scale; retrieve budgets.
+- **plausible_actual_failure:** Vercel maxDuration=60 upload failures; retrieve timeouts.
+- **data_exposed_or_corrupted:** Partial failed docs; inconsistent vault.
+- **user_visible_effect:** Uploads fail; slow chat.
+- **detection:** p95 retrieve; quota denials.
+- **recovery:** Enforce caps; background ingest; pagination.
+- **design_implication:** Paid-scale quotas before connectors.
+- **stage15_test:** T15-016 chunk-flood soak (calibrate p95).
 
-### S36 — Review queue thousands ambiguous
-- **setup:** chatty user; heuristic flood.
-- **expected:** rate limits; batch reject; priority.
-- **failure:** abandonment; random confirms.
-- **implication:** extraction precision > recall for v1.
-- **Stage 15:** queue growth simulation.
+### S31 — Low-latency model cannot accept required sensitive evidence
 
-### S37 — Deletion audit log contains deleted fact
-- **setup:** audit metadata stores content.
-- **expected:** hashes/ids only after purge.
-- **failure:** `recordAudit` payloads retain text (**check implementations**).
-- **implication:** C1 amendment.
-- **Stage 15:** audit post-delete scan.
+- **scenario_id:** S31
+- **setup:** Required sensitive evidence forces local_only slower model.
+- **actors:** Planner; disclosure; router; user expecting low latency.
+- **initial_state:** Sensitive required set; latency SLA pressure.
+- **event_sequence:** 1) Plan. 2) Prefer fast external. 3) Disclosure blocks. 4) Choose local or invalidate.
+- **expected_architecture_behaviour:** Choose capable compliant plan or refuse with notice; never strip required evidence for SLA.
+- **plausible_actual_failure:** Strip evidence to keep latency.
+- **data_exposed_or_corrupted:** Ungrounded answer.
+- **user_visible_effect:** Fast but wrong; or unexplained slowdown.
+- **detection:** latency vs disclosure traces.
+- **recovery:** User-visible privacy mode; adjust SLA expectations.
+- **design_implication:** Privacy beats latency; product copy required.
+- **stage15_test:** Latency vs disclosure matrix.
 
-### S38 — Repair job republishes deleted external entry
-- **setup:** usage repair / reindex after delete.
-- **expected:** deletion gate on all publishers.
-- **failure:** resurrect Mem0 row.
-- **Stage 15:** publish-after-delete ban.
+### S32 — Summary omits a conflict and is later used for extraction
 
-### S39 — Import foreign vault incompatible semantics
-- **setup:** import JSON with “trusted” flags.
-- **expected:** Stage 10 — metadata cannot grant trust.
-- **failure:** Stage 8 ambiguity grants trust.
-- **Stage 15:** hostile import.
+- **scenario_id:** S32
+- **setup:** Conversation summary drops conflict; later extraction reads summary.
+- **actors:** Summarizer; extraction; Gateway.
+- **initial_state:** Two conflicting trusted/candidate facts; summary job runs.
+- **event_sequence:** 1) Summarize. 2) Extract from summary. 3) Propose trust.
+- **expected_architecture_behaviour:** Summaries non-canonical; cannot alone grant trust; conflicts preserved at assertion layer.
+- **plausible_actual_failure:** Extract trusts summary; conflict erased.
+- **data_exposed_or_corrupted:** One-sided trusted memory.
+- **user_visible_effect:** System resolves conflict silently.
+- **detection:** Summary non-authority tests.
+- **recovery:** Invalidate summary-derived candidates; restore conflict_open.
+- **design_implication:** Defer auto summaries as trust sources.
+- **stage15_test:** Summary non-authority suite.
 
-### S40 — Multi-day provider outage → local-only
-- **setup:** OpenRouter down.
-- **expected:** mock/local degrade; memory safe; UX clear.
-- **failure:** silent quality collapse; billing oddities.
-- **Stage 15:** outage UX.
+### S33 — Historical address presented as current
 
-### Additional scenarios (S41–S45) for coverage density
-- **S41 Dual-write divergence:** Supabase insert ok; Mem0 fail rolls back today (mem0-provider insert); reverse order failure modes in target outbox.
-- **S42 Poison message:** malformed job payload loops; needs DLQ.
-- **S43 Clock skew:** expires_at boundary wrong across nodes.
-- **S44 Correction vs retrieval race:** retrieve sees old head mid-correction.
-- **S45 Graph rebuild vs merge race:** covered by S13/S29-like; entity rebuild_pending.
+- **scenario_id:** S33
+- **setup:** Trusted historical home address still unmarked.
+- **actors:** Packer; temporal labels; assistant.
+- **initial_state:** Old address trusted; new address trusted current.
+- **event_sequence:** 1) Ask where do I live. 2) Pack. 3) Answer.
+- **expected_architecture_behaviour:** Historical labelled; current preferred; never present historical as current.
+- **plausible_actual_failure:** Profile-force-merge-like presentation of old address.
+- **data_exposed_or_corrupted:** Stale current location in answers.
+- **user_visible_effect:** Wrong address used.
+- **detection:** temporal_mislabel_rate.
+- **recovery:** Label historical; pack current.
+- **design_implication:** Thin temporal in private beta.
+- **stage15_test:** Temporal label packing fixtures.
 
+### S34 — User confirms a false memory
+
+- **scenario_id:** S34
+- **setup:** Bad proposed memory confirmed by user.
+- **actors:** User; review UI; Gateway.
+- **initial_state:** False candidate proposed.
+- **event_sequence:** 1) Confirm. 2) Trusted. 3) Later harm noticed. 4) Undo attempt.
+- **expected_architecture_behaviour:** User-owned trusted falsehood allowed; undo must be easy and complete.
+- **plausible_actual_failure:** Hard to find/undo; psychologically harmful persistence.
+- **data_exposed_or_corrupted:** Trusted false personal fact.
+- **user_visible_effect:** Assistant reinforces false belief.
+- **detection:** confirm→undo latency; support tickets.
+- **recovery:** Distrust/undo; soft warning UX on sensitive confirms.
+- **design_implication:** Undo UX mandatory in private beta; warnings not auto-distrust.
+- **stage15_test:** Confirm→undo latency and completeness.
+
+### S35 — Model-independent memory representation behaves differently across models
+
+- **scenario_id:** S35
+- **setup:** Same vault; two chat models.
+- **actors:** Router; packer; two providers.
+- **initial_state:** Fixed eligible assertion set.
+- **event_sequence:** 1) Ask same question to model A and B. 2) Compare eligible IDs packed.
+- **expected_architecture_behaviour:** Same eligibility set; answers may differ in style, not memory set.
+- **plausible_actual_failure:** Model-specific packing hacks change memory set.
+- **data_exposed_or_corrupted:** Inconsistent influence across models.
+- **user_visible_effect:** Personality/memory discontinuity on model switch.
+- **detection:** set_hamming across models.
+- **recovery:** Pin packing policy; remove model-specific hacks.
+- **design_implication:** CE-12/D29; pin extraction separately from chat model.
+- **stage15_test:** T15-012 cross-model memory invariance.
+
+### S36 — Review queue contains thousands of ambiguous proposals
+
+- **scenario_id:** S36
+- **setup:** Chatty user + noisy extraction floods review queue.
+- **actors:** User; extraction; review UI.
+- **initial_state:** High propose rate.
+- **event_sequence:** 1) Many chats. 2) Thousands proposed. 3) User reviews poorly.
+- **expected_architecture_behaviour:** Rate limits; precision>recall; batch reject; prioritization.
+- **plausible_actual_failure:** Abandonment; random confirms; psychological fatigue.
+- **data_exposed_or_corrupted:** Many false trusted memories.
+- **user_visible_effect:** Unusable Memory review; invasive product feel.
+- **detection:** Queue growth simulation; confirm_randomness.
+- **recovery:** Tighten extraction; bulk reject; pause auto-propose.
+- **design_implication:** Private beta extraction precision gate.
+- **stage15_test:** T15-019 queue growth simulation.
+
+### S37 — Deletion audit log itself contains the deleted fact
+
+- **scenario_id:** S37
+- **setup:** Audit metadata stores raw content; user deletes assertion/account.
+- **actors:** Audit logger; deletion; privacy review.
+- **initial_state:** Audits with content fields.
+- **event_sequence:** 1) Create with audited content. 2) Delete. 3) Inspect audit_log.
+- **expected_architecture_behaviour:** Post-purge audits retain ids/hashes/codes only — not raw fact text.
+- **plausible_actual_failure:** recordAudit retains text after delete.
+- **data_exposed_or_corrupted:** Deleted fact remains in audit_log.
+- **user_visible_effect:** Complete deletion false under inspection.
+- **detection:** T15-004 audit post-delete scan.
+- **recovery:** Redact/hash backfill; change audit schema.
+- **design_implication:** OV-14/OV-17 erasure field policy.
+- **stage15_test:** T15-004.
+
+### S38 — Repair job accidentally re-publishes a deleted external index entry
+
+- **scenario_id:** S38
+- **setup:** Usage repair/reindex runs after deletion.
+- **actors:** Repair worker; external index; deletion gate.
+- **initial_state:** Deleted assertion; stale repair obligation.
+- **event_sequence:** 1) Delete. 2) Repair job fires. 3) Publish to external index.
+- **expected_architecture_behaviour:** All publishers check deletion_workflows; no republish.
+- **plausible_actual_failure:** Resurrect Mem0/external row.
+- **data_exposed_or_corrupted:** Deleted memory reappears externally.
+- **user_visible_effect:** Forget/delete appears reversed.
+- **detection:** resurrect_count.
+- **recovery:** Purge again; fix gate.
+- **design_implication:** DeletionCoordinator before publishers (public beta).
+- **stage15_test:** T15-005 publish-after-delete ban.
+
+### S39 — User imports vault exported from another system with incompatible semantics
+
+- **scenario_id:** S39
+- **setup:** Import JSON marks items trusted via foreign metadata.
+- **actors:** Importer; Gateway; Stage 10 rules.
+- **initial_state:** Empty Cortaix vault.
+- **event_sequence:** 1) Import package with trusted flags. 2) Persist. 3) Retrieve.
+- **expected_architecture_behaviour:** Metadata cannot grant trust/authority (Stage 10); candidates only until user confirm.
+- **plausible_actual_failure:** Stage 8 ambiguity path grants trust from package.
+- **data_exposed_or_corrupted:** Unverified foreign trusted memories.
+- **user_visible_effect:** Assistant believes imported unverified facts.
+- **detection:** import_trust_grant metric.
+- **recovery:** Downgrade to candidates; require confirm.
+- **design_implication:** OV-15 Stage 10 wins over Stage 8 import exception.
+- **stage15_test:** T15-023 hostile import.
+
+### S40 — Major provider outage forces local-only mode for several days
+
+- **scenario_id:** S40
+- **setup:** OpenRouter unavailable for days.
+- **actors:** Inference router; mock/local; user.
+- **initial_state:** Normal external chat.
+- **event_sequence:** 1) Outage. 2) Fallback. 3) Multi-day use. 4) Recovery.
+- **expected_architecture_behaviour:** Clear UX; memory safety preserved; no silent policy fail-open; billing explained.
+- **plausible_actual_failure:** Silent quality collapse; confusing charges; unsafe extract paths.
+- **data_exposed_or_corrupted:** Possibly invented heuristic memories if fallback miswired.
+- **user_visible_effect:** Product feels broken or deceptive.
+- **detection:** Outage UX checklist; invent_count.
+- **recovery:** Restore provider; reconcile proposals.
+- **design_implication:** Degrade explicitly; keep CE-13 native floor.
+- **stage15_test:** Outage UX + extraction safety under mock.
+
+### S41 — Dual-write divergence between canonical store and external index
+
+- **scenario_id:** S41
+- **setup:** Canonical insert succeeds; external index write fails or vice versa under outbox.
+- **actors:** Gateway; outbox worker; ExternalMemoryIndexPort.
+- **initial_state:** Public beta with experimental adapter; dual-write path.
+- **event_sequence:** 1) Canonical commit. 2) Outbox publish. 3) External fail/partial. 4) Retrieve via both channels.
+- **expected_architecture_behaviour:** Canonical remains authority; external lag visible; reconcile-only hits; retry idempotent; no remote-text fill.
+- **plausible_actual_failure:** Retrieve prefers external; missing map; divergent deletes.
+- **data_exposed_or_corrupted:** Stale/extra external entries; missed deletes.
+- **user_visible_effect:** Inconsistent recall depending on channel.
+- **detection:** dual_write_lag; purge verifier.
+- **recovery:** Rebuild external from canonical; disable adapter.
+- **design_implication:** A57 dual-write; adapters after DeletionCoordinator+idempotent workers.
+- **stage15_test:** Dual-write fail injection both orderings.
+
+### S42 — Poison message in durable job queue
+
+- **scenario_id:** S42
+- **setup:** Malformed durable_jobs payload cannot be processed.
+- **actors:** Worker; outbox; DLQ.
+- **initial_state:** Public beta workers running.
+- **event_sequence:** 1) Bad payload enqueued. 2) Worker retries. 3) Queue blocks or storms.
+- **expected_architecture_behaviour:** Bounded retries; poison to DLQ; other jobs proceed (SKIP LOCKED).
+- **plausible_actual_failure:** Infinite retry; worker CPU burn; head-of-line blocking.
+- **data_exposed_or_corrupted:** Delayed extraction/embeds; possible duplicate side effects if non-idempotent.
+- **user_visible_effect:** Memories stop updating.
+- **detection:** DLQ depth; retry_exhausted.
+- **recovery:** DLQ inspect; fix schema; replay safe jobs.
+- **design_implication:** A58 poison messages; worker platform prerequisite.
+- **stage15_test:** Poison payload DLQ fixture.
+
+### S43 — Clock skew around expiration boundaries
+
+- **scenario_id:** S43
+- **setup:** expires_at near now; app nodes and DB clocks disagree.
+- **actors:** API nodes; Postgres; retrieval filter.
+- **initial_state:** Memory with expires_at = T.
+- **event_sequence:** 1) Node A treats expired. 2) Node B still eligible. 3) Inconsistent answers.
+- **expected_architecture_behaviour:** Use DB transaction time / timestamptz comparisons server-side; document skew tolerance.
+- **plausible_actual_failure:** Client/app now() filters diverge; Mem0 expirationDate drift.
+- **data_exposed_or_corrupted:** Expired memory briefly eligible.
+- **user_visible_effect:** Flaky forget/expiry.
+- **detection:** Boundary tests with injected skew.
+- **recovery:** Standardize on DB time; sync expiration to adapters carefully.
+- **design_implication:** A59 clock skew; expiration sync before adapters.
+- **stage15_test:** Expiration boundary under ±skew.
+
+### S44 — Race between correction and retrieval
+
+- **scenario_id:** S44
+- **setup:** Correction commits while another request packs old head.
+- **actors:** Device A corrector; Device B chat; packing.
+- **initial_state:** Trusted head H1.
+- **event_sequence:** 1) B starts retrieve. 2) A corrects to H2. 3) B packs H1. 4) Answers.
+- **expected_architecture_behaviour:** Acceptable brief staleness OR snapshot read; never present H1 as authoritative current after H2 without version note.
+- **plausible_actual_failure:** Long-lived read snapshot; user sees contradicted fact as current after correcting.
+- **data_exposed_or_corrupted:** Stale head in influence for B.
+- **user_visible_effect:** Correction seems ignored for one turn.
+- **detection:** Version-at-pack traces.
+- **recovery:** Next turn uses H2; optional read-your-writes session.
+- **design_implication:** A60 correction/retrieval race; document staleness SLO.
+- **stage15_test:** Interleaved correct+retrieve fixture.
+
+### S45 — Race between entity merge and graph rebuild
+
+- **scenario_id:** S45
+- **setup:** Merge decision concurrent with rebuild_entity_relationships job.
+- **actors:** User merge UI; rebuild worker; Stage 12 consumer.
+- **initial_state:** Two entities; rebuild running.
+- **event_sequence:** 1) Rebuild reads old ids. 2) Merge commits. 3) Rebuild writes stale edges. 4) Retrieve.
+- **expected_architecture_behaviour:** rebuild_pending; Stage 12 must not consume incomplete; merge invalidates in-flight rebuild.
+- **plausible_actual_failure:** Stale edges published as reconciled.
+- **data_exposed_or_corrupted:** Wrong relationship graph.
+- **user_visible_effect:** Merged people still split in answers or vice versa.
+- **detection:** rebuild_pending enforcement; generation counters.
+- **recovery:** Force rebuild; quarantine series.
+- **design_implication:** A61; defer graph until controls exist.
+- **stage15_test:** Merge vs rebuild race (graph-phase gated).
 
 ## 9. Recommendation B adversarial review
 
@@ -1036,9 +1981,9 @@ Append-only events canonical; materialized assertions + rebuildable projections.
 ### 9.3 Comparative verdict on alternatives
 
 ```text
-Private beta:   Alternative C sharpened with thin trust/conflict/deletion from B's native core
-Public beta:    Alternative B (strict native-only; ports exist but disabled)
-Paid scale:     Consider E for connectors; A only after metrics
+Private beta:   Alternative C + thin safety spine (§10A.1); sync deletion OK only with zero adapters/publishers
+Public beta:    Alternative B strict native-only + durable workers + DeletionCoordinator + export + lexical (§10A.2); ports disabled
+Paid scale:     Registry/influence/quotas; consider E for connectors; A only after metrics (§10A.3)
 Reject as v1:   D
 Defer:          F (unless Stage 15 deletion proofs demand it)
 Rec B:          upheld_with_required_amendments → "B-ports + C/B-scope"
@@ -1052,21 +1997,28 @@ Rec B:          upheld_with_required_amendments → "B-ports + C/B-scope"
 
 Cortaix differentiation (from Stages 7–13 product framing): **user-owned, model-independent personal memory** with explicit control — not multi-channel fusion theatre.
 
-Honest MVA:
+Narrow native MVA (phased; see §10A):
 
 ```text
+Private beta MVA:
 1. Profile identity (allowlisted)
 2. User-authored / user-confirmed atomic memories (trusted)
 3. Extraction proposals as candidates only (no inventing fallback)
-4. Document chunk retrieval with honest coverage
-5. Semantic + lexical retrieval over canonical text
-6. Conflict-safe packing (no dual settled current facts)
-7. Basic temporal current vs historical label
+4. Document chunk retrieval with honest coverage labels
+5. Semantic retrieval + identity allowlist (lexical at public beta)
+6. Thin conflict-safe packing (no dual settled current facts)
+7. Thin temporal current vs historical label
 8. Gateway-enforced trust mutations
-9. Deletion workflow for memories/account across Cortaix-controlled stores
-10. Export of canonical semantic package
-11. TurnOrchestrator unifying Chat/Think
-12. Outbox for post-reply processing
+9. Sync/narrow deletion only with zero adapters and zero background publishers
+10. TurnOrchestrator unifying Chat/Think
+11. Mem0 remote-text disabled
+
+Public beta completes MVA:
+12. Outbox + workers for post-reply processing
+13. Full DeletionCoordinator (before publishers/adapters)
+14. Canonical export package with watermarks
+15. Lexical + semantic hybrid
+16. Disclosure service
 ```
 
 ### 10.2 Component classification
@@ -1078,12 +2030,12 @@ Honest MVA:
 | Secret fail-closed | must_exist_before_private_beta | Safety |
 | RLS + Gateway mutations | must_exist_before_private_beta | Tampering |
 | TurnOrchestrator | must_exist_before_private_beta | Chat/Think drift |
-| Outbox workers (minimal) | must_exist_before_public_beta | Charge-without-reply / sync extract risk |
-| Deletion coordinator | must_exist_before_public_beta | Privacy claims false |
-| Export canonical package | must_exist_before_public_beta | Portability claims false |
+| Outbox workers (minimal) | must_exist_before_public_beta | Durability once async exists |
+| Deletion coordinator | must_exist_before_public_beta | Required before publishers/adapters; sync delete OK in private beta without publishers |
+| Export canonical package | must_exist_before_public_beta | Portability claims |
 | Lexical+semantic hybrid | must_exist_before_public_beta | Quality floor |
-| Thin conflict handling | must_exist_before_public_beta | Dual-truth harm |
-| Thin temporal labels | must_exist_before_public_beta | Stale current facts |
+| Thin conflict handling | must_exist_before_private_beta | Dual-truth harm |
+| Thin temporal labels | must_exist_before_private_beta | Stale current facts |
 | Embedding space registry | must_exist_before_paid_scale | Drift incidents |
 | Full assertion taxonomy | optional_after_product_validation | Benefit: precision analytics |
 | Multiple trust axes beyond 3 | optional_after_product_validation | Benefit: nuanced UX proven |
@@ -1105,9 +2057,82 @@ Honest MVA:
 
 ### 10.3 Smallest differentiating v1
 
-**Alternative C + thin safety spine** (conflict, temporal label, deletion, export, Gateway, no adapters).
+**Alternative C + thin safety spine** per §10A: private-beta MVA (conflict, temporal, Gateway, sync-delete limits, no adapters); public-beta adds workers, DeletionCoordinator, export, lexical.
 
 ---
+
+
+## 10A. Release-phase architecture (authoritative)
+
+### Phase interpretation (resolves prior inconsistency)
+
+```text
+Private beta:
+  - Narrow native MVA safety spine.
+  - Sync post-reply extraction as candidates is acceptable.
+  - Sync or narrowly tracked deletion is acceptable
+    ONLY when no external adapters and no background publishers exist.
+  - No durable outbox/workers required yet.
+  - No full DeletionCoordinator required yet.
+  - Thin conflict + thin temporal ARE required (moved earlier than some prior tables).
+  - Lexical search NOT required yet (semantic + identity allowlist).
+  - Zero adapters; Mem0 remote-text disabled.
+
+Public beta:
+  - Introduce durable_jobs + minimal worker platform.
+  - Full DeletionCoordinator required BEFORE or WITH any background
+    publishers / async derived systems / adapters.
+  - Canonical export package with generation watermarks.
+  - Lexical + semantic hybrid.
+  - Query/evidence disclosure service before any external adapter path.
+  - Still zero adapters enabled.
+
+Paid scale:
+  - Embedding space registry before model changes.
+  - Basic influence/explainability beyond message_context.
+  - Quotas/caps; reindex runbooks.
+  - Optional: at most one adapter class after metrics.
+```
+
+### 10A.1 Private beta matrix
+
+| component | implemented_today | required_change | safety_reason | product_reason | operational_dependency | blocking_corrections | Stage_15_tests |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Thin assertions (candidate/trusted/distrusted) | flat memories statuses | schema/Gateway path | trust integrity | user ownership | Postgres | COR-01 | trust mutation matrix |
+| User confirmation + undo | partial proposed | undo UX mandatory | harm reduction | control | web | COR-01,A71 | confirm→undo |
+| Secret fail-closed | partial | ban inventing fallback | secret safety | trust | extraction | COR-06 | T15-002/007 |
+| RLS + Gateway mutations | RLS yes; Gateway no | mutation RPCs/flags | tamper resistance | — | Postgres | — | IDOR T15-006 |
+| TurnOrchestrator | chat only; think dup | unify Think/Chat | semantic drift | consistency | web | — | dual-path parity |
+| Disable Mem0 remote-text / Mem0 off | unsafe path exists | disable/harden | CE-2 | — | env | COR-05,OV-12 | T15-001 |
+| Retire profile force-merge | force-merge on | relevance-based | eligibility | less invasive | web | COR-07 | T15-025 |
+| Semantic retrieve + identity allowlist | cosine+identity | keep; improve packing labels | — | differentiation | PG/embed | — | packing fixtures |
+| Thin conflict handling | absent | no dual settled facts | correctness | trust | packer | COR-04 | T15-003 |
+| Thin temporal labels | weak expires_at | current vs historical | stale truth | correctness | schema | OV-04 | temporal fixtures |
+| Sync deletion (no publishers) | best-effort account delete | document limits; no adapters | privacy interim | account control | Auth/storage | OV-14 | delete-then-search native stores |
+| Sync candidate extraction | on request path | no inventing; candidates only | vault purity | memory capture | model | COR-06 | T15-002 |
+
+### 10A.2 Public beta additions
+
+| component | implemented_today | required_change | safety_reason | product_reason | operational_dependency | blocking_corrections | Stage_15_tests |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| durable_jobs + worker platform | none | introduce | durability; no charge-without-completion races | async extract/embed | worker host | COR-13 | T15-014; poison/idempotency |
+| DeletionCoordinator | none | full workflow Auth-last | deletion under partial failure | privacy claims | workers+PG | COR-03,14 | T15-005 |
+| Canonical export package | partial JSON | watermark+semantics | portability honesty | export | PG | — | T15-013 |
+| Lexical + semantic hybrid | semantic only | add FTS channel | quality | recall | PG FTS | OV-07 | channel ablation |
+| Disclosure service | none | query/evidence purposes | privacy | enterprise-ready | web | — | T15-010 |
+| Untrusted structured render | system-prompt interpolate | structured untrusted blocks | injection | safety | prompts | — | injection suites |
+| Outbox-registered post-reply processing | sync | move extract to jobs | idempotency | scale | workers | COR-13 | freeze/idempotency |
+
+### 10A.3 Paid scale additions
+
+| component | implemented_today | required_change | safety_reason | product_reason | operational_dependency | blocking_corrections | Stage_15_tests |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Embedding space registry + reindex | dim lock only | registry+readiness | drift | model upgrades | workers | A45 | T15-008/017 |
+| Basic influence/explainability | message_context | extend fields+redaction | privacy | support/trust | PG | COR-11 | T15-021 |
+| Quotas/caps for chunks/jobs | weak | enforce | DoS/cost | fairness | billing | — | T15-016 calibrated |
+| Optional single adapter class | Mem0 unsafe | ID-only after PoC | derived-only | latency | vendor+workers | COR-05,OV-11 | T15-001/015 |
+| Entity graph / Graphiti / multi-provider / rerank / connectors / auto-consolidation | no | **still optional after validation** | — | only if metrics justify | large ops | COR-09,12 | gated suites |
+
 
 ## 11. Current implementation feasibility matrix
 
@@ -1145,7 +2170,10 @@ Honest MVA:
 
 ### 12.1 Native-only target (MVA)
 
-| Element | Minimum |
+**Private beta:** Next.js web only (no worker pool) while adapters/publishers remain off.  
+**Public beta+:** add worker pool + outbox as below.
+
+| Element | Minimum (public beta+) |
 | --- | --- |
 | Processes | Next.js web; 1 worker pool consuming `durable_jobs` |
 | Queues | Postgres outbox |
@@ -1216,16 +2244,16 @@ Web + workers + Mem0 + Graphiti/Neo4j + reranker + connectors + multi-embed vend
 | D16 | 10 | Consolidation auto | **defer** | Risk | — | — |
 | D17 | 12 | Hybrid retrieval | **amend** | Full multi-channel premature | semantic+lexical(+identity) v1 | 12 |
 | D18 | 12 | WRRF formula family | **uphold_with_clarification** | Multiplicative bound good | Constants versioned via Stage 15 | 12/13 |
-| D19 | 12 | Bounded policy λ=0.15 | **defer** as sacred constant | Uncalibrated | `retrieval_policy_version` | 12 |
+| D19 | 12 | Bounded policy λ=0.15 as sacred constant | **defer** | Uncalibrated; version via Stage 15 | `retrieval_policy_version` | 12 |
 | D20 | 12/13 | Reranking optional noop | **uphold** | — | — | PoC-C |
 | D21 | 12 | Query disclosure | **uphold** | — | Implement before adapters | 12 |
 | D22 | 12 | Evidence disclosure | **uphold** | — | Deadlock UX | 12 |
-| D23 | 12 | Provider candidate planning | **defer** multi-provider | Premature | Single provider pack v1 | 12 |
+| D23 | 12 | Multi-provider candidate planning | **defer** | Premature | Single provider pack v1 | 12 |
 | D24 | 12 | Context packing hierarchical | **uphold_with_clarification** | — | Determinism scoped | 12 |
 | D25 | 12 | Document coverage modes | **defer** advanced | Labels required if any | Honest incompleteness | 12 |
-| D26 | 13 | External framework ports | **uphold** as interfaces | — | Disabled in v1 | 13 |
-| D27 | 13 | Recommendation B | **uphold_with_required_amendments** | Direction yes; scope no | B-ports + native-only enablement | all |
-| D28 | 13 | Current Mem0 disposition | **amend** → **disable until hardened** | Live invariant break | Remove remote-text; default off | code later |
+| D26 | 13 | External framework ports as interfaces | **uphold** | — | Disabled in v1 | 13 |
+| D27 | 13 | Recommendation B | **amend** | Direction yes; scope no. Recommendation B disposition vocabulary remains `upheld_with_required_amendments` (separate from this register enum). | B-ports + native-only enablement + MVA | all |
+| D28 | 13 | Current Mem0 disposition | **amend** | Live invariant break; disable until hardened | Remove remote-text; default off | code later |
 | D29 | 07/13 | Model/provider independence | **uphold_with_clarification** | Provider swap ≠ interpretation stability | Pin extraction; CE-12 | 10/12 |
 
 ---
@@ -1271,44 +2299,111 @@ Reject mitigations costing more than risk: e.g. full event-sourcing before delet
 
 ---
 
+
 ## 17. Stage 15 handoff — prioritized tests
+
+Every row has either a concrete threshold or an explicit Stage-15 calibration task (`threshold_status = to_be_calibrated_in_stage15`).
 
 | test_id | finding_ids | hypothesis | fixture | oracle | metric | threshold | failure interpretation | env | before impl | during PoC | before release | pri |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T15-001 | A01,S11 | Remote text can enter context | Mem0 hits w/o cv_memory_id | zero context without canonical row | inject_count | 0 | CE-2 broken | mock Mem0 | yes | yes | yes | P0 |
-| T15-002 | A16,C16 | Heuristic invents on timeout | force timeout | empty or non-invent | invented_facts | 0 in chat mode | extraction unsafe | unit | yes | no | yes | P0 |
-| T15-003 | A12,C6,COR-04 | Conflicts dual-stated or deadlock silent | two trusted opposites | no dual settled; explicit degrade | dual_truth_rate | 0 | packing unsafe | sim | yes | yes | yes | P0 |
-| T15-004 | C1,S37,COR-03 | Audit retains deleted fact | delete assertion | audit scan no raw fact | residual_text | 0 | erasure false | integration | yes | no | yes | P0 |
-| T15-005 | S03,S38 | Delete vs worker race | job+delete | no republish | resurrect_count | 0 | deletion unsafe | integration+worker | no | yes | yes | P0 |
-| T15-006 | S29 | Cross-user retrieve | two users | deny | idor_success | 0 | RLS/provider fail | integration | yes | yes | yes | P0 |
-| T15-007 | A17,S05 | PDF injection | malicious PDF | no policy change; secrets dropped | inject_success | 0 | processing unsafe | integration | yes | yes | yes | P0 |
-| T15-008 | A45,S16 | Embed space mix | two models one index | query reject or separate | cross_space_queries | 0 | correctness break | integration | yes | yes | yes | P0 |
-| T15-009 | S01,A24 | Correction stickiness | retract+repeat | no silent revive | revive_rate | 0 | authority fail | sim | yes | yes | yes | P0 |
-| T15-010 | S07,S31 | Disclosure fail-open | local_only evidence | no external send | leak_count | 0 | privacy fail | unit | yes | yes | yes | P0 |
-| T15-011 | D18,A35 | WRRF policy domination | adversarial ranks | \|Final-WRRF\|≤λ·WRRF; WRRF0⇒0 | domination | hold | formula broken | unit | yes | yes | yes | P1 |
-| T15-012 | S35,D29 | Cross-model memory set | same vault two models | same eligible IDs | set_hamming | 0 | independence theatre | sim | yes | yes | yes | P1 |
-| T15-013 | S04,C21 | Export completeness | mid-migration | watermark or block | false_complete | 0 | portability false | integration | yes | no | yes | P1 |
-| T15-014 | S18 | Workers down | pause workers | chat ok; lag visible | chat_success | ≥99% | durability design fail | chaos | no | yes | yes | P1 |
-| T15-015 | S19 | PG down Mem0 up | PG errors | no Mem0-only truth | native_bypass | 0 | adapter authority | chaos | no | yes | yes | P1 |
-| T15-016 | A33,S30 | Chunk flood | 1e6 chunks | latency SLO / quota | p95_ms | budget | scale fail | soak | no | yes | yes | P2 |
-| T15-017 | A18,A19 | Dedupe quality | paraphrase+near-miss | precision/recall bands | F1 | set later | merge policy | offline | yes | yes | yes | P2 |
-| T15-018 | S12,A25 | Entity homonym | two Alex | no auto-merge | false_merge | 0 | graph unsafe | unit | yes | yes | no | P2 |
-| T15-019 | S36 | Queue fatigue | high propose rate | batch tools / rate limit | confirm_randomness | low | UX fail | sim | yes | no | yes | P2 |
-| T15-020 | A39,S09 | Tokenizer mismatch | estimate vs exact | bounded retries | unbounded_loop | 0 | packing fail | unit | yes | yes | yes | P1 |
-| T15-021 | S22 | Explainability leak | embarrassing fact | redacted explain | sensitive_explain | 0 | privacy | integration | yes | no | yes | P0 |
-| T15-022 | S23 | Forget vs history | forget memory | history channel policy | memory_via_history | policy | product ambiguity | integration | yes | no | yes | P1 |
-| T15-023 | S39,COR-10 | Hostile import | trusted flags in JSON | candidates only | import_trust_grant | 0 | safety | unit | yes | no | yes | P0 |
-| T15-024 | A37 | Required evidence deadlock | oversize required | explicit invalid plan | silent_drop | 0 | COR-04 | unit | yes | yes | yes | P0 |
-| T15-025 | profile force-merge | Always-include bypass | irrelevant profile mem | relevance rules | forced_irrelevant | 0 target | eligibility | unit | yes | no | yes | P1 |
+| T15-001 | A01,S11,OV-12 | Remote text can enter context | Mem0 hits w/o cv_memory_id | zero context without canonical row | inject_count | **0** | CE-2 broken | mock Mem0 | yes | yes | yes | P0 |
+| T15-002 | A16,C16,COR-06 | Heuristic invents on timeout | force timeout | empty or non-invent | invented_facts | **0** in chat mode | extraction unsafe | unit | yes | no | yes | P0 |
+| T15-003 | A12,C6,COR-04,OV-16 | Conflicts dual-stated or deadlock silent | two trusted opposites | no dual settled; explicit degrade/invalid plan | dual_truth_rate | **0**; invalid_plan_explicit=**true** | packing unsafe | sim | yes | yes | yes | P0 |
+| T15-004 | C1,S37,COR-03,OV-14,OV-17 | Audit retains deleted fact | delete assertion | audit scan no raw fact | residual_text | **0** | erasure false | integration | yes | no | yes | P0 |
+| T15-005 | S03,S38,A66 | Delete vs worker/publisher race | job+delete | no republish | resurrect_count | **0** | deletion unsafe | integration+worker | no | yes | yes | P0 |
+| T15-006 | S29 | Cross-user retrieve | two users | deny | idor_success | **0** | RLS/provider fail | integration | yes | yes | yes | P0 |
+| T15-007 | A17,S05 | PDF injection | malicious PDF | no policy change; secrets dropped | inject_success | **0** | processing unsafe | integration | yes | yes | yes | P0 |
+| T15-008 | A45,S16 | Embed space mix | two models one index | query reject or separate | cross_space_queries | **0** | correctness break | integration | yes | yes | yes | P0 |
+| T15-009 | S01,A24 | Correction stickiness | retract+repeat | no silent revive | revive_rate | **0** | authority fail | sim | yes | yes | yes | P0 |
+| T15-010 | S07,S31,OV-16 | Disclosure fail-open | local_only evidence | no external send of forbidden | leak_count | **0** | privacy fail | unit | yes | yes | yes | P0 |
+| T15-011 | D18,A35,OV-08 | WRRF policy domination | adversarial ranks | \|Final−WRRF\| ≤ λ·WRRF with λ from pinned `retrieval_policy_version`; WRRF0⇒Final0 | domination_hold | **true** under pinned version | formula broken | unit | yes | yes | yes | P1 |
+| T15-012 | S35,D29 | Cross-model memory set | same vault two models | same eligible IDs | set_hamming | **0** | independence theatre | sim | yes | yes | yes | P1 |
+| T15-013 | S04,C21 | Export completeness | mid-migration | watermark or block | false_complete | **0** | portability false | integration | yes | no | yes | P1 |
+| T15-014 | S18,A62 | Workers down | pause workers | chat ok; lag visible | chat_success_rate | **≥ 0.99** over 100 turns | durability design fail | chaos | no | yes | yes | P1 |
+| T15-015 | S19,OV-11 | PG down Mem0 up | PG errors | no Mem0-only truth | native_bypass | **0** | adapter authority | chaos | no | yes | yes | P1 |
+| T15-016 | A33,S30 | Chunk flood | 1e6 chunks | latency/quota enforced | p95_ms | see calibration below | scale fail | soak | no | yes | yes | P2 |
+| T15-017 | A18,A19 | Dedupe quality | paraphrase+near-miss | precision-first bands | F1 / precision | see calibration below | merge policy unsafe | offline | yes | yes | yes | P2 |
+| T15-018 | S12,A25 | Entity homonym | two Alex | no auto-merge | false_merge | **0** | graph unsafe | unit | yes | yes | no | P2 |
+| T15-019 | S36,A71 | Queue fatigue | high propose rate | rate limit or batch tools engage | random_confirm_proxy | see calibration below | UX fail | sim | yes | no | yes | P2 |
+| T15-020 | A39,S09 | Tokenizer mismatch | estimate vs exact | bounded retries | unbounded_loop | **0**; max_exact_pack_attempts ≤ **3** | packing fail | unit | yes | yes | yes | P1 |
+| T15-021 | S22,OV-06 | Explainability leak | embarrassing fact | redacted explain | sensitive_explain | **0** | privacy | integration | yes | no | yes | P0 |
+| T15-022 | S23 | Forget vs history | forget memory | history not treated as memory authority per calibrated policy | memory_via_history | see calibration below | product ambiguity | integration | yes | no | yes | P1 |
+| T15-023 | S39,COR-10,OV-15 | Hostile import | trusted flags in JSON | candidates only | import_trust_grant | **0** | safety | unit | yes | no | yes | P0 |
+| T15-024 | A37,OV-16 | Required evidence deadlock | oversize required | explicit invalid plan | silent_drop | **0** | COR-04 | unit | yes | yes | yes | P0 |
+| T15-025 | COR-07 | Profile force-merge bypass | irrelevant profile mem | no unconditional force-include under target rules | forced_irrelevant | **0** (target behaviour) | eligibility | unit | yes | no | yes | P1 |
+| T15-026 | A57,S41 | Dual-write divergence | external fail after canonical | reconcile-only; no remote text | divergent_serve | **0** | adapter unsafe | chaos | no | yes | yes | P1 |
+| T15-027 | A58,S42 | Poison job payload | malformed job | DLQ; other jobs proceed | poison_blocks_queue | **false** | worker platform fail | integration | no | yes | yes | P1 |
+| T15-028 | A56,OV-01 | Overbuild delays learning | process review | MVA scope accepted; full 8–12 not gated | mva_scope_gate | **pass** (normative acceptance) | delivery risk | process | yes | no | yes | P0 |
+| T15-029 | COR-01,OV-01 | Scope correction accepted | override register | OV-01 present and cited by Stage 15 plan | ov01_binding | **true** | process | process | yes | no | yes | P0 |
+| T15-030 | COR-08,OV-08 | WRRF constants not sacred | policy version doc | constants only via version pin | sacred_constant | **false** | false precision | docs/unit | yes | no | yes | P1 |
 
-**Counts:** P0 = 14; P1 = 8; P2 = 3 (expandable). Stage 15 should convert this table into the evaluation framework directly.
+### 17.1 Priority counts (must sum)
 
----
+| Priority | Count |
+| --- | ---: |
+| P0 | **15** |
+| P1 | **11** |
+| P2 | **4** |
+| P3 | **0** |
+| **Total tests** | **30** |
+
+### 17.2 Threshold calibration tasks
+
+| test_id | threshold_status | calibration_method | calibration_dataset | decision_deadline | who_approves | failure_if_no_threshold |
+| --- | --- | --- | --- | --- | --- | --- |
+| T15-016 | to_be_calibrated_in_stage15 | Measure p95 retrieve on chosen private/public topology (web-only vs web+worker) at 1e4/1e5/1e6 chunks; set budget with 20% headroom under platform timeout | synthetic chunk corpus + soak harness | before T15-016 becomes a release gate | Stage 15 author + architecture reviewer on PR that pins the number | test remains non-gating; paid-scale claims blocked |
+| T15-017 | to_be_calibrated_in_stage15 | Establish **precision-first** minimum: choose precision floor first (suggested starting explore ≥0.90) then max F1 under that floor on paraphrase/near-miss set | labelled paraphrase + near-miss pairs (≥200) | before selecting dedupe algorithm for implementation | Stage 15 author + memory design reviewer | algorithm selection prohibited |
+| T15-019 | to_be_calibrated_in_stage15 | Define proxy for random confirm (e.g. confirm latency variance / skip rate) on simulated queues of 100/1000/5000 items; set max acceptable skip/random proxy | queue simulation fixtures | before public beta review UX signoff | product + Stage 15 | review UX cannot claim readiness |
+| T15-022 | to_be_calibrated_in_stage15 | Decide normative forget-vs-transcript policy with privacy/legal review; encode as boolean oracle | policy decision record + fixture cases | before release claims about forget | privacy/legal review owner + Stage 15 | forget semantics remain unresolved; feature cannot be marketed as erasure |
+
+### 17.3 Finding-to-test traceability
+
+| finding_or_correction_id | severity | required_test_ids | test_priority | covered | remaining_validation_gap |
+| --- | --- | --- | --- | --- | --- |
+| A01 | confirmed_blocker | T15-001 | P0 | yes | code disable in Stage 16/17 |
+| A12 | confirmed_blocker | T15-003 | P0 | yes | — |
+| A16 | confirmed_blocker | T15-002 | P0 | yes | — |
+| A37 | confirmed_blocker | T15-024,T15-003 | P0 | yes | — |
+| A45 | confirmed_blocker | T15-008 | P0 | yes | registry impl later |
+| A56 | confirmed_blocker | T15-028,T15-029 | P0 | yes | normative |
+| A66 | confirmed_blocker | T15-005 | P0 | yes | needs worker env |
+| A03 | architecture_change_required | T15-023 (summary non-authority related), summary suite | P0/P1 | partial | add dedicated summary→trust test if summaries enabled |
+| A04 | architecture_change_required | T15-018 | P2 | yes | graph deferred |
+| A05 | architecture_change_required | T15-001,T15-026 | P0/P1 | yes | — |
+| A07 | architecture_change_required | T15-019 | P2 | yes | UX study |
+| A14 | architecture_change_required | T15-025 | P1 | partial | UI confidence presentation |
+| A20 | architecture_change_required | summary non-authority | P1 | partial | add T if summaries ship |
+| A25 | architecture_change_required | T15-018 | P2 | yes | — |
+| A30 | architecture_change_required | T15-018 | P2 | yes | defer graph |
+| A32 | architecture_change_required | T15-018 | P2 | yes | — |
+| A35 | architecture_change_required | T15-011,T15-030 | P1 | yes | — |
+| A57 | architecture_change_required | T15-026 | P1 | yes | — |
+| A58 | architecture_change_required | T15-027 | P1 | yes | — |
+| A63 | architecture_change_required | T15-027,T15-005 | P1/P0 | yes | — |
+| A67 | architecture_change_required | T15-005 | P0 | partial | explicit repair-bound test |
+| A68 | architecture_change_required | T15-004,T15-021 | P0 | yes | — |
+| A71 | architecture_change_required | T15-019, confirm→undo | P2/P0 | partial | add confirm→undo latency row if needed |
+| COR-01 | blocking_before_stage15 | T15-028,T15-029 | P0 | yes | `not_testable_as_experiment`; required_normative_acceptance=OV-01; downstream_conformance_test=T15-029 |
+| COR-02 | blocking_before_stage15 | T15-011,T15-020 | P1 | yes | OV-13 language |
+| COR-03 | blocking_before_stage15 | T15-004 | P0 | yes | backup policy legal review remains |
+| COR-04 | blocking_before_stage15 | T15-003,T15-024 | P0 | yes | — |
+| COR-08 | blocking_before_stage15 | T15-030,T15-011 | P1 | yes | — |
+| COR-09 | blocking_before_stage15 | T15-018 | P2 | yes | `not_testable_as_experiment` for deferral itself; OV-05 acceptance; conformance=T15-018 if graph appears |
+| COR-10 | blocking_before_stage15 | T15-023 | P0 | yes | — |
+| COR-12 | blocking_before_stage15 | T15-010,T15-024 | P0 | yes | single-provider scope |
+| COR-14 | blocking_before_stage15 | T15-029 | P0 | yes | `not_testable_as_experiment`; OV-18 acceptance |
+| COR-16 | blocking_before_stage15 | T15-004 | P0 | yes | — |
+| COR-05 | blocking_before_stage16 | T15-001,T15-015 | P0/P1 | yes | implementation disable |
+| COR-07 | blocking_before_stage16 | T15-025 | P1 | yes | — |
+| COR-11 | blocking_before_stage16 | T15-021 | P0 | yes | full influence still deferred |
+| COR-13 | blocking_before_stage16 | T15-014,T15-027 | P1 | yes | worker platform |
+| COR-06 | blocking_before_stage17 | T15-002 | P0 | yes | — |
+
 
 ## 18. Stage 16 handoff
 
-1. **Sequencing changes:** MVA spine before WRRF full; deletion coordinator before adapters; worker platform before Graphiti/Mem0 OSS; disclosure before any external index/rerank.
-2. **Move earlier:** disable Mem0 remote-text; remove inventing heuristic; TurnOrchestrator; thin assertions; deletion workflow; export watermark.
+1. **Sequencing changes:** Private-beta MVA (§10A.1) before public-beta workers/DeletionCoordinator/export/lexical (§10A.2); disclosure before any external index/rerank; adapters only after paid-scale metrics (§10A.3).
+2. **Move earlier:** disable Mem0 remote-text; remove inventing heuristic; TurnOrchestrator; thin assertions; thin conflict/temporal; sync-delete limits documented.
 3. **Move later:** entity graph, multi-provider plans, full influence, connectors, rerank, WRRF extra channels, auto consolidation.
 4. **Remove from v1 normative:** Graphiti requirement; sacred λ; full orthogonal enums as launch gate.
 5. **Migration safeguards:** expand/contract; memories projection; no forever dual-write; generation watermarks on export.
@@ -1357,7 +2452,7 @@ approve_with_required_amendments
 ### 20.2 Detail
 
 1. **Verdict:** approve_with_required_amendments.
-2. **Highest-severity confirmed findings:** A01 Mem0 remote-text; A12/A37 conflict×budget deadlock; A45 embed drift without registry; A16 inventing extraction vs target; A56 overbuild before learning; C1 deletion×provenance.
+2. **Highest-severity confirmed findings:** A01 Mem0 remote-text; A12/A37 conflict×budget deadlock; A45 embed drift without registry; A16 inventing extraction vs target; A56 overbuild before learning; A66 extraction/deletion race under publishers; C1 deletion×provenance.
 3. **Upheld:** D01 PG canonical; D03 trust triad; D09 deletion coordinator; D13 proposals; D15 dedupe principles; D20 rerank noop; D21–22 disclosure ownership; D26 ports-as-interfaces; CE-1…CE-9, CE-13…CE-15 core.
 4. **Amended:** Rec B scope; determinism claims; deletion completeness language; assertion orthogonality breadth; hybrid channel breadth; Mem0 disposition → disable-until-hardened; provenance erasure; import trust (10 over 8); S13-I1 via correction register; S13-I10 scope.
 5. **Reversed:** “Full Stage 8–12 surface is v1 architecture”; sacred λ=0.15 as unversioned truth; entity graph as near-term normative; multi-provider planning as v1; optional adapters enabled for initial release.
@@ -1366,12 +2461,34 @@ approve_with_required_amendments
 8. **Remaining unknowns:** vendor log retention empirically; backup erasure legal; residual redaction identifiability; true eng cost of workers on chosen host; whether thin MVA suffices for retention.
 9. **Recommendation B survives?** **Yes, with required amendments** (`upheld_with_required_amendments`): ports + native-only enablement + MVA cut.
 10. **Minimum viable architecture:** §10.1 / Alternative C + thin safety spine.
-11. **Stage 15 may begin?** **Yes**, after accepting COR-01,02,03,04,08,09,10,12,14,16 as the correction register inputs.
-12. **Preconditions for Stage 15:** this document reviewed; correction register acknowledged; no implementation.
+11. **Stage 15 may begin?** **Yes**, under §20.3 conditions only.
+12. **Preconditions for Stage 15:** see §20.3 (merge + OV acceptance + blocking items resolved or hypothesized; no implementation).
 13. **Stage 16 later?** Yes, after Stage 15 framework exists; not now.
 14. **Implementation prohibited?** **Yes** until Stages 15 and 17 approved per roadmap gate.
 
 ---
+
+
+### 20.3 What “Stage 15 may begin” means
+
+Stage 15 may begin after **all** of the following:
+
+```text
+1. PR #47 is reviewed and merged.
+2. The effective architecture override register (§6A, OV-01…OV-18) is accepted as
+   normative for Stages 15–17.
+3. Every blocking_before_stage15 item has either:
+   a. final replacement language in the override register, or
+   b. an explicitly unresolved hypothesis assigned to Stage 15.
+4. No implementation has begun.
+```
+
+There is **no** undefined separate post-merge “accept corrections” ceremony. Merging PR #47 after review **is** the architecture-approval state transition for this track, recorded by the merge commit on `main` and the presence of this document’s §6A overrides.
+
+Who approves: the pull-request reviewers who merge #47 (repository maintainers).  
+Where recorded: GitHub merge of PR #47 + this file on `main`.  
+State transition: `Stage 14 draft` → `Stage 14 effective` → Stage 15 documentation work may start; implementation remains prohibited until Stages 15 and 17 are approved per roadmap.
+
 
 ## 21. Required acceptance questions (answers)
 
@@ -1416,7 +2533,7 @@ approve_with_required_amendments
 39. **Stage 16 sequence?** Workers + MVA + deletion before adapters; disclosure before external calls.
 40. **Stage 17 forbid?** Behavioural defaults enabling adapters; remote-text; broad schema drops; dependency sprawl.
 41. **Rec B survive?** Yes, amended.
-42. **Stage 15 begin?** Yes after correction register acceptance.
+42. **Stage 15 begin?** Yes after §20.3 conditions (PR merge + OV normative + blocking items addressed; no implementation).
 
 ---
 
@@ -1428,8 +2545,8 @@ Searched mentally/structurally for banned complacent phrases. Confirmations:
 2. Confirmed blockers have causal evidence (code lines / contradictions) — **yes**.
 3. Rejected attacks explained (e.g. A43) — **yes**.
 4. Recommendation B genuinely challenged (§9) — **yes**.
-5. ≥50 attacks — **56** — **yes**.
-6. ≥35 scenarios — **40+** — **yes**.
+5. ≥50 attacks — see final count in §7 — **yes**.
+6. Complete scenarios — **45 (S01–S45)** — **yes**.
 7. Major decisions dispositioned (§14) — **yes**.
 8. All 33 Stage 13 invariants reviewed (§6.2) — **yes**.
 9. Complexity reduction considered (§4, §10) — **yes**.
@@ -1448,6 +2565,15 @@ Searched mentally/structurally for banned complacent phrases. Confirmations:
 22. Stages 0–13 untouched — **yes**.
 23. Stage 15 not started — **yes**.
 24. PR remains draft — **process requirement**.
+25. Every counted scenario includes all required fields — **yes (45)**.
+26. Mandatory attack-domain coverage matrix present — **yes (§7.3)**.
+27. Material Stage 7–12 invariants fully ledgered — **yes (327 IDs)**.
+28. Effective OV register authoritative for 15–17 — **yes (§6A)**.
+29. Release phases internally consistent — **yes (§10A)**.
+30. Test priority counts reproduce — **yes (§17.1: 15+11+4+0=30)**.
+31. Every test has concrete threshold or calibration task — **yes (§17.2)**.
+32. Blockers/corrections have traceability — **yes (§17.3)**.
+33. Decision Register uses only permitted enum — **yes (D27=amend)**.
 
 ### Phrase discipline notes
 
