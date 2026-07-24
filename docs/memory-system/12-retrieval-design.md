@@ -57,7 +57,8 @@ rawQuery + turnId + userId + model/selection hints
  Local deterministic query-policy scan
         │
         ▼
- QueryDisclosureDecision (before any external call)
+ QueryDisclosureDecision
+   (external semantic / index / planner / reranker / final inference — purpose-specific)
         │
         ▼
  RetrievalPlanner → RetrievalQueryPlan (once; primaryIntentMode + intentFacets)
@@ -72,16 +73,23 @@ rawQuery + turnId + userId + model/selection hints
  CandidateFusionService (WRRF × bounded policy) → optional rerank → Deduplicator → ConflictContextService
         │
         ▼
- Evidence DisclosureContextPlanner (sensitivity summary → compatible provider class)
+ Evidence disclosure summary
         │
         ▼
- ContextPacker (model-specific token budget, hierarchical reserve-then-fill)
+ Provider selection = intersection of
+   query-compatible ∩ evidence-compatible ∩ model capabilities
         │
         ▼
- ContextRenderer (structured ContextPackage → provider adapter)
+ Provider-specific evidence filtering
         │
         ▼
- InfluenceRecorder (sent + budget-drop + disclosure-withheld + conflict/ambiguity + direct-answer)
+ ContextPacker (budget uses raw / safeInferenceUserMessage / or no external user msg)
+        │
+        ▼
+ Inference: raw_allowed | redacted_allowed | local_only (no external call)
+        │
+        ▼
+ InfluenceRecorder (sent + withheld + budget-drop + query_inference_disposition + coverage labels)
 ```
 
 ### Headline Stage 12 decisions
@@ -89,10 +97,10 @@ rawQuery + turnId + userId + model/selection hints
 1. **Architecture:** Option B WRRF × deterministic bounded policy; optional reranker interface unused for correctness.  
 2. **Policy version:** `retrieval_policy_version = "rp-v1.0"`. Final score is multiplicative: `Final = WRRF × (1 + λ_policy × Policy)` with `λ_policy = 0.15`, so policy adjusts fusion by at most ±15% and cannot dominate or invent candidates.  
 3. **Query plan:** `primaryIntentMode` + deterministic `intentFacets`; optional structured model assistance cannot grant trust, widen ownership, bypass disclosure, or silently pick ambiguous entities/projects.  
-4. **Query disclosure preflight:** Local scan produces `QueryDisclosureDecision` **before** any external embedding, external-index, planner-model, or reranker call.  
+4. **Query disclosure preflight:** Local scan produces purpose-specific `QueryDisclosureDecision` **before** any external embedding, external-index, planner-model, reranker, or **final inference** call. Permission for one purpose never implies another.  
 5. **Graph expansion v1:** **Zero-hop default**; **one bounded hop** only for `entity_focused` / `relationship_focused` via Stage 11 contracts to supporting assertions — never friend-of-friend.  
-6. **Evidence disclosure order:** Option B — build evidence disclosure summary → select compatible provider/model → pack to that window (after query preflight and retrieval).  
-7. **Packing:** Hierarchical reserve-then-fill with group minima/maxima and utility-per-token fill; whole-document summarisation uses an explicit coverage decision tree, not the Q&A chunk cap.  
+6. **Provider selection:** Intersect query-compatible providers, evidence-compatible providers, and model capabilities; then filter evidence and pack. Local-only inference disposition never fail-opens to an unauthorized external model.  
+7. **Packing:** Hierarchical reserve-then-fill; `reservedCurrentUserTokens` uses the exact user-message representation that will be sent (raw / redacted / none). Document diversity caps are **scope-specific** (`targeted_passage` only for 4/2 chunk limits).  
 8. **History:** Complete eligible turns with reserved recent-turn budget; no orphan/failed turns; optional derived summaries never become trusted memory.  
 9. **Identity:** Not unconditional inject-everything; deterministic short-circuit only after a complete canonical identity consistency check (not lexical absence-of-conflict).  
 10. **External indexes:** IDs only → canonical map → eligibility; **no remote-text fallback**; query text still requires query disclosure.  
@@ -355,27 +363,57 @@ See §33 for the full invariant list. Non-negotiable: score ≠ trust; external 
 
 ### 7.0 Query disclosure preflight (normative, before external calls)
 
-Stored-record disclosure flags do **not** authorize disclosure of the user’s current query. Before any external embedding, external-index search, optional planner-model assist, or optional reranker call:
+Stored-record disclosure flags do **not** authorize disclosure of the user’s current query. Purpose permissions are **independent**:
+
+```text
+external query embedding
+external index search
+planner-model assistance
+reranker-model assistance
+final inference
+```
+
+Permission for one purpose **must not** imply permission for another. Embedding permission never authorizes final inference.
 
 ```ts
+type QueryDisclosureReasonCode =
+  | 'allowed'
+  | 'forbidden_secret_detected'
+  | 'provider_restricted_query'
+  | 'highly_sensitive_query'
+  | 'user_policy_denied'
+  | 'redaction_not_lossless'
+  | 'no_compatible_provider_class'
+  | 'byok_does_not_bypass';
+
+type QueryInferenceDisposition =
+  | {
+      kind: 'raw_allowed';
+      allowedProviderClasses: string[];
+    }
+  | {
+      kind: 'redacted_allowed';
+      safeInferenceUserMessage: string;
+      allowedProviderClasses: string[];
+    }
+  | {
+      kind: 'local_only';
+      reasonCodes: QueryDisclosureReasonCode[];
+    };
+
 type QueryDisclosureDecision = {
-  /** Raw user text stays local by default. */
-  rawQueryLocalOnly: true;
   externalSemanticAllowed: boolean;
   externalIndexSearchAllowed: boolean;
   plannerModelAllowed: boolean;
   rerankerModelAllowed: boolean;
 
-  /** Optional redacted query for external semantic use only when lossless for intent. */
+  /** Redacted text for external semantic retrieval only; not automatically valid for inference. */
   safeSemanticQueryText?: string;
-  reasonCodes: Array<
-    | 'allowed'
-    | 'forbidden_secret_detected'
-    | 'provider_restricted_query'
-    | 'highly_sensitive_query'
-    | 'user_policy_denied'
-    | 'redaction_not_lossless'
-  >;
+
+  /** Purpose-specific decision for the final inference provider call. */
+  inferenceDisposition: QueryInferenceDisposition;
+
+  reasonCodes: QueryDisclosureReasonCode[];
 };
 ```
 
@@ -384,28 +422,69 @@ type QueryDisclosureDecision = {
 ```text
 Raw user query
   → local deterministic query-policy scan
-  → safe local query plan skeleton
   → QueryDisclosureDecision
-  → permitted candidate channels only
-  → candidate reconciliation
+  → local query planning
+  → permitted retrieval channels
+  → canonical reconciliation
   → evidence disclosure summary
-  → compatible provider selection
-  → provider-specific filtering
-  → packing
+  → intersection of:
+       query-compatible providers
+       evidence-compatible providers
+       model capabilities
+  → provider selection
+  → provider-specific evidence filtering
+  → context packing
+  → inference using raw, safely redacted, or no external user message
 ```
 
-**Rules:**
+**Before provider/model selection (normative):**
 
-1. `rawQuery` remains local unless query disclosure explicitly allows an external purpose.  
-2. Query text containing forbidden secrets must not be sent to external embedding, external index, planner-model, or reranker services.  
-3. A locally produced redacted `safeSemanticQueryText` may be used only when redaction preserves retrieval intent.  
-4. If safe redaction is impossible, disable external semantic/index/model-assisted channels.  
-5. Continue with local FTS, exact matching, canonical entity/project queries, and eligible conversation history.  
-6. `allow_embedding` on stored assertions does **not** authorize embedding the current query.  
-7. BYOK does **not** automatically bypass query-disclosure policy.  
-8. Record explicit degradation and withholding codes **without** storing the secret query in logs.  
-9. Do **not** send raw query text to an external index merely because the index returns IDs only.  
-10. Optional reranking must receive only disclosure-approved candidate text and query representation.
+1. Classify the current user message locally.  
+2. Determine whether the raw message may be sent for inference (`raw_allowed` / `redacted_allowed` / `local_only`).  
+3. Determine compatible provider classes for the **query itself**.  
+4. Combine query-provider compatibility with evidence-provider compatibility.  
+5. Select only a provider compatible with **both** (and model capabilities).  
+6. Pack evidence only after this combined provider constraint is known.
+
+Selected inference provider must satisfy:
+
+```text
+query disclosure compatibility
+AND
+evidence disclosure compatibility
+AND
+model capability requirements
+```
+
+**Inference disposition rules:**
+
+| Kind | When | Behaviour |
+| --- | --- | --- |
+| `raw_allowed` | Current user message may be sent unchanged to listed provider classes | Send raw message to selected compatible provider |
+| `redacted_allowed` | Local `safeInferenceUserMessage` removes restricted material, preserves the user’s actual task, and does not materially change names, entities, temporal meaning, desired action, or answer scope | Send only the redacted message; record redacted path **without** storing removed secret in logs |
+| `local_only` | Forbidden secret cannot be safely removed; provider/user policy prohibits sending; redaction would materially alter the task; or no provider class is compatible | **Do not** call an external inference provider |
+
+**Redaction separation:** A redaction sufficient for semantic search (`safeSemanticQueryText`) is **not** automatically sufficient for inference. Keep separate fields. Inference redaction must preserve the user’s actual requested task.
+
+**When `inferenceDisposition.kind = 'local_only'`:**
+
+1. Do not call an external inference provider.  
+2. Use a deterministic local response where possible.  
+3. Otherwise provide a local refusal, clarification, or instruction to remove the secret and retry.  
+4. Do not claim an external model answered.  
+5. Do not fail open by selecting a different external model without permission.
+
+**Additional rules:**
+
+1. Query text for each external purpose requires that purpose’s allowance.  
+2. Forbidden secrets must not be sent to external embedding, index, planner, reranker, **or final inference** services (unless a lossless inference-safe redaction is used under `redacted_allowed`).  
+3. If safe semantic redaction is impossible, disable external semantic/index/model-assisted **retrieval** channels; continue with local FTS/exact/entity/history.  
+4. `allow_embedding` on stored assertions does **not** authorize embedding the current query and does **not** authorize final inference.  
+5. BYOK does **not** automatically bypass query-disclosure policy (including query-inference disclosure).  
+6. Record degradation / withhold codes **without** storing the secret query or removed secret in logs.  
+7. Do **not** send raw query text to an external index merely because hits are IDs.  
+8. Optional reranking must receive only disclosure-approved candidate text and query representation.  
+9. Influence/turn snapshots must record `query_inference_disposition`, reason codes, provider classes allowed for query, whether query was redacted, and whether external inference was blocked — never the secret itself.
 
 ### 7.1 `RetrievalQueryPlan`
 
@@ -462,6 +541,8 @@ type RetrievalQueryPlan = {
   /**
    * Text used for local semantic/FTS planning. For external semantic calls,
    * use QueryDisclosureDecision.safeSemanticQueryText when present and allowed.
+   * Final inference uses inferenceDisposition (raw / safeInferenceUserMessage / local_only),
+   * never this field alone as inference authorization.
    */
   semanticQueryText: string;
   embeddingSpace?: string; // pinned space id when embeddings used
@@ -609,12 +690,12 @@ Filters applied at generation or immediately after (still subject to eligibility
 
 **Modes** (driven by `documentRetrievalScope` on the plan):
 
-- `targeted_passage` (normal Q&A): top chunks by fusion under ordinary per-document caps.  
-- `section`: ordered, adjacent, deduplicated chunks from the identified section under a section-specific budget.  
-- `whole_document` (e.g. “summarise this PDF”): follow the honest whole-document decision tree in §19 — **not** the Q&A chunk cap alone.  
+- `targeted_passage` (normal Q&A): top chunks by fusion under **targeted-passage-only** caps (§13 / §14.5).  
+- `section`: ordered complete section coverage when it fits; otherwise derived-complete or labelled partial (§19.2) — **not** the two-chunk Q&A section cap as completeness.  
+- `whole_document` (e.g. “summarise this PDF”): honest whole-document decision tree in §19.3 — **not** the Q&A chunk cap.  
 - Filename targeting: boost that `documentId`.
 
-**Limits:** semantic **24**, FTS **24**; see §13 for `normal_q_and_a_max_chunks_per_document` vs whole-document coverage policy.
+**Channel recall limits:** semantic **24**, FTS **24** (candidate generation). Diversity/completeness rules are **scope-specific** (§14.5).
 
 Overlap-aware handling: see §14.
 
@@ -1049,10 +1130,10 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 | `global_retrieval_deadline_ms` | 800 | Soft conceptual budget |
 | `min_similarity_floor` | 0.12 | Post-gate weak filter for semantic-only weak hits (**calibration**) — exact/FTS exempt |
 | `max_assertions_per_family` | 2 | Dedupe |
-| `normal_q_and_a_max_chunks_per_document` | 4 | Diversity for `targeted_passage` Q&A only |
-| `max_chunks_per_section` | 2 | Section / Q&A diversity |
-| `whole_document_coverage_policy` | see §19 | Prefer complete ordered coverage after overlap removal when it fits; else derived summary or partial/clarify — **not** four-chunk “full” summary |
-| `whole_document_summary_max_source_sections` | Stage 15 calibration | Cap on distinct sections used when packing a labelled partial/derived whole-document summary |
+| `normal_q_and_a_max_chunks_per_document` | 4 | Diversity for `targeted_passage` only |
+| `normal_q_and_a_max_chunks_per_section` | 2 | Diversity for `targeted_passage` only — **not** a complete-section claim |
+| `whole_document_coverage_policy` | see §19.3 | Coverage/token/disclosure bounded; may exceed Q&A chunk caps when complete coverage fits |
+| `partial_summary_max_sections_packed` | Stage 15 calibration | Cap on **excerpts packed beside** a partial summary for citation — **not** a limit on sections used to *produce* a complete derived summary |
 | `near_paraphrase_similarity` | 0.92 | Calibration; Stage 15 |
 
 ### 13.3 Policy boosts / penalties (additive before clip)
@@ -1075,7 +1156,7 @@ All numeric weights in §13 are **initial calibration constants**, versioned und
 
 ### 13.4 What Stage 15 must calibrate
 
-Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ_policy` (keep ±15% unless version bump), pin boost, Q&A chunk maxima, whole-document summary section caps, and latency deadlines. Stage 15 must include a regression that additive policy domination cannot reappear under `rp-v1.0`.
+Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ_policy` (keep ±15% bound unless version bump), pin boost, targeted-passage Q&A chunk maxima, `partial_summary_max_sections_packed` (citation packing only), and latency deadlines. Stage 15 must include regressions that additive policy domination cannot reappear, that blocked queries never reach final inference, and that 4/2 chunk caps are not treated as section/document completeness.
 
 ---
 
@@ -1109,7 +1190,7 @@ Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ
 
 | Case | Policy |
 | --- | --- |
-| Overlapping chunks | Prefer higher Final; apply overlap penalty; max per section |
+| Overlapping chunks | Prefer higher Final; apply overlap penalty; apply scope-specific caps (§14.5) |
 | Adjacent same page | May **merge for packing** into one record if overlap ≥ 40% and same document |
 | Lexical+semantic same chunk | Merge candidates |
 | Headers/footers repeated | Penalty via overlap / low uniqueness (**Assumption** heuristic Deferred detail) |
@@ -1119,11 +1200,46 @@ Similarity floor, near-paraphrase threshold, channel weights, multiplicative `λ
 
 Entity hit + relationship-support hit → same assertion candidate. Multiple episodes supported by same assertion → one assertion; episodes retained in provenance/conflict metadata.
 
-### 14.5 Diversity caps
+### 14.5 Diversity caps (document limits are scope-specific)
 
 - Max **2** from one assertion family in packed context.  
-- Max **4** chunks from one document; **2** per section.  
 - Source diversity: attempt ≥1 non-document personal assertion when personal recall required and available.
+
+**Document chunk diversity / completeness matrix** (`DocumentRetrievalScope`):
+
+| Scope | Cap / completeness rule |
+| --- | --- |
+| `targeted_passage` | Max **4** chunks/document (`normal_q_and_a_max_chunks_per_document`); max **2** chunks/section (`normal_q_and_a_max_chunks_per_section`). Diversity only — not completeness claims. |
+| `section` | Ordered complete section coverage when it fits after overlap removal; otherwise current derived-complete section summary (if eligible) or labelled partial / narrower passage / limitation / staged requirement. **Never** call a two-chunk result a complete section summary unless those chunks genuinely are the full section. |
+| `whole_document` | Ordered complete document coverage when it fits; otherwise current complete derived document summary or labelled partial/clarify. **Must not** use fixed 4/2 chunk-count caps as completeness rules. Bounded by token budget, global document max share, overlap removal, ordered coverage, disclosure, and honest labels. May exceed ordinary Q&A chunk caps when complete coverage fits. |
+
+Deduplication and overlap removal still apply to **all** scopes.
+
+**Derived summary completeness:**
+
+```text
+A derived summary labelled as complete must have complete
+section/chunk provenance for the current document fingerprint.
+A cap on packed source excerpts (partial_summary_max_sections_packed)
+may limit citations shown beside the summary, but must not limit
+the source coverage used to produce a complete derived summary.
+```
+
+Distinguish: **sections used to produce the summary** (must be complete for `derived_complete_*`) vs **sections whose excerpts are packed beside the summary** (may be capped).
+
+**Coverage labels** (normative outcomes):
+
+```text
+targeted_passage
+complete_section
+partial_section
+complete_document
+partial_document
+derived_complete_section
+derived_complete_document
+```
+
+Do not rely on ambiguous alone labels such as bare `complete` / `partial` / `section` / `derived_summary` without scope.
 
 **Dedup must never silently merge genuine conflicts or distinct temporal episodes.**
 
@@ -1230,40 +1346,57 @@ Answers Stage 11 handoff questions:
 1. Require ready + ownership + fingerprint.  
 2. Semantic + FTS + exact filename (subject to query disclosure for external embeds).  
 3. Scope from plan: `targeted_passage` | `section` | `whole_document`.  
-4. Overlap merge rules §14.  
-5. Document instructions quoted as document content (`untrustedData: true`).
+4. Overlap merge rules §14 (all scopes).  
+5. Document instructions quoted as document content (`untrustedData: true`).  
+6. Influence `documentCoverageLabel` uses the explicit labels in §14.5.
 
 ### 19.1 `targeted_passage`
 
-Use normal semantic/FTS/exact retrieval and `normal_q_and_a_max_chunks_per_document` (4).
+Use normal semantic/FTS/exact retrieval with:
+
+- `normal_q_and_a_max_chunks_per_document = 4`  
+- `normal_q_and_a_max_chunks_per_section = 2`  
+
+These are **diversity caps for ordinary passage Q&A only**. Label outcome `targeted_passage`.
 
 ### 19.2 `section`
 
-Use ordered, adjacent, deduplicated chunks from the identified section under a section-specific budget (`max_chunks_per_section` and section token reserve).
+A request for an entire section must **not** claim complete section coverage from two chunks.
+
+Decision tree:
+
+1. Resolve the target document and section.  
+2. Build ordered, overlap-deduplicated coverage for that section.  
+3. If complete useful section coverage fits, pack it in order → `complete_section`.  
+4. Otherwise use a current derived section summary only when it is explicitly derived, covers the **complete** section, is current for the document fingerprint, has complete section provenance, and passes disclosure → `derived_complete_section`.  
+5. Otherwise return a clearly labelled partial section answer (`partial_section`), a narrower passage answer (`targeted_passage`), a limitation notice, or a staged summarisation requirement.  
+6. Never call a two-chunk result a complete section summary unless those chunks genuinely represent the full section.
 
 ### 19.3 `whole_document` — honest summarisation decision tree
 
-Ordinary one-pass Q&A caps are **not** sufficient to claim a complete document summary.
+Ordinary one-pass Q&A caps are **not** completeness rules. Whole-document retrieval must **not** use fixed per-document or per-section chunk-count caps as completeness rules. It remains bounded by model token budget, global document maximum share, overlap removal, ordered section coverage, provider disclosure, context safety, and honest completeness labels. A whole-document pack **may exceed** ordinary Q&A chunk caps when complete coverage fits.
 
 1. Confirm **one** resolved, ready, user-owned target document.  
 2. Build an ordered section/chunk coverage map.  
-3. If the complete useful document representation fits the available context, pack **complete ordered coverage** after overlap removal.  
+3. If the complete useful document representation fits the available context, pack **complete ordered coverage** after overlap removal → `complete_document`.  
 4. Otherwise, use a **derived document summary** only if:
    - it is explicitly marked derived,
-   - it has complete chunk/section provenance,
+   - it has **complete** chunk/section provenance for the current fingerprint (sections used to *produce* the summary are complete),
    - it is current for the document fingerprint,
    - disclosure permits it,
-   - it is **never** treated as trusted memory.  
-5. If no current derived summary exists and complete coverage does not fit, ordinary one-pass retrieval **must not** claim to provide a complete summary.  
+   - it is **never** treated as trusted memory  
+   → `derived_complete_document`.  
+   Packed citation excerpts beside the summary may be limited by `partial_summary_max_sections_packed` without limiting production coverage.  
+5. If no current complete derived summary exists and complete coverage does not fit, ordinary one-pass retrieval **must not** claim to provide a complete summary.  
 6. Return one of:
-   - a clearly labelled **partial** summary,
-   - a scoped **section** summary,
+   - a clearly labelled **partial** document answer (`partial_document`),
+   - a scoped **section** answer (§19.2),
    - a limitation/clarification response,
    - or a request for a staged hierarchical summarisation workflow.  
 7. A staged hierarchical summarisation workflow may be specified conceptually; **implementation remains deferred to Stages 16–17**.  
 8. **Do not** silently summarize a long PDF from four top-ranked chunks.
 
-Constants: `normal_q_and_a_max_chunks_per_document`, `whole_document_coverage_policy`, `whole_document_summary_max_source_sections` (§13). Influence records must label partial vs derived vs complete coverage.
+Constants: `normal_q_and_a_max_chunks_per_document`, `normal_q_and_a_max_chunks_per_section`, `whole_document_coverage_policy`, `partial_summary_max_sections_packed` (§13).
 
 ---
 
@@ -1335,36 +1468,46 @@ Approaches:
 
 ### 22.2 Order of operations
 
-1. **Query disclosure preflight** (§7.0) — before any external query-processing call.  
-2. Candidate retrieval on **permitted** channels only. Stored `allow_embedding` governs whether an assertion may have been indexed externally historically; it does **not** authorize embedding the current query.  
-3. Local eligibility (including `local_only`).  
-4. **Evidence disclosure summary:** sensitivity classes + flags among finalists.  
-5. Provider/model selection constrained by disclosure compatibility + capability metadata.  
-6. Disclosure filtering for selected provider (withheld finalists recorded — §27).  
-7. Context packing to model window.  
-8. Inference (or deterministic local answer).
+1. **Query disclosure preflight** (§7.0) — purpose-specific decisions for embedding, index search, planner, reranker, **and final inference**.  
+2. Candidate retrieval on **permitted** channels only. Stored `allow_embedding` does **not** authorize embedding the live query and does **not** authorize final inference.  
+3. Local eligibility (including evidence `local_only`).  
+4. **Evidence disclosure summary:** sensitivity classes + flags among finalists → evidence-compatible provider classes.  
+5. **Provider selection** = intersection of:
+   - `inferenceDisposition.allowedProviderClasses` (empty when `local_only`),
+   - evidence-compatible provider classes,
+   - model capability requirements.  
+6. If intersection is empty → treat as query/evidence `local_only` path (deterministic/refusal); **do not** fail-open.  
+7. Provider-specific evidence filtering (withheld finalists recorded — §27).  
+8. Context packing using the user-message representation that will actually be sent (§23).  
+9. Inference: raw message, `safeInferenceUserMessage`, or **no** external inference call.
 
-### 22.3 Flags
+### 22.3 Flags and purposes
 
-| Flag | Meaning |
+| Flag / field | Meaning |
 | --- | --- |
-| `allow_inference` | May enter provider prompt for chat inference (evidence) |
-| `allow_embedding` | Stored assertion may be embedded externally (index **build**; not authorization to embed the live query) |
-| `allow_external_index` | Stored assertion may sync to external index |
-| QueryDisclosureDecision | Live-query purposes: external semantic / index search / planner / reranker |
-| BYOK | User-supplied keys still require both query and evidence disclosure; BYOK does not bypass (**Assumption** aligned with Stage 7/9) |
+| Evidence `allow_inference` | Stored assertion may enter provider prompt for chat inference |
+| Evidence `allow_embedding` | Stored assertion may be embedded externally (index **build** only) |
+| Evidence `allow_external_index` | Stored assertion may sync to external index |
+| `externalSemanticAllowed` | Live query may be sent for external query embedding |
+| `externalIndexSearchAllowed` | Live query may be sent for external index search |
+| `plannerModelAllowed` | Live query may be sent to planner-model assist |
+| `rerankerModelAllowed` | Approved query representation may be sent to reranker |
+| `inferenceDisposition` | Whether/how the **current user message** may be sent to final inference |
+| BYOK | Does **not** automatically bypass query or evidence disclosure (**Assumption** aligned with Stage 7/9) |
 
 ### 22.4 Outcomes
 
 | Situation | Behaviour |
 | --- | --- |
-| Best evidence cannot disclose to any available provider | Prefer local-only / direct deterministic answer if possible; else answer with reduced context + user-visible withhold notice backed by influence rows |
-| Compatible alternative provider exists | Router may prefer disclosure-compatible provider |
-| Provider-restricted assertion | `local_only` or filter out for incompatible provider; persist `drop_reason` |
-| Highly sensitive | Same; stricter defaults |
-| Query disclosure denies external channels | Local FTS/exact/entity/history only; degradation codes; no secret query in logs |
-| User told of withhold? | **Yes** — user-facing explanation; not raw secret content; **must** have corresponding influence/snapshot record |
-| No-context fallback | General knowledge / clarify / ask user; never fail-open secrets |
+| `inferenceDisposition.kind = 'local_only'` | No external inference; deterministic/refusal/clarify; record blocked inference; never claim external model answered |
+| Raw allowed + evidence compatible | Send raw user message + filtered evidence to intersected provider |
+| Redacted allowed | Send only `safeInferenceUserMessage` + filtered evidence; record redaction without secret |
+| Semantic redaction OK but inference redaction not | May run local/FTS retrieval with `safeSemanticQueryText` while inference stays `local_only` or refuses |
+| Best evidence cannot disclose to any available provider | Prefer local-only / direct deterministic answer if possible; else reduced context + withhold notice |
+| Compatible alternative provider exists | Router may prefer intersection-compatible provider |
+| Query disclosure denies retrieval externals only | Local FTS/exact/entity/history; inference still follows `inferenceDisposition` independently |
+| User told of withhold? | **Yes** — backed by influence/snapshot; no raw secret content |
+| No-context / blocked-query fallback | Clarify / refuse / ask to remove secret and retry; never fail-open secrets |
 
 ---
 
@@ -1385,11 +1528,19 @@ type ContextBudget = {
 - Model capability metadata (registry) supplies `modelContextWindowTokens`.  
 - `reservedOutputTokens`: conservative default **1024** or model-specific.  
 - System policy estimate from renderer template.  
-- Current user message tokenized.
+- **`reservedCurrentUserTokens` must use the exact user-message representation that will actually be sent:**
+
+| `inferenceDisposition.kind` | User-message budget basis |
+| --- | --- |
+| `raw_allowed` | Raw current user message |
+| `redacted_allowed` | `safeInferenceUserMessage` |
+| `local_only` | **No** external provider user-message budget (no external inference pack for that message) |
 
 \[
 available = window - reservedOutput - reservedSystem - reservedCurrentUser
 \]
+
+For `local_only`, skip external provider packing entirely (deterministic/refusal path).
 
 ### 23.2 Conservative behaviour
 
@@ -1458,7 +1609,8 @@ U(c) = \frac{\mathrm{Final}(c) + \gamma \cdot \mathbf{1}_{essential}}{1 + tokens
 | No evidence fits | Empty retrieval context; answer generally / ask clarification |
 | Very small window models | Raise similarity floor; keep conflict notices + top 1–2 assertions; shrink history aggressively |
 | Very large windows | Still enforce diversity caps; do not dump entire vault |
-| `whole_document` scope | Follow §19.3; may exceed Q&A chunk cap when packing complete ordered coverage that fits; never claim completeness from four chunks |
+| `whole_document` / `section` scope | Follow §19; may exceed targeted-passage 4/2 caps when packing complete ordered coverage that fits; never claim completeness from fixed Q&A chunk counts |
+| `local_only` inference | Do not pack for external provider; no external user message |
 | Tie-break | Higher `Final`, then higher WRRF, then exact match, then newer `last_confirmed_at`, then stable `candidateId` |
 
 Prevents: profile monopolies, one long memory crowding atomics, overlapping chunk floods, history monopolies, low-value graph displacing direct evidence, ignoring metadata overhead (citation labels counted).
@@ -1532,15 +1684,16 @@ type ContextPackage = {
 
 ## 26. Provider / model interaction
 
-1. Query disclosure already constrained which external retrieval/planning/rerank calls ran.  
-2. Evidence DisclosureContextPlanner selects compatible provider class for inference.  
-3. Model registry supplies context window + capabilities.  
-4. ContextPacker packs to that window; disclosure-withheld finalists are not sent.  
-5. ContextRenderer adapts `ContextPackage` to provider message schema.  
-6. Inference runs (or deterministic local answer).  
-7. InfluenceRecorder persists sent, withheld, budget-dropped, notices, and direct-answer fields (§27).
+1. Query disclosure already constrained embedding / index / planner / reranker **and** produced `inferenceDisposition`.  
+2. Evidence disclosure summary yields evidence-compatible provider classes.  
+3. Select provider from **intersection** of query-compatible classes, evidence-compatible classes, and model capabilities.  
+4. If `inferenceDisposition.kind = 'local_only'` or intersection empty → no external inference.  
+5. ContextPacker packs to the selected window using the actual transmitted user-message representation; disclosure-withheld finalists are not sent.  
+6. ContextRenderer adapts `ContextPackage` to provider message schema (raw or redacted user message).  
+7. Inference runs, or deterministic/refusal local answer.  
+8. InfluenceRecorder persists sent, withheld, budget-dropped, notices, direct-answer fields, and query inference disposition (§27).
 
-Routing may prefer disclosure-compatible providers. Framework/provider choice cannot redefine retrieval semantics (Invariant 26). Optional rerankers receive only disclosure-approved query representation and candidate text.
+Routing may prefer intersection-compatible providers. Framework/provider choice cannot redefine retrieval semantics (Invariant 26). Optional rerankers receive only disclosure-approved query representation and candidate text. BYOK does not bypass query-inference disclosure.
 
 ---
 
@@ -1601,6 +1754,10 @@ Also record: canonical IDs only; eligibility/disclosure codes; provider class co
 | primaryIntentMode + intentFacets | Yes |
 | documentRetrievalScope | When document evidence |
 | queryDisclosure reason codes (not raw query) | Yes |
+| query_inference_disposition (`raw_allowed` / `redacted_allowed` / `local_only`) | Yes |
+| provider_classes_allowed_for_query | Yes |
+| whether_query_was_redacted | Yes |
+| whether_external_inference_was_blocked | Yes |
 | final_state (vocabulary above) | Yes |
 | selected boolean | Compatible with Stage 9; interpret via final_state |
 | drop_reason | When not sent |
@@ -1609,7 +1766,7 @@ Also record: canonical IDs only; eligibility/disclosure codes; provider class co
 | citation label | Yes when sent |
 | conflict group id | When applicable |
 | user_visible_withhold_notice | Boolean when withheld |
-| document coverage label | `complete` / `partial` / `derived_summary` / `section` when docs |
+| document coverage label | `targeted_passage` / `complete_section` / `partial_section` / `complete_document` / `partial_document` / `derived_complete_section` / `derived_complete_document` |
 
 ### 27.4 User-facing explanations (conceptual)
 
@@ -1620,7 +1777,9 @@ Also record: canonical IDs only; eligibility/disclosure codes; provider class co
 - “Two saved facts conflict.”  
 - “This context stayed private and was not sent to this model.” ← requires withheld influence row  
 - “This older conversation was not included because of the context limit.” ← requires budget-drop row  
-- “This is a partial summary of the document; full coverage did not fit.” ← coverage label  
+- “This is a partial summary of the document; full coverage did not fit.” ← `partial_document`  
+- “Your message was not sent to this model because it contained restricted material.” ← local_only inference disposition  
+- “Your message was sent in a redacted form.” ← redacted_allowed (no secret shown)  
 
 Correction entry points: Vault assertion, conflict decision, document open — UI deferred.
 
@@ -1630,6 +1789,7 @@ Correction entry points: Vault assertion, conflict decision, document open — U
 - No influence record claims `sent_to_provider` for evidence that was not sent.  
 - Every privacy-withholding explanation has a withheld influence/snapshot record.  
 - Direct identity answers record `used_in_deterministic_local_answer` for fields used.  
+- Local-only / blocked external inference records `whether_external_inference_was_blocked` and disposition — never claim an external model answered.  
 - Thinking UI must be able to consume influence records (closes Stage 5 gap; UI implementation Deferred).
 
 ---
@@ -1659,11 +1819,13 @@ Correction entry points: Vault assertion, conflict decision, document open — U
 | Failure | Behaviour |
 | --- | --- |
 | Query disclosure denies external semantic/index/planner/reranker | Local FTS/exact/entity/project/history only; mark `query_disclosure_denied`; never log secret query |
+| `inferenceDisposition.local_only` | No external inference; deterministic/refusal/clarify; record `externalInferenceBlocked`; never fail-open to another model |
+| Semantic redaction OK, inference redaction not | Retrieval may use `safeSemanticQueryText`; inference stays local_only or refuses |
 | Embedding provider outage | FTS + exact + entity/project/history; mark `embeddings_unavailable` |
 | Stale embeddings | Exclude stale hits; FTS/exact remain |
 | External index timeout | Ignore channel; PostgreSQL only |
 | Identity short-circuit disabled | Full local retrieval path; conflict/ambiguity as needed |
-| Whole-document coverage does not fit and no derived summary | Labelled partial / section / clarify / request staged workflow — never silent four-chunk “full” summary |
+| Whole-document / section coverage does not fit and no complete derived summary | Labelled `partial_*` / narrower passage / clarify / staged workflow — never silent fixed-count “full” summary |
 | Graph `rebuild_pending` | Skip graph channel; mark `graph_incomplete` |
 | Reranker outage | No-op rerank |
 | Document search outage | Skip documents |
@@ -1698,11 +1860,12 @@ Reusable query embedding: one per space per turn; never duplicate for memory+doc
 | 15a | Old wording revision treated as historical fact | Revision≠history rule §16 | Current revision only; succession/phase for history | Misread revisions | Revision-vs-history test | No |
 | 16 | Uncertain as fact | Modality gate + labels | — | Classifier error | Plan uncertainty test | No |
 | 17 | Sensitive→wrong provider | Evidence disclosure planner Option B | Filter before pack; influence withheld rows | Router bug | Sensitive withhold test | No |
-| 17a | Secret query→external embed/index | QueryDisclosureDecision preflight | Deny external channels; local-only continue | Detector miss | Forbidden-secret query never leaves | No |
+| 17a | Secret query→external embed/index | Purpose-specific QueryDisclosureDecision | Deny those purposes; continue local retrieval | Detector miss | Forbidden-secret query never leaves those channels | No |
+| 17a2 | Secret/provider-restricted **current user message** sent to final inference | `inferenceDisposition` + provider intersection | Block external inference; local refuse/clarify | Detector miss / fail-open | Query blocked for inference never appears in any external provider request | No |
 | 17b | allow_embedding on assertion misused as query auth | Explicit separation in §7.0 / §22 | Preflight ignores stored allow_embedding for live query | Confusion | Query embed denied while assertion embed allowed | No |
 | 17c | External index search with raw secret query despite ID-only hits | Rule: query disclosure required | Block channel | Implementer shortcut | Index search denied for secret query | No |
 | 17d | Withhold UI without influence row | Persist withheld finalists | Integrity check | Bug | Withhold notice⇔influence | No |
-| 17e | Four-chunk fake full PDF summary | §19.3 decision tree | Coverage labels | Product pressure | Whole-doc honesty test | No |
+| 17e | Four-chunk / two-chunk fake full doc/section summary | Scope-specific §14.5 / §19 trees | Explicit coverage labels | Product pressure | Whole-doc and section honesty tests | No |
 | 17f | Identity short-circuit via memory_exact miss | Canonical consistency check §7.4 | Disable on conflict/stale/self issues | Shortcut regression | Dual-name short-circuit disabled | No |
 | 17g | Additive policy domination revived | Multiplicative Final formula | Version pin rp-v1.0 | Formula drift | Policy ±15% math test | No |
 | 18 | Provider-restricted embedded externally | allow_embedding separate | Index workers | Worker bug | Restricted not externalized | No |
@@ -1758,8 +1921,10 @@ type RetrievalDegradation = {
     | 'tokenizer_unavailable'
     | 'model_metadata_uncertain'
     | 'query_disclosure_denied'
+    | 'external_inference_blocked'
     | 'identity_short_circuit_disabled'
-    | 'whole_document_coverage_incomplete';
+    | 'whole_document_coverage_incomplete'
+    | 'section_coverage_incomplete';
   channel?: RetrievalChannel;
   detailCode?: string;
 };
@@ -1818,11 +1983,22 @@ type InfluenceRecord = {
   disclosureDecision: string;
   providerClassConsidered?: string;
   userVisibleWithholdNotice?: boolean;
-  documentCoverageLabel?: 'complete' | 'partial' | 'derived_summary' | 'section';
+  documentCoverageLabel?:
+    | 'targeted_passage'
+    | 'complete_section'
+    | 'partial_section'
+    | 'complete_document'
+    | 'partial_document'
+    | 'derived_complete_section'
+    | 'derived_complete_document';
   retrievalPolicyVersion: string;
   primaryIntentMode: IntentMode;
   intentFacets: IntentMode[];
   queryDisclosureReasonCodes?: string[];
+  queryInferenceDisposition?: 'raw_allowed' | 'redacted_allowed' | 'local_only';
+  providerClassesAllowedForQuery?: string[];
+  queryWasRedacted?: boolean;
+  externalInferenceBlocked?: boolean;
   conflictGroupId?: string;
 };
 ```
@@ -1926,19 +2102,19 @@ type InfluenceRecord = {
 | | |
 | --- | --- |
 | Input | rawQuery + user policy |
-| Output | `QueryDisclosureDecision` |
+| Output | `QueryDisclosureDecision` including purpose flags + `inferenceDisposition` |
 | Owner | Disclosure |
-| Failure | deny external purposes (fail closed for external; continue local) |
-| Forbidden | logging secret query text |
+| Failure | deny external purposes (fail closed); inference `local_only` when unsafe |
+| Forbidden | logging secret query text; implying embedding permission ⇒ inference permission |
 
 #### `DisclosureContextPlanner`
 
 | | |
 | --- | --- |
-| Input | finalists + available provider classes + model capabilities + queryDisclosure |
-| Output | selected provider class constraints + filtered candidates + withhold notices + influence stubs for withheld |
+| Input | finalists + available provider classes + model capabilities + queryDisclosure (incl. inferenceDisposition) |
+| Output | intersection-selected provider + filtered candidates + withhold notices + influence stubs for withheld |
 | Owner | Disclosure + Routing |
-| Failure | prefer safer provider / reduced context; persist withhold reasons |
+| Failure | empty intersection → local_only / reduced context; never fail-open; persist withhold reasons |
 
 #### `ContextPacker`
 
@@ -2083,10 +2259,11 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 ### 32.4 “What medication do I take?”
 
 - **Plan:** `primaryIntentMode='current_state'`, `intentFacets=['personal_recall']`; highly_sensitive likely.  
-- **Query disclosure:** may deny external semantic/index if query itself highly sensitive / restricted → local channels only.  
+- **Query disclosure:** purpose-specific — may allow inference only for compatible provider classes (`raw_allowed` or `redacted_allowed`) while denying external semantic/index, or may set inference `local_only`.  
 - **Evidence disclosure:** may be `local_only` / provider_restricted.  
-- **Withhold path:** influence `withheld_before_pack` + `drop_reason=disclosure_denied|provider_restricted|no_compatible_provider` + user notice.  
-- **Pack:** trusted current meds only when disclosable; uncertain plans labeled.
+- **Provider selection:** intersection of query-compatible ∩ evidence-compatible ∩ capabilities.  
+- **Withhold path:** influence `withheld_before_pack` + drop_reason + user notice; if inference blocked, `externalInferenceBlocked=true`.  
+- **Pack:** trusted current meds only when disclosable to selected provider; uncertain plans labeled.
 
 ### 32.5 “What projects am I currently working on?”
 
@@ -2138,14 +2315,14 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 ### 32.14 “Summarise this PDF.”
 
 - **Plan:** `primaryIntentMode='document_focused'`, `intentFacets=[]`, `documentRetrievalScope='whole_document'`, `requiresDocumentEvidence=true`.  
-- **Decision tree §19.3:** complete ordered coverage if fits; else current derived summary if eligible; else labelled partial / section / clarify / request staged workflow.  
-- **Forbidden:** claiming full summary from four top chunks (`normal_q_and_a_max_chunks_per_document`).  
-- **Influence:** documentCoverageLabel `complete`|`partial`|`derived_summary`.
+- **Decision tree §19.3:** `complete_document` if ordered coverage fits; else `derived_complete_document` if eligible complete derived summary; else `partial_document` / section path / clarify / staged workflow.  
+- **Forbidden:** claiming full summary from four top chunks (targeted-passage caps do not apply as completeness).  
+- **Influence:** documentCoverageLabel one of the explicit §14.5 labels.
 
 ### 32.15 “What does the PDF say about cancellation?”
 
 - **Plan:** `primaryIntentMode='document_focused'`, `documentRetrievalScope='targeted_passage'`.  
-- **Q&A caps apply;** semantic+FTS; filename boost.
+- **Targeted-passage caps apply** (4/doc, 2/section); label `targeted_passage`; semantic+FTS; filename boost.
 
 ### 32.16 Same fact as memory and document
 
@@ -2153,7 +2330,7 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 
 ### 32.17 Three overlapping document chunks
 
-- **Overlap penalties + merge;** pack ≤ `max_chunks_per_section`.
+- **Overlap penalties + merge;** for `targeted_passage` pack ≤ `normal_q_and_a_max_chunks_per_section` (2). Section/whole-document scopes use coverage trees, not this as completeness.
 
 ### 32.18 “What is the capital of France?”
 
@@ -2241,6 +2418,54 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 
 - One candidate; WRRF sums channel terms; policy multiplies once; packed once; influence lists channels.
 
+### 32.39 Ordinary query allowed for inference
+
+- **Query disclosure:** `inferenceDisposition.kind='raw_allowed'` with broad provider classes; semantic/index/planner/reranker independently allowed or not.  
+- **Sequence:** retrieve → evidence summary → intersection → pack with **raw** user message tokens → external inference.  
+- **Influence:** disposition `raw_allowed`; `externalInferenceBlocked=false`.
+
+### 32.40 Query contains an API key
+
+- **Local scan:** `forbidden_secret_detected`.  
+- **Retrieval purposes:** external semantic/index/planner/reranker denied (unless a lossless semantic redaction exists — typically not for secrets).  
+- **Inference:** `inferenceDisposition.kind='local_only'` (secret cannot be safely removed without altering task, or redaction not lossless).  
+- **Behaviour:** no external inference; local refusal/clarify “remove the secret and retry”; never claim model answered; never fail-open to another provider; never log the key.  
+- **Stage 15:** assert key never appears in any external provider request body.
+
+### 32.41 Highly sensitive query allowed only for a compatible provider
+
+- **Inference:** `raw_allowed` or `redacted_allowed` with **restricted** `allowedProviderClasses`.  
+- **Evidence:** may further restrict classes.  
+- **Selection:** intersection only; if evidence needs a class outside query allow-list → local_only or withhold evidence + notice.
+
+### 32.42 Safe semantic redaction but not inference-safe redaction
+
+- **`safeSemanticQueryText` present;** `externalSemanticAllowed=true` (or local embed).  
+- **Inference:** `local_only` because inference redaction would materially alter the task / not lossless for the asked action.  
+- **Result:** local retrieval may run; external model does **not** receive the user message.
+
+### 32.43 Safe redaction for both semantic and inference
+
+- Separate fields both populated; `inferenceDisposition.kind='redacted_allowed'`.  
+- Pack/budget uses `safeInferenceUserMessage`; semantic channel uses `safeSemanticQueryText`.  
+- Influence: `queryWasRedacted=true`; secret not stored.
+
+### 32.44 No compatible inference provider exists
+
+- Query and/or evidence allow-lists yield empty intersection with available models.  
+- **Behaviour:** `local_only` path; refuse/clarify; `externalInferenceBlocked=true`; no fail-open.
+
+### 32.45 BYOK exists but user policy denies external inference
+
+- BYOK does **not** bypass; `inferenceDisposition.kind='local_only'` with `user_policy_denied` / `byok_does_not_bypass`.  
+- No external inference call.
+
+### 32.46 “Summarise the Cancellation section of this PDF”
+
+- **Plan:** `documentRetrievalScope='section'`.  
+- **Tree §19.2:** complete ordered section → `complete_section`; else derived-complete → `derived_complete_section`; else `partial_section` / targeted passage / limitation.  
+- **Forbidden:** treating two Q&A-cap chunks as a complete section summary by default.
+
 ---
 
 ## 33. Invariants
@@ -2274,10 +2499,16 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 27. `Final(c) = WRRF(c) × (1 + λ_policy × Policy(c))` with `λ_policy = 0.15`; policy adjusts fusion by at most ±15% and cannot dominate or invent candidates (`WRRF=0` ⇒ `Final=0`).  
 28. Query disclosure preflight completes before any external embedding, external-index, planner-model, or reranker call; stored `allow_embedding` does not authorize embedding the live query.  
 29. A prior assertion revision is provenance, not automatically a historical fact.  
-30. Whole-document summarisation must not claim complete coverage from ordinary Q&A chunk caps.  
+30. Whole-document and section summarisation must not claim complete coverage from ordinary targeted-passage Q&A chunk caps.  
+36. Fixed 4/2 chunk counts are `targeted_passage` diversity caps only; section and whole-document completeness are coverage-based.  
+37. A derived summary labelled complete must have complete section/chunk provenance for the current document fingerprint; packed citation caps must not limit production coverage.  
 31. Identity short-circuit requires a complete canonical consistency check; `memory_exact` miss is not proof of non-conflict.  
 32. Every user-visible privacy-withholding explanation has a corresponding disclosure-withheld influence/snapshot record.  
-33. `primaryIntentMode` is unique; `intentFacets` never duplicates the primary and is deterministically ordered.
+33. `primaryIntentMode` is unique; `intentFacets` never duplicates the primary and is deterministically ordered.  
+34. Every provider-bound current user message passes purpose-specific query-inference disclosure; permission for embedding, indexing, planning, or reranking never authorizes final inference.  
+35. Provider selection is the intersection of query-compatible, evidence-compatible, and model-capable classes; empty intersection never fail-opens.  
+36. Fixed 4/2 chunk counts are `targeted_passage` diversity caps only; section and whole-document completeness are coverage-based.  
+37. A derived summary labelled complete must have complete section/chunk provenance for the current document fingerprint; packed citation caps must not limit production coverage.
 
 ---
 
@@ -2348,15 +2579,15 @@ Format per scenario: plan (`primaryIntentMode` + `intentFacets`) → query discl
 | 13 | Contradictions? | **Met** — §15 |
 | 14 | Temporal/uncertain separation? | **Met** — §16 (revision≠history) |
 | 15 | Relationship episodes without independent truth? | **Met** — §8.D, §17 |
-| 16 | Document overlaps / whole-doc honesty? | **Met** — §14.3, §19.3 |
+| 16 | Document overlaps / scope-specific coverage honesty? | **Met** — §14.5, §19 |
 | 17 | Conversation history? | **Met** — §20 |
 | 18 | Token budget? | **Met** — §23 |
 | 19 | Allocation/packing? | **Met** — §24 |
 | 20 | Assertion truncation safety? | **Met** — §24.4 |
 | 21 | Data vs instructions? | **Met** — §25 |
 | 22 | Indirect injection reduced? | **Met** — §25, §29 |
-| 23 | Query + evidence disclosure? | **Met** — §7.0, §22 |
-| 24 | Model context size packing? | **Met** — §23–24 |
+| 23 | Query + evidence + inference disclosure? | **Met** — §7.0 purpose-specific, §22 intersection |
+| 24 | Model context size packing (raw/redacted/local-only user msg)? | **Met** — §23–24 |
 | 25 | Degradation? | **Met** — §28 |
 | 26 | Sent/withheld/budget-dropped explained? | **Met** — §27 finalState |
 | 27 | Influence data persisted (incl. withheld)? | **Met** — §27 |
@@ -2385,8 +2616,9 @@ Stage 13 must evaluate frameworks/vendors **against** this retrieval architectur
 4. Does adoption preserve PostgreSQL canonicality, disclosure flags, and influence recording?  
 5. Latency/cost vs Option B baseline.  
 6. Failure behaviour when external service down (must match §28).  
-7. External query calls must honour QueryDisclosureDecision.  
+7. External query calls must honour purpose-specific QueryDisclosureDecision (incl. final inference).  
 8. Must not redefine Final = WRRF × (1+λPolicy) semantics.  
+9. Must not treat BYOK as bypass of query-inference disclosure.  
 
 Stage 13 must **not** redefine eligibility, trust, conflict packing, or untrusted rendering.
 
@@ -2403,6 +2635,9 @@ Evaluate at least:
 5. **Math regression:** multiplicative policy cannot dominate (rank-1 exact ±Policy examples); additive domination must fail the test.  
 6. Injection suites (PDF, memory, filename).  
 7. Query disclosure preflight: forbidden-secret query never reaches external embed/index/planner/reranker; `allow_embedding` on assertions ≠ query auth.  
+7b. **Final inference:** a query blocked for inference (`local_only`) never appears in any external provider request; embedding permission ≠ inference permission; BYOK does not bypass.  
+7c. Redaction separation: `safeSemanticQueryText` vs `safeInferenceUserMessage` tested independently.  
+7d. Provider intersection: empty query∩evidence∩capability → no external inference.  
 8. Evidence disclosure routing + withheld influence rows ↔ user notices.  
 9. History eligibility (orphans excluded).  
 10. Influence `sent_to_provider` ≡ actually sent; withhold explanations require rows.  
@@ -2412,7 +2647,9 @@ Evaluate at least:
 14. External deleted-id tests; no raw secret query to index.  
 15. Embedding outage / query-disclosure-denied FTS fallback quality.  
 16. Revision-vs-history: older wording revision not treated as historical fact.  
-17. Whole-document honesty: four-chunk path cannot claim complete summary.  
+17. Whole-document honesty: four-chunk path cannot claim complete summary; complete derived summary has complete production provenance.  
+17b. Section honesty: two-chunk path cannot claim complete section unless those chunks are the full section.  
+17c. Coverage labels distinguish targeted_passage / complete_section / partial_section / complete_document / partial_document / derived_complete_*.  
 18. Identity short-circuit: dual current names / conflicted identity disables shortcut; clean name does not require external semantic.  
 19. Pin/policy relevance-only: cannot grant eligibility/trust; cannot create zero-WRRF candidates.
 
@@ -2464,6 +2701,10 @@ Evaluate at least:
 | Earlier Stage 12 draft: summarise via Q&A chunk cap | **Superseded** — whole_document decision tree §19.3 |
 | Earlier Stage 12 draft: identity short-circuit via memory_exact | **Superseded** — canonical identity consistency check |
 | Earlier Stage 12 draft: influence = selected + budget drops only | **Superseded** — includes disclosure-withheld + finalState vocabulary |
+| Earlier Stage 12 draft: `rawQueryLocalOnly: true` | **Superseded** — purpose-specific `inferenceDisposition` |
+| Earlier Stage 12 draft: query disclosure without final inference purpose | **Superseded** — embedding/index/planner/reranker/inference distinct |
+| Earlier Stage 12 draft: universal max 4/2 document chunk diversity | **Superseded** — targeted_passage-only; section/whole-document coverage trees |
+| Earlier Stage 12 draft: `whole_document_summary_max_source_sections` as completeness | **Superseded** — `partial_summary_max_sections_packed` for packed citations only |
 
 No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/graph rules bind.
 
@@ -2477,9 +2718,11 @@ No disagreement that PostgreSQL is canonical or that Stages 8–11 eligibility/g
 - [x] Stage 13–17 not started  
 - [x] Option B selected with multiplicative policy constants versioned  
 - [x] Multi-intent plans (`primaryIntentMode` + `intentFacets`)  
-- [x] Query disclosure preflight before external calls  
-- [x] Revision≠history; whole-doc decision tree; identity consistency gate  
-- [x] Influence finalState incl. disclosure-withheld  
+- [x] Query disclosure preflight with purpose-specific final inference disposition  
+- [x] Query∩evidence∩capability provider intersection  
+- [x] Scope-specific document diversity / coverage labels  
+- [x] Revision≠history; whole-doc/section decision trees; identity consistency gate  
+- [x] Influence finalState incl. disclosure-withheld + query_inference_disposition  
 - [x] Eligibility/disclosure/packing/graph/history/rendering specified  
 - [x] Amendments recorded  
 - [x] 38 scenarios traced with valid plans  
